@@ -67,17 +67,19 @@ impl ModelRegistry {
 
     /// Every model, smallest first.
     pub fn all() -> Vec<ModelInfo> {
-        // Sizes are the published artifact sizes and are used only as a truncation check.
+        // Real published artifact sizes, read from the CDN's Content-Length. These were
+        // previously rounded approximations, which rejected every legitimately downloaded
+        // model — the check is only useful if the numbers are exact.
         let entries = [
-            ("tiny.en", ModelSize::Tiny, 77_700_000u64, false),
-            ("tiny", ModelSize::Tiny, 77_700_000, true),
-            ("base.en", ModelSize::Base, 148_000_000, false),
-            ("base", ModelSize::Base, 148_000_000, true),
-            ("small.en", ModelSize::Small, 488_000_000, false),
-            ("small", ModelSize::Small, 488_000_000, true),
-            ("medium.en", ModelSize::Medium, 1_530_000_000, false),
-            ("medium", ModelSize::Medium, 1_530_000_000, true),
-            ("large-v3", ModelSize::Large, 3_090_000_000, true),
+            ("tiny.en", ModelSize::Tiny, 77_704_715u64, false),
+            ("tiny", ModelSize::Tiny, 77_691_713, true),
+            ("base.en", ModelSize::Base, 147_964_211, false),
+            ("base", ModelSize::Base, 147_951_465, true),
+            ("small.en", ModelSize::Small, 487_614_201, false),
+            ("small", ModelSize::Small, 487_601_967, true),
+            ("medium.en", ModelSize::Medium, 1_533_774_781, false),
+            ("medium", ModelSize::Medium, 1_533_763_059, true),
+            ("large-v3", ModelSize::Large, 3_095_033_483, true),
         ];
 
         entries

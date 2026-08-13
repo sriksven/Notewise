@@ -16,12 +16,21 @@ reqwest.workspace = true
 tokio = { workspace = true }
 async-trait.workspace = true
 notewise-audio-capture.workspace = true
+# Optional: pulls in a cmake build of whisper.cpp. ~13s on an M4, but it is a C++
+# toolchain dependency that a default build should not require.
+whisper-rs = { version = "0.14", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = []
-# whisper.cpp inference. Off by default: needs a cmake build of whisper.cpp and a
+# whisper.cpp inference. Off by default: needs a C++ toolchain (cmake + clang) and a
 # 150MB-1.5GB model download, neither of which belongs in a default `cargo build`.
-whisper = []
+whisper = ["dep:whisper-rs"]
+# GPU acceleration via Metal on Apple silicon. Measured ~1.5x over CPU on an M4.
+whisper-metal = ["whisper", "whisper-rs/metal"]
+# GPU acceleration via CUDA on NVIDIA hardware.
+whisper-cuda = ["whisper", "whisper-rs/cuda"]
+# GPU acceleration via Vulkan (AMD/Intel).
+whisper-vulkan = ["whisper", "whisper-rs/vulkan"]

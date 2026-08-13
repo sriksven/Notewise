@@ -73,7 +73,8 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | `storage`, `graph`, `ai-router` | Implemented, tested |
 | `api-server`, `mcp-server`, `cli` | Implemented, tested |
 | Markdown export | Implemented |
-| `audio-capture` (mixing, conversion), `transcription` | Interfaces + partial implementation |
+| `transcription` | **Whisper implemented** (`--features whisper-metal`), Parakeet pending |
+| `audio-capture` | Mixing and conversion implemented; OS capture pending |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
 | `apps/` (except CLI), `cloud/` | Scaffolded, awaiting their phase |
 

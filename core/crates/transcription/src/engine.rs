@@ -59,40 +59,159 @@ pub trait TranscriptionEngine: std::fmt::Debug + Send {
 
 /// Whisper.cpp.
 ///
-/// **Inference is not implemented.** It needs a cmake build of whisper.cpp linked through
-/// FFI, plus a model download; both are gated behind the `whisper` feature so a default
-/// `cargo build` stays fast and dependency-light. The model management around it — registry,
-/// download, verification — is real and lives in [`ModelStore`].
-#[derive(Debug)]
+/// Real inference, behind the `whisper` feature. Enabling it pulls in a cmake build of
+/// whisper.cpp; add `whisper-metal`, `whisper-cuda`, or `whisper-vulkan` for GPU
+/// acceleration. Without the feature the type still exists and every method returns
+/// [`TranscriptionError::EngineUnavailable`], so callers compile either way.
+///
+/// # Windowing
+///
+/// whisper.cpp transcribes a buffer, not a stream. Feeding it one 100 ms frame at a time
+/// would produce nonsense — the model needs enough context to resolve a phrase. Audio is
+/// therefore accumulated and decoded a window at a time, with segment timings offset back
+/// into the meeting's own time base so the transcript lines up with the recording.
 pub struct WhisperEngine {
     model: ModelInfo,
-    #[allow(dead_code)] // Used by the inference path once the `whisper` feature lands.
+    #[allow(dead_code)] // Only read by the feature-gated inference path.
     store: ModelStore,
+
+    /// Audio accumulated since the last decode.
+    buffer: Vec<f32>,
+    /// Milliseconds of audio already decoded, for offsetting segment timings.
+    offset_ms: i64,
+    /// How much audio to accumulate before decoding.
+    #[allow(dead_code)] // Only read by the feature-gated inference path.
+    window_samples: usize,
+
+    #[cfg(feature = "whisper")]
+    context: whisper_rs::WhisperContext,
+}
+
+// `whisper_rs::WhisperContext` is not `Debug`, so this is written by hand. It reports the
+// model and buffer state — the loaded weights have nothing useful to print, and audio must
+// not end up in a log line.
+impl std::fmt::Debug for WhisperEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WhisperEngine")
+            .field("model", &self.model.name)
+            .field("buffered_samples", &self.buffer.len())
+            .field("offset_ms", &self.offset_ms)
+            .field("gpu", &Self::gpu_enabled())
+            .finish()
+    }
 }
 
 impl WhisperEngine {
+    /// Decode window, in seconds.
+    ///
+    /// A tradeoff between latency to the first visible text and accuracy: shorter windows
+    /// show text sooner but cut phrases in half, which the model then mis-transcribes.
+    /// Ten seconds is comfortably longer than most sentences.
+    pub const WINDOW_SECONDS: usize = 10;
+
     /// Create an engine for a model.
     ///
     /// Verifies the model is present and intact before claiming the engine is usable, so a
     /// missing model surfaces here rather than at the first frame of a live meeting.
     pub fn new(model: ModelInfo, store: ModelStore) -> Result<Self> {
         store.verify(&model)?;
-        Ok(Self { model, store })
+
+        let window_samples =
+            AudioFormat::transcription().sample_rate.hz() as usize * Self::WINDOW_SECONDS;
+
+        #[cfg(feature = "whisper")]
+        let context = {
+            let path = store.path_for(&model);
+            whisper_rs::WhisperContext::new_with_params(
+                &path.to_string_lossy(),
+                whisper_rs::WhisperContextParameters::default(),
+            )
+            .map_err(|e| TranscriptionError::Download(format!("loading {}: {e}", path.display())))?
+        };
+
+        Ok(Self {
+            model,
+            store,
+            buffer: Vec::with_capacity(window_samples),
+            offset_ms: 0,
+            window_samples,
+            #[cfg(feature = "whisper")]
+            context,
+        })
     }
 
     pub fn model(&self) -> &ModelInfo {
         &self.model
     }
 
+    /// Whether GPU acceleration was compiled in.
+    pub fn gpu_enabled() -> bool {
+        cfg!(any(
+            feature = "whisper-metal",
+            feature = "whisper-cuda",
+            feature = "whisper-vulkan"
+        ))
+    }
+
+    #[cfg(not(feature = "whisper"))]
     fn unavailable() -> TranscriptionError {
         TranscriptionError::EngineUnavailable {
             engine: "whisper",
-            reason: if cfg!(feature = "whisper") {
-                "whisper.cpp bindings are not implemented yet"
-            } else {
-                "built without the 'whisper' feature"
-            },
+            reason: "built without the 'whisper' feature",
         }
+    }
+
+    /// Decode whatever is buffered and return its segments.
+    #[cfg(feature = "whisper")]
+    fn decode(&mut self) -> Result<Vec<Segment>> {
+        if self.buffer.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let audio = std::mem::take(&mut self.buffer);
+        let rate = AudioFormat::transcription().sample_rate.hz() as i64;
+        let duration_ms = (audio.len() as i64 * 1000) / rate;
+
+        let mut state = self.context.create_state().map_err(|e| {
+            TranscriptionError::BadAudio(format!("could not create a decode state: {e}"))
+        })?;
+
+        let mut params =
+            whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+        // whisper.cpp writes to stdout by default, which would corrupt the MCP server's
+        // JSON-RPC stream sharing this process.
+        params.set_print_progress(false);
+        params.set_print_special(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        state
+            .full(params, &audio)
+            .map_err(|e| TranscriptionError::BadAudio(format!("inference failed: {e}")))?;
+
+        let count = state
+            .full_n_segments()
+            .map_err(|e| TranscriptionError::BadAudio(format!("reading segments: {e}")))?;
+
+        let mut segments = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let text = state
+                .full_get_segment_text(i)
+                .map_err(|e| TranscriptionError::BadAudio(format!("reading segment {i}: {e}")))?;
+
+            // whisper.cpp reports centiseconds relative to this window; shift into the
+            // meeting's time base so the transcript lines up with the recording.
+            let start = state.full_get_segment_t0(i).unwrap_or(0) * 10 + self.offset_ms;
+            let end = state.full_get_segment_t1(i).unwrap_or(0) * 10 + self.offset_ms;
+
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                segments.push(Segment::new(trimmed, start, end));
+            }
+        }
+
+        self.offset_ms += duration_ms;
+        Ok(segments)
     }
 }
 
@@ -102,12 +221,37 @@ impl TranscriptionEngine for WhisperEngine {
         &self.model.name
     }
 
+    #[cfg(feature = "whisper")]
+    async fn feed(&mut self, frame: &AudioFrame) -> Result<Vec<Segment>> {
+        if frame.format != self.required_format() {
+            return Err(TranscriptionError::BadAudio(format!(
+                "expected {}, got {}",
+                self.required_format(),
+                frame.format
+            )));
+        }
+
+        self.buffer.extend_from_slice(&frame.samples);
+
+        if self.buffer.len() >= self.window_samples {
+            return self.decode();
+        }
+        Ok(Vec::new())
+    }
+
+    #[cfg(not(feature = "whisper"))]
     async fn feed(&mut self, _frame: &AudioFrame) -> Result<Vec<Segment>> {
         // Fails loudly. Returning an empty vec would look like "no speech detected" and
         // produce an empty transcript with no indication anything was wrong.
         Err(Self::unavailable())
     }
 
+    #[cfg(feature = "whisper")]
+    async fn finish(&mut self) -> Result<Vec<Segment>> {
+        self.decode()
+    }
+
+    #[cfg(not(feature = "whisper"))]
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         Err(Self::unavailable())
     }
@@ -288,6 +432,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(feature = "whisper"))]
     async fn whisper_fails_loudly_rather_than_returning_an_empty_transcript() {
         // An empty transcript with no error looks like "the meeting had no speech".
         let dir = std::env::temp_dir().join(format!("notewise-whisper-{}", std::process::id()));
@@ -314,6 +459,19 @@ mod tests {
     }
 
     #[test]
+    fn gpu_support_is_reported_from_the_enabled_features() {
+        // Lets the UI say whether inference is accelerated without probing the device.
+        assert_eq!(
+            WhisperEngine::gpu_enabled(),
+            cfg!(any(
+                feature = "whisper-metal",
+                feature = "whisper-cuda",
+                feature = "whisper-vulkan"
+            ))
+        );
+    }
+
+    #[test]
     fn whisper_refuses_to_construct_without_its_model() {
         let store = ModelStore::new(std::env::temp_dir().join("notewise-absent"));
         let err = WhisperEngine::new(crate::ModelRegistry::default_model(), store)
@@ -323,6 +481,38 @@ mod tests {
             matches!(err, TranscriptionError::ModelNotDownloaded { .. }),
             "a missing model must surface before a meeting starts, not during one"
         );
+    }
+
+    /// End-to-end inference against the real model.
+    ///
+    /// Ignored because it needs a downloaded model; run with
+    /// `NOTEWISE_MODEL_DIR=... cargo test -p notewise-transcription \
+    ///   --features whisper-metal -- --ignored --nocapture`
+    #[tokio::test]
+    #[cfg(feature = "whisper")]
+    #[ignore = "requires a downloaded model and a speech sample"]
+    async fn transcribes_real_speech() {
+        let dir = std::env::var("NOTEWISE_MODEL_DIR").expect("NOTEWISE_MODEL_DIR");
+        let sample = std::env::var("NOTEWISE_SAMPLE_WAV").expect("NOTEWISE_SAMPLE_WAV");
+
+        let store = ModelStore::new(&dir);
+        let model = crate::ModelRegistry::default_model();
+        let mut engine = WhisperEngine::new(model, store).expect("engine");
+
+        let mut source = notewise_audio_capture::FileSource::open_wav(&sample).expect("wav");
+        let transcript = engine.transcribe_all(&mut source).await.expect("transcribe");
+
+        let text = transcript.to_text().to_lowercase();
+        println!("\n--- transcript ---\n{}\n", transcript.to_text());
+        println!("gpu enabled: {}", WhisperEngine::gpu_enabled());
+
+        assert!(text.contains("postgres"), "got: {text}");
+        assert!(text.contains("friday"), "got: {text}");
+
+        // Timings must land inside the recording, not at zero or past its end.
+        let first = transcript.segments.first().expect("at least one segment");
+        assert!(first.end_ms > first.start_ms);
+        assert!(transcript.span_ms() > 1000, "span was {}", transcript.span_ms());
     }
 
     #[tokio::test]

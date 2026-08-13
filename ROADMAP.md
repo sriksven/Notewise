@@ -15,7 +15,7 @@ half-working version of four product categories at once.
 | `core/crates/graph` | Typed nodes and edges, traversal |
 | `core/crates/ai-router` | Trait + mock/Ollama/BYOK backends |
 | `core/crates/audio-capture` | Capture interface, mic capture, per-OS backends |
-| `core/crates/transcription` | Whisper.cpp integration, model registry |
+| `core/crates/transcription` | Whisper.cpp integration ✅, model registry ✅ |
 | `apps/desktop` | macOS + Windows shell |
 
 > `graph` and `ai-router` are pulled into Phase 0 rather than Phase 1. Retrofitting a graph
