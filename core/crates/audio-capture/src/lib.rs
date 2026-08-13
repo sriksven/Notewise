@@ -31,6 +31,7 @@ mod format;
 mod microphone;
 mod mixer;
 mod source;
+mod vad;
 
 pub use convert::{resample_linear, rms, to_mono};
 pub use format::{AudioFormat, SampleRate};
@@ -38,6 +39,7 @@ pub use format::{AudioFormat, SampleRate};
 pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};
 pub use mixer::{soft_clip, MixedSource, Mixer};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};
+pub use vad::{Vad, VadConfig, VadReport};
 
 use thiserror::Error;
 

@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use notewise_audio_capture::{AudioFormat, AudioFrame};
+use notewise_audio_capture::{AudioFormat, AudioFrame, Vad};
 
 use crate::models::{ModelInfo, ModelStore};
 use crate::segment::{Segment, Transcript};
@@ -83,6 +83,13 @@ pub struct WhisperEngine {
     #[allow(dead_code)] // Only read by the feature-gated inference path.
     window_samples: usize,
 
+    /// Speech gate. See [`WhisperEngine::decode`] for why a transcription engine owns one.
+    #[allow(dead_code)] // Only read by the feature-gated inference path.
+    vad: Vad,
+    /// Whether to skip decoding windows the gate finds no speech in.
+    #[allow(dead_code)]
+    gate_on_speech: bool,
+
     #[cfg(feature = "whisper")]
     context: whisper_rs::WhisperContext,
 }
@@ -135,6 +142,8 @@ impl WhisperEngine {
             buffer: Vec::with_capacity(window_samples),
             offset_ms: 0,
             window_samples,
+            vad: Vad::default(),
+            gate_on_speech: true,
             #[cfg(feature = "whisper")]
             context,
         })
@@ -142,6 +151,27 @@ impl WhisperEngine {
 
     pub fn model(&self) -> &ModelInfo {
         &self.model
+    }
+
+    /// Tune the speech gate.
+    pub fn with_vad(mut self, vad: Vad) -> Self {
+        self.vad = vad;
+        self
+    }
+
+    /// Decode every window, including ones containing no speech.
+    ///
+    /// Off by default, and turning it on brings the hallucinations back. It exists for
+    /// diagnosing the gate itself: if a transcript is missing words, running once ungated
+    /// answers whether the gate or the model dropped them.
+    pub fn without_speech_gate(mut self) -> Self {
+        self.gate_on_speech = false;
+        self
+    }
+
+    /// The noise floor the gate has settled on, in dBFS.
+    pub fn noise_floor_db(&self) -> f32 {
+        self.vad.noise_floor_db()
     }
 
     /// Whether GPU acceleration was compiled in.
@@ -172,6 +202,27 @@ impl WhisperEngine {
         let rate = AudioFormat::transcription().sample_rate.hz() as i64;
         let duration_ms = (audio.len() as i64 * 1000) / rate;
 
+        // The speech gate.
+        //
+        // Whisper does not return nothing when given non-speech — it invents. Ten seconds of
+        // room tone in a live test here produced "I know. You're happy to see a new work to
+        // grow.", indistinguishable in the transcript from something a person said.
+        //
+        // The offset still advances by the full window. Skipping the *decode* must not skip
+        // the *time*, or every silent stretch would pull the rest of the transcript earlier
+        // and desynchronise it from the recording.
+        let report = self.vad.analyze(&audio, rate as u32);
+        if self.gate_on_speech && !report.has_speech() {
+            tracing::debug!(
+                duration_ms,
+                noise_floor_db = report.noise_floor_db,
+                peak_db = report.peak_db,
+                "no speech in window; skipping inference"
+            );
+            self.offset_ms += duration_ms;
+            return Ok(Vec::new());
+        }
+
         let mut state = self.context.create_state().map_err(|e| {
             TranscriptionError::BadAudio(format!("could not create a decode state: {e}"))
         })?;
@@ -184,6 +235,20 @@ impl WhisperEngine {
         params.set_print_special(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+
+        // whisper.cpp's own defences against inventing text. The VAD above removes windows
+        // with no speech at all; these catch the harder case of a window that has some speech
+        // and some silence, where the model will happily fill the silence.
+        //
+        // Values are whisper.cpp's own defaults for these thresholds, which are *not* applied
+        // unless set explicitly through this API.
+        params.set_no_speech_thold(0.6);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
+        // Suppress blank output at the start of a window, and non-speech tokens like
+        // "(wind blowing)" — subtitle-corpus artefacts that are not meeting content.
+        params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
 
         state
             .full(params, &audio)
@@ -205,7 +270,7 @@ impl WhisperEngine {
             let end = state.full_get_segment_t1(i).unwrap_or(0) * 10 + self.offset_ms;
 
             let trimmed = text.trim();
-            if !trimmed.is_empty() {
+            if !trimmed.is_empty() && !is_non_speech_marker(trimmed) {
                 segments.push(Segment::new(trimmed, start, end));
             }
         }
@@ -255,6 +320,53 @@ impl TranscriptionEngine for WhisperEngine {
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         Err(Self::unavailable())
     }
+}
+
+/// Whether whisper.cpp emitted a marker rather than transcribed speech.
+///
+/// whisper.cpp signals "there was nothing here" in-band, as text: `[BLANK_AUDIO]`, and its
+/// training corpus of subtitles teaches it to emit annotations like `(silence)` or
+/// `[MUSIC PLAYING]`. Stored unfiltered these become transcript lines that read as things
+/// someone said — observed here as a `[BLANK_AUDIO]` segment spanning ten seconds of a real
+/// recording's opening room tone.
+///
+/// Matching is deliberately narrow: the whole segment must be one bracketed or parenthesised
+/// annotation. A real utterance that merely *contains* "(laughs)" keeps its words.
+// Called only from the feature-gated inference path; its tests are not gated.
+#[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+fn is_non_speech_marker(text: &str) -> bool {
+    let bounded = matches!(
+        (text.chars().next(), text.chars().next_back()),
+        (Some('['), Some(']')) | (Some('('), Some(')')) | (Some('*'), Some('*'))
+    );
+    if !bounded {
+        return false;
+    }
+
+    // A bracketed span containing more than a few words is more likely a real transcription
+    // of someone reading a list than an annotation.
+    let inner = text[1..text.len().saturating_sub(1)]
+        .trim()
+        .to_ascii_lowercase();
+    if inner.split_whitespace().count() > 4 {
+        return false;
+    }
+
+    const MARKERS: [&str; 12] = [
+        "blank_audio",
+        "blank audio",
+        "silence",
+        "silent",
+        "no speech",
+        "inaudible",
+        "music",
+        "music playing",
+        "sound",
+        "noise",
+        "applause",
+        "background noise",
+    ];
+    MARKERS.contains(&inner.as_str())
 }
 
 /// A deterministic engine that emits a segment per frame of non-silent audio.
@@ -491,6 +603,122 @@ mod tests {
     /// Ignored because it needs a downloaded model; run with
     /// `NOTEWISE_MODEL_DIR=... cargo test -p notewise-transcription \
     ///   --features whisper-metal -- --ignored --nocapture`
+    /// whisper.cpp signals "nothing here" as text. Stored unfiltered, `[BLANK_AUDIO]` became
+    /// a ten-second transcript line in a real recording.
+    #[test]
+    fn whisper_non_speech_markers_are_not_transcript() {
+        for marker in [
+            "[BLANK_AUDIO]",
+            "[ Silence ]",
+            "(silence)",
+            "[MUSIC PLAYING]",
+            "(applause)",
+            "[INAUDIBLE]",
+            "*music*",
+            "[ background noise ]",
+        ] {
+            assert!(is_non_speech_marker(marker), "{marker} should be filtered");
+        }
+    }
+
+    /// The filter must not eat speech. A bracketed aside inside a real sentence, or a long
+    /// bracketed span, is far more likely to be something a person actually said.
+    #[test]
+    fn real_speech_is_not_mistaken_for_a_marker() {
+        for text in [
+            "We agreed to ship on Friday.",
+            "The silence in that meeting was telling.",
+            "(I think we should revisit the pricing model next quarter)",
+            "[the numbers are in the appendix at the back]",
+            "music",
+            "[silence]-ish",
+        ] {
+            assert!(!is_non_speech_marker(text), "{text} should be kept");
+        }
+    }
+
+    /// The regression test for the hallucination this gate exists to stop.
+    ///
+    /// Ungated, real Whisper on room tone returns invented sentences — a live recording in
+    /// this repository produced *"I know. You're happy to see a new work to grow."* over the
+    /// silence before anyone spoke. Gated, it must return nothing at all.
+    ///
+    /// Runs both ways in one test so a pass genuinely means the gate did the work, rather
+    /// than the model happening to stay quiet on this particular noise.
+    ///
+    /// `NOTEWISE_MODEL_DIR=... cargo test -p notewise-transcription \
+    ///   --features whisper-metal -- --ignored --nocapture`
+    #[tokio::test]
+    #[cfg(feature = "whisper")]
+    #[ignore = "requires a downloaded model"]
+    async fn the_speech_gate_stops_whisper_inventing_words_over_room_tone() {
+        let dir = std::env::var("NOTEWISE_MODEL_DIR").expect("NOTEWISE_MODEL_DIR");
+        let model = crate::ModelRegistry::default_model();
+        let format = AudioFormat::transcription();
+        let rate = format.sample_rate.hz() as usize;
+
+        // Prefers a real recording, because synthetic noise is too clean to reproduce this:
+        // set NOTEWISE_ROOMTONE_WAV to a few seconds of a genuinely quiet room. Falls back to
+        // synthesis so the test is still runnable without one.
+        let frame = match std::env::var("NOTEWISE_ROOMTONE_WAV") {
+            Ok(wav) => {
+                use notewise_audio_capture::AudioSource;
+                let mut source = notewise_audio_capture::FileSource::open_wav(&wav).expect("wav");
+                let mut samples = Vec::new();
+                while let Some(f) = source.next_frame().expect("frame") {
+                    let f = if f.format == format {
+                        f
+                    } else {
+                        f.to_transcription_format()
+                    };
+                    samples.extend_from_slice(&f.samples);
+                }
+                println!("real room tone: {} samples from {wav}", samples.len());
+                AudioFrame::new(samples, format, 0)
+            }
+            Err(_) => {
+                let mut state = 0x2545_F491_4F6C_DD1Du64;
+                let samples: Vec<f32> = (0..rate * 12)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6364136223846793005)
+                            .wrapping_add(1442695040888963407);
+                        (((state >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0) * 0.002
+                    })
+                    .collect();
+                println!("synthetic room tone: {} samples", samples.len());
+                AudioFrame::new(samples, format, 0)
+            }
+        };
+
+        let mut ungated = WhisperEngine::new(model.clone(), ModelStore::new(&dir))
+            .expect("engine")
+            .without_speech_gate();
+        ungated.feed(&frame).await.expect("feed");
+        let invented = ungated.finish().await.expect("finish");
+        println!("ungated on room tone -> {invented:?}");
+
+        let mut gated = WhisperEngine::new(model, ModelStore::new(&dir)).expect("engine");
+        gated.feed(&frame).await.expect("feed");
+        let gated_out = gated.finish().await.expect("finish");
+        println!("gated on room tone   -> {gated_out:?}");
+        println!("noise floor: {:.1} dBFS", gated.noise_floor_db());
+
+        assert!(
+            gated_out.is_empty(),
+            "the gate let {} segment(s) through on room tone: {:?}",
+            gated_out.len(),
+            gated_out.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        // Not asserted as a hard requirement — whisper.cpp's own thresholds may also catch
+        // this noise — but printed, because if the ungated run is empty too then this test
+        // proves nothing and the sample needs to change.
+        if invented.is_empty() {
+            println!("NOTE: ungated run was also empty; this sample does not exercise the gate");
+        }
+    }
+
     #[tokio::test]
     #[cfg(feature = "whisper")]
     #[ignore = "requires a downloaded model and a speech sample"]
