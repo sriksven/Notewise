@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Shown in the microphone permission dialog. macOS refuses to prompt without it,
+         and an app that cannot prompt simply never gets access. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Notewise records your microphone so it can transcribe meetings on this machine.</string>
+
+    <!-- macOS 14.4+ has a narrower "System Audio Recording Only" grant. Asking for that
+         rather than full screen recording matters: users decline "this app can see your
+         screen" far more often than "this app can hear your calls". -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Notewise captures audio from your calls so it can transcribe what other participants say.</string>
+
+    <!-- Required as a fallback on macOS 13, where system audio comes via ScreenCaptureKit
+         and there is no audio-only permission yet. -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Notewise needs this to capture meeting audio from other apps. It does not record or store your screen.</string>
+</dict>
+</plist>

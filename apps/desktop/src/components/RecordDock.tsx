@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
-import { Mic, MoreHorizontal, Square } from "lucide-react";
+import { Mic, MicOff, MoreHorizontal, Square } from "lucide-react";
 
 interface Props {
   isRecording: boolean;
   startedAt: number | null;
   busy: boolean;
+  /**
+   * Whether the engine can actually capture audio.
+   *
+   * The button stays enabled when false — it still creates a meeting for an imported
+   * transcript — but says what it will and will not do, rather than looking identical to a
+   * build that records.
+   */
+  canRecord: boolean;
+  /** The input the engine is capturing from, once it is recording. */
+  device: string | null;
   onToggle: () => void;
   onSummarize: () => void;
   canSummarize: boolean;
@@ -32,6 +42,8 @@ export function RecordDock({
   isRecording,
   startedAt,
   busy,
+  canRecord,
+  device,
   onToggle,
   onSummarize,
   canSummarize,
@@ -55,6 +67,12 @@ export function RecordDock({
     return () => window.removeEventListener("click", close);
   }, [menuOpen]);
 
+  const label = isRecording
+    ? "Stop recording"
+    : canRecord
+      ? "Start recording"
+      : "Start a meeting (this engine cannot capture audio)";
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
       <div
@@ -65,26 +83,43 @@ export function RecordDock({
           type="button"
           onClick={onToggle}
           disabled={busy}
-          aria-label={isRecording ? "Stop recording" : "Start recording"}
+          aria-label={label}
           aria-pressed={isRecording}
-          title={isRecording ? "Stop recording" : "Start recording"}
+          title={label}
           className={`flex h-11 w-11 items-center justify-center rounded-full text-white
                       transition disabled:opacity-60
-                      ${isRecording ? "bg-record recording-pulse" : "bg-record hover:bg-record-hover"}`}
+                      ${
+                        isRecording
+                          ? "bg-record recording-pulse"
+                          : canRecord
+                            ? "bg-record hover:bg-record-hover"
+                            : "bg-neutral-400 hover:bg-neutral-500"
+                      }`}
         >
           {isRecording ? (
             <Square size={16} fill="currentColor" aria-hidden />
-          ) : (
+          ) : canRecord ? (
             <Mic size={19} strokeWidth={2} aria-hidden />
+          ) : (
+            <MicOff size={19} strokeWidth={2} aria-hidden />
           )}
         </button>
 
         {isRecording && startedAt !== null && (
-          <span
-            className="px-2 font-mono text-[13px] tabular-nums text-neutral-700"
-            aria-live="off"
-          >
-            {elapsed(startedAt)}
+          <span className="flex flex-col justify-center px-2 leading-tight">
+            <span
+              className="font-mono text-[13px] tabular-nums text-neutral-700"
+              aria-live="off"
+            >
+              {elapsed(startedAt)}
+            </span>
+            {device && (
+              // Which input is live matters: the usual recording failure is capturing the
+              // wrong device and finding out afterwards.
+              <span className="max-w-[13ch] truncate text-[10px] text-neutral-400" title={device}>
+                {device}
+              </span>
+            )}
           </span>
         )}
 

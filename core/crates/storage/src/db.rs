@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
@@ -11,6 +11,12 @@ use crate::migrations;
 /// this crate goes through repositories.
 pub struct Database {
     conn: Connection,
+    /// Where this database lives, or `None` for in-memory.
+    ///
+    /// Kept so a caller that needs a *second* connection to the same database — the recording
+    /// pipeline, which must write for the duration of a meeting without holding the API's
+    /// lock — can open one without being told the path separately.
+    path: Option<PathBuf>,
 }
 
 // `rusqlite::Connection` is not `Debug`, so this is written by hand. Deliberately reports
@@ -30,14 +36,15 @@ impl std::fmt::Debug for Database {
 impl Database {
     /// Open (or create) a database file and bring it to the current schema version.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
         let conn = Connection::open(path)?;
-        Self::from_connection(conn, true)
+        Self::from_connection(conn, Some(path.to_path_buf()))
     }
 
     /// Open an in-memory database. Used by tests and by `--ephemeral` CLI runs.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        Self::from_connection(conn, false)
+        Self::from_connection(conn, None)
     }
 
     /// Open an encrypted database.
@@ -50,10 +57,11 @@ impl Database {
     pub fn open_encrypted(path: impl AsRef<Path>, key: &str) -> Result<Self> {
         #[cfg(feature = "sqlcipher")]
         {
+            let path = path.as_ref();
             let conn = Connection::open(path)?;
             // Must be the first statement executed on the connection.
             conn.pragma_update(None, "key", key)?;
-            Self::from_connection(conn, true)
+            Self::from_connection(conn, Some(path.to_path_buf()))
         }
         #[cfg(not(feature = "sqlcipher"))]
         {
@@ -61,7 +69,8 @@ impl Database {
         }
     }
 
-    fn from_connection(conn: Connection, persistent: bool) -> Result<Self> {
+    fn from_connection(conn: Connection, path: Option<PathBuf>) -> Result<Self> {
+        let persistent = path.is_some();
         // Cascading deletes are part of the schema's correctness, and SQLite leaves this
         // off by default. It must be set per-connection, not once per database.
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -73,9 +82,18 @@ impl Database {
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
         }
 
-        let mut db = Database { conn };
+        let mut db = Database { conn, path };
         migrations::migrate(&mut db.conn)?;
         Ok(db)
+    }
+
+    /// Where this database lives, or `None` if it is in-memory.
+    ///
+    /// In-memory returns `None` rather than a placeholder path: a second connection to
+    /// `:memory:` is a *different, empty* database, and a caller that needs one must be able
+    /// to detect that rather than silently writing into the void.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     /// Schema version of this database.

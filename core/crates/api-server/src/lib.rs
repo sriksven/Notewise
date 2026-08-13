@@ -30,10 +30,12 @@
 #![warn(missing_debug_implementations)]
 
 mod error;
+pub mod recording;
 mod routes;
 mod state;
 
 pub use error::{ApiError, ApiResult};
+pub use recording::{RecordingError, RecordingManager};
 pub use state::AppState;
 
 use std::net::SocketAddr;
@@ -109,6 +111,20 @@ impl Server {
 
     /// Serve until the process is signalled.
     pub async fn serve(self, state: AppState) -> Result<(), ServeError> {
+        self.serve_router(app(Arc::new(state))).await
+    }
+
+    /// Serve the API plus a frontend from `dir`.
+    pub async fn serve_with_frontend(
+        self,
+        state: AppState,
+        dir: impl AsRef<std::path::Path>,
+    ) -> Result<(), ServeError> {
+        self.serve_router(app_with_frontend(Arc::new(state), dir))
+            .await
+    }
+
+    async fn serve_router(self, router: AxumRouter) -> Result<(), ServeError> {
         let listener = tokio::net::TcpListener::bind(self.addr)
             .await
             .map_err(|source| ServeError::Bind {
@@ -119,11 +135,38 @@ impl Server {
         let bound = listener.local_addr()?;
         tracing::info!(addr = %bound, "notewise api listening on loopback");
 
-        axum::serve(listener, app(Arc::new(state)))
+        axum::serve(listener, router)
             .with_graceful_shutdown(shutdown_signal())
             .await?;
 
         Ok(())
+    }
+
+    /// Bind now and return the router-serving future plus the real address.
+    ///
+    /// Binding before returning is what lets an embedder (the desktop shell) know the port is
+    /// actually listening before it points a window at it — otherwise the window can load
+    /// before the server is up and show a connection error on launch.
+    pub async fn bind_with_frontend(
+        self,
+        state: AppState,
+        dir: impl AsRef<std::path::Path>,
+    ) -> Result<(SocketAddr, impl std::future::Future<Output = Result<(), ServeError>>), ServeError>
+    {
+        let listener = tokio::net::TcpListener::bind(self.addr)
+            .await
+            .map_err(|source| ServeError::Bind {
+                addr: self.addr,
+                source,
+            })?;
+
+        let bound = listener.local_addr()?;
+        let router = app_with_frontend(Arc::new(state), dir);
+
+        Ok((bound, async move {
+            axum::serve(listener, router).await?;
+            Ok(())
+        }))
     }
 }
 
@@ -133,6 +176,52 @@ impl Server {
 /// without opening a socket.
 pub fn app(state: Arc<AppState>) -> AxumRouter {
     routes::router(state)
+}
+
+/// Build the route table and serve a frontend from `dir` alongside it.
+///
+/// Serving the UI from the engine is a security decision, not a convenience. The alternative
+/// — the frontend on its own origin calling this API — is cross-origin, which would require
+/// permissive CORS on an unauthenticated loopback server. That would let **any** page the user
+/// visits read their meetings, since same-origin policy is currently the only thing standing
+/// in the way. Same origin means no CORS is needed at all.
+///
+/// Unknown paths fall back to `index.html` so client-side routing works on a hard refresh.
+pub fn app_with_frontend(state: Arc<AppState>, dir: impl AsRef<std::path::Path>) -> AxumRouter {
+    let dir = dir.as_ref();
+    let index = dir.join("index.html");
+
+    // The fallback is a handler rather than `ServeDir::not_found_service(ServeFile::new(..))`,
+    // which serves the right body but keeps the 404 status. A deep link answered with 404 is
+    // wrong twice over: the page did load, and crawlers, `curl --fail`, and the webview's own
+    // error handling all key off the status rather than the body.
+    let spa = axum::routing::any(move || {
+        let index = index.clone();
+        async move { serve_index(index).await }
+    });
+
+    routes::router(state).fallback_service(tower_http::services::ServeDir::new(dir).fallback(spa))
+}
+
+/// Serve `index.html` with a 200, or say plainly that the frontend was never built.
+async fn serve_index(index: std::path::PathBuf) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    match tokio::fs::read(&index).await {
+        Ok(bytes) => (
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(path = %index.display(), error = %e, "frontend index is missing");
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                "the Notewise frontend is not built — run `npm run build` in apps/desktop",
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn shutdown_signal() {
@@ -186,5 +275,106 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("loopback"), "{message}");
         assert!(message.contains("unauthenticated"), "{message}");
+    }
+
+    mod frontend {
+        use super::*;
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use notewise_ai_router::{Router, RouterConfig};
+        use notewise_storage::Database;
+        use tower::ServiceExt;
+
+        /// A throwaway `dist` directory, so these tests do not depend on the frontend
+        /// having been built.
+        fn dist() -> tempfile::TempDir {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join("index.html"), "<!doctype html><title>NW</title>")
+                .expect("index");
+            std::fs::create_dir_all(dir.path().join("assets")).expect("assets");
+            std::fs::write(dir.path().join("assets/app.js"), "export const x = 1;")
+                .expect("asset");
+            dir
+        }
+
+        fn router(dir: &tempfile::TempDir) -> AxumRouter {
+            let state = AppState::new(
+                Database::open_in_memory().expect("db"),
+                Router::from_config(RouterConfig::mock()).expect("router"),
+            );
+            app_with_frontend(Arc::new(state), dir.path())
+        }
+
+        async fn get(dir: &tempfile::TempDir, path: &str) -> (StatusCode, String) {
+            let response = router(dir)
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .expect("response");
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .expect("body");
+            (status, String::from_utf8_lossy(&bytes).into_owned())
+        }
+
+        #[tokio::test]
+        async fn the_index_is_served_at_the_root() {
+            let dir = dist();
+            let (status, body) = get(&dir, "/").await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(body.contains("<!doctype html>"), "{body}");
+        }
+
+        #[tokio::test]
+        async fn real_assets_are_served() {
+            let dir = dist();
+            let (status, body) = get(&dir, "/assets/app.js").await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(body.contains("export const x"), "{body}");
+        }
+
+        /// A deep link must answer 200, not 404 with an HTML body. Client-side routing means
+        /// the URL is handled by the app, so the request genuinely succeeded.
+        #[tokio::test]
+        async fn unknown_paths_fall_back_to_the_index_with_a_success_status() {
+            let dir = dist();
+            for path in ["/settings", "/meetings/abc123", "/deep/nested/route"] {
+                let (status, body) = get(&dir, path).await;
+                assert_eq!(status, StatusCode::OK, "{path} should be a 200");
+                assert!(body.contains("<title>NW</title>"), "{path}: {body}");
+            }
+        }
+
+        /// The fallback must not shadow the API, or a typo in a route would silently return
+        /// HTML to a caller expecting JSON.
+        #[tokio::test]
+        async fn api_routes_win_over_the_frontend_fallback() {
+            let dir = dist();
+            let (status, body) = get(&dir, "/health").await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(body.contains("\"status\""), "{body}");
+            assert!(!body.contains("<!doctype"), "html shadowed the api: {body}");
+        }
+
+        /// An unbuilt frontend is a real 404 with an actionable message, not a blank page.
+        #[tokio::test]
+        async fn a_missing_index_reports_how_to_fix_it() {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let state = AppState::new(
+                Database::open_in_memory().expect("db"),
+                Router::from_config(RouterConfig::mock()).expect("router"),
+            );
+            let response = app_with_frontend(Arc::new(state), dir.path())
+                .oneshot(Request::get("/").body(Body::empty()).unwrap())
+                .await
+                .expect("response");
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            let body = String::from_utf8_lossy(&bytes);
+            assert!(body.contains("npm run build"), "{body}");
+        }
     }
 }

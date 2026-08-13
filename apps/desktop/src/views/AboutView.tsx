@@ -12,8 +12,25 @@ interface Props {
  * audio does not work by recording a call and getting half a transcript is worse off than one
  * who was told up front.
  */
-const CAPABILITIES: Array<{ label: string; done: boolean; note?: string }> = [
-  { label: "Microphone recording", done: true },
+function capabilities(health: Health | null): Array<{
+  label: string;
+  done: boolean;
+  note?: string;
+}> {
+  return [
+  // Read from the engine rather than hard-coded: capture is a compile-time feature and also
+  // needs a file-backed database, so the same source can produce a build that records and one
+  // that cannot. Claiming it works when it does not is exactly the failure this list exists to
+  // prevent.
+  {
+    label: "Microphone recording",
+    done: health?.can_record ?? false,
+    note: health
+      ? health.can_record
+        ? undefined
+        : "not available in this build"
+      : "engine unreachable",
+  },
   { label: "Local transcription (Whisper)", done: true, note: "GPU-accelerated on Apple silicon" },
   { label: "Speaker separation", done: true, note: "inferred from pauses, not voices" },
   { label: "Summaries, decisions, action items", done: true },
@@ -23,9 +40,12 @@ const CAPABILITIES: Array<{ label: string; done: boolean; note?: string }> = [
   { label: "System audio capture", done: false, note: "needs a signed app and screen-audio permission" },
   { label: "Notes editor and tickets", done: false },
   { label: "Cloud sync", done: false, note: "opt-in, a later phase" },
-];
+  ];
+}
 
 export function AboutView({ health }: Props) {
+  const CAPABILITIES = capabilities(health);
+
   return (
     <div className="flex-1 overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-2xl space-y-7">
@@ -50,6 +70,15 @@ export function AboutView({ health }: Props) {
 
             <dt className="text-neutral-500">AI backend</dt>
             <dd className="text-neutral-800">{health?.ai_model ?? "—"}</dd>
+
+            <dt className="text-neutral-500">Recording</dt>
+            <dd className={health?.can_record ? "text-emerald-700" : "text-neutral-500"}>
+              {health
+                ? health.can_record
+                  ? "microphone capture available"
+                  : "not available in this build"
+                : "—"}
+            </dd>
 
             <dt className="text-neutral-500">Transcripts</dt>
             <dd className={health?.ai_local ? "text-emerald-700" : "text-amber-700"}>

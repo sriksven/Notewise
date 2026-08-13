@@ -77,7 +77,8 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | `transcription` | **Whisper implemented** (`--features whisper-metal`), Parakeet pending |
 | `audio-capture` | **Microphone capture implemented** (`--features os-capture`); system audio pending |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
-| `apps/` (except CLI), `cloud/` | Scaffolded, awaiting their phase |
+| `apps/desktop` | **Runs** — React UI served by the engine, in a Tauri window; records from the app |
+| `apps/mobile`, `cloud/` | Scaffolded, awaiting their phase |
 
 See [ROADMAP.md](ROADMAP.md) for what lands when, and each directory's `README.md` for
 its specific state. Directories that are scaffolds say so at the top.
@@ -101,6 +102,33 @@ cargo run -p notewise-cli --features full -- import meeting.wav
 ```
 
 On an Apple M4 with `base.en`, transcription runs at **37.6x realtime on Metal**.
+
+### Run the desktop app
+
+```sh
+cd apps/desktop && npm install && npm run build && cd -
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --features bundle
+```
+
+`--features bundle` is what makes the record button real: it compiles in microphone capture and
+Metal-accelerated Whisper. Without it the app still browses, searches, summarizes, and exports —
+and says so in About rather than offering a button that does nothing.
+
+The window points at the engine's own loopback port. That is deliberate: serving the UI from the
+engine keeps them same-origin, so the unauthenticated local API needs no CORS. With permissive
+CORS, any page you visited could read your meetings.
+
+### Recording over HTTP
+
+Capture is server-side, so the desktop app and the CLI see the same recording:
+
+```sh
+curl -X POST   127.0.0.1:47821/v1/recording -d '{"title":"Standup"}'
+curl           127.0.0.1:47821/v1/recording          # what is running
+curl -X DELETE 127.0.0.1:47821/v1/recording          # stop, flush, diarize
+```
+
+`GET /health` reports `can_record`, so a client can tell "not recording" from "cannot record".
 
 ## Documentation
 

@@ -23,6 +23,21 @@ pub enum ApiError {
 
     #[error("{0}")]
     BadRequest(String),
+
+    /// The request was well-formed but conflicts with current state — starting a recording
+    /// while one is running, or stopping when none is.
+    #[error("{0}")]
+    Conflict(String),
+
+    /// This build cannot do what was asked. Distinct from a 500: nothing is broken, the
+    /// feature was simply not compiled in, and the fix is a different build.
+    #[error("{0}")]
+    NotImplemented(String),
+
+    /// Something failed on this machine. The message is shown to the user, so it must describe
+    /// what went wrong without leaking paths or transcript content.
+    #[error("{0}")]
+    Internal(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +85,9 @@ impl ApiError {
             ApiError::Ai(_) => (StatusCode::BAD_GATEWAY, "ai_backend_error"),
 
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            ApiError::NotImplemented(_) => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
+            ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         }
     }
 }
@@ -177,5 +195,29 @@ mod tests {
         for err in errors {
             assert!(!err.parts().1.is_empty());
         }
+    }
+
+    /// A conflict is the client's cue to re-read state rather than retry, so it must not be
+    /// reported as a server fault.
+    #[test]
+    fn a_conflict_is_a_409_and_not_a_server_error() {
+        let err = ApiError::Conflict("already recording".into());
+        assert_eq!(err.parts(), (StatusCode::CONFLICT, "conflict"));
+        assert!(!err.parts().0.is_server_error());
+    }
+
+    /// 501 rather than 500: a build without capture is not a broken build, and a client should
+    /// hide the feature rather than offer a retry.
+    #[test]
+    fn an_uncompiled_feature_is_a_501() {
+        let err = ApiError::NotImplemented("no capture in this build".into());
+        assert_eq!(err.parts(), (StatusCode::NOT_IMPLEMENTED, "not_implemented"));
+    }
+
+    #[test]
+    fn an_internal_error_keeps_its_message() {
+        let err = ApiError::Internal("the microphone disappeared".into());
+        assert_eq!(err.parts().0, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.to_string(), "the microphone disappeared");
     }
 }

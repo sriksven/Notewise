@@ -23,6 +23,7 @@ use notewise_storage::{
 };
 
 use crate::error::{ApiError, ApiResult};
+use crate::recording::{self, RecordingError, StartRequest};
 use crate::state::AppState;
 
 type Shared = Arc<AppState>;
@@ -48,6 +49,10 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/models", get(list_models))
         .route("/v1/models/:name/download", post(download_model))
         .route("/v1/search", get(search))
+        .route(
+            "/v1/recording",
+            get(recording_status).post(start_recording).delete(stop_recording),
+        )
         .with_state(state)
 }
 
@@ -67,6 +72,13 @@ struct Health {
     /// can show the user where their transcripts are going.
     ai_local: bool,
     ai_model: String,
+    /// Whether this build can capture audio.
+    ///
+    /// Reported rather than assumed: capture is behind compile-time features, so a client has
+    /// no other way to know. A UI that guessed would show a record button that did nothing.
+    can_record: bool,
+    /// Whether a recording is in progress, so a reloaded window recovers the live state.
+    recording_meeting_id: Option<Id>,
 }
 
 async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
@@ -76,7 +88,115 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         schema_version,
         ai_local: state.ai().is_local(),
         ai_model: state.ai().model_id().to_string(),
+        // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
+        // reports that it cannot record even in a build that otherwise could.
+        can_record: recording::SUPPORTED && state.db_path().is_some(),
+        recording_meeting_id: state.recording().status().await.map(|s| s.meeting_id),
     }))
+}
+
+// ---------------------------------------------------------------- recording
+
+#[derive(Debug, Deserialize)]
+struct StartRecordingBody {
+    title: Option<String>,
+    /// Input device name. Omit for the system default.
+    device: Option<String>,
+    /// Transcription model, e.g. `base.en`. Omit for the default.
+    model: Option<String>,
+    /// Separate speakers when the recording stops. Defaults to on.
+    diarize: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct RecordingStatusBody {
+    recording: bool,
+    meeting_id: Option<Id>,
+    device: Option<String>,
+    model: Option<String>,
+    /// So a client can tell "not recording" from "cannot record".
+    can_record: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct StoppedBody {
+    meeting_id: Id,
+    segments: usize,
+    speakers: usize,
+    audio_ms: i64,
+}
+
+async fn recording_status(State(state): State<Shared>) -> Json<RecordingStatusBody> {
+    let status = state.recording().status().await;
+    Json(RecordingStatusBody {
+        recording: status.is_some(),
+        meeting_id: status.as_ref().map(|s| s.meeting_id),
+        device: status.as_ref().map(|s| s.device.clone()),
+        model: status.as_ref().map(|s| s.model.clone()),
+        can_record: recording::SUPPORTED && state.db_path().is_some(),
+    })
+}
+
+/// Start recording, creating the meeting in the same call.
+async fn start_recording(
+    State(state): State<Shared>,
+    body: Option<Json<StartRecordingBody>>,
+) -> ApiResult<(axum::http::StatusCode, Json<RecordingStatusBody>)> {
+    let body = body.map(|Json(b)| b);
+
+    let status = state
+        .recording()
+        .start(
+            state.db_path().map(|p| p.to_path_buf()),
+            state.model_dir().to_path_buf(),
+            StartRequest {
+                title: body.as_ref().and_then(|b| b.title.clone()),
+                device: body.as_ref().and_then(|b| b.device.clone()),
+                model: body.as_ref().and_then(|b| b.model.clone()),
+                diarize: body.as_ref().and_then(|b| b.diarize).unwrap_or(true),
+            },
+        )
+        .await?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(RecordingStatusBody {
+            recording: true,
+            meeting_id: Some(status.meeting_id),
+            device: Some(status.device),
+            model: Some(status.model),
+            can_record: true,
+        }),
+    ))
+}
+
+/// Stop the active recording and report what it captured.
+///
+/// `DELETE` rather than `POST /stop`: the recording is a resource that either exists or does
+/// not, which also makes a duplicate stop a clean 409 instead of an ambiguous success.
+async fn stop_recording(State(state): State<Shared>) -> ApiResult<Json<StoppedBody>> {
+    let (meeting_id, outcome) = state.recording().stop().await?;
+    Ok(Json(StoppedBody {
+        meeting_id,
+        segments: outcome.segments,
+        speakers: outcome.speakers,
+        audio_ms: outcome.audio_ms,
+    }))
+}
+
+impl From<RecordingError> for ApiError {
+    fn from(error: RecordingError) -> Self {
+        match error {
+            // 501: the request was valid, this build just cannot do it. A 400 would suggest
+            // the caller was wrong, and a 500 would suggest a bug.
+            RecordingError::Unsupported => ApiError::NotImplemented(error.to_string()),
+            RecordingError::Ephemeral => ApiError::BadRequest(error.to_string()),
+            RecordingError::AlreadyRecording(_) | RecordingError::NotRecording => {
+                ApiError::Conflict(error.to_string())
+            }
+            RecordingError::Failed(message) => ApiError::Internal(message),
+        }
+    }
 }
 
 // ---------------------------------------------------------------- meetings
@@ -1303,5 +1423,119 @@ mod tests {
         let (status, json) = call(&app(), get("/v1/tickets")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    // ------------------------------------------------------------------ recording
+
+    /// `/health` must state whether capture is possible. Without this a client has to guess,
+    /// and the only way to discover the truth is a record button that does nothing.
+    #[tokio::test]
+    async fn health_reports_whether_this_build_can_record() {
+        let response = app()
+            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        let body: serde_json::Value = serde_json::from_slice(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap();
+
+        assert!(body["can_record"].is_boolean(), "{body}");
+        // This state is in-memory, so recording is impossible regardless of features.
+        assert_eq!(body["can_record"], serde_json::Value::Bool(false));
+        assert_eq!(body["recording_meeting_id"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn recording_status_is_idle_before_anything_starts() {
+        let response = app()
+            .oneshot(Request::get("/v1/recording").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(body["recording"], serde_json::Value::Bool(false));
+        assert_eq!(body["meeting_id"], serde_json::Value::Null);
+    }
+
+    /// Starting on an in-memory engine must fail loudly. A second connection to `:memory:` is
+    /// a different, empty database, so "succeeding" would record into nothing.
+    #[tokio::test]
+    async fn starting_a_recording_on_an_ephemeral_engine_is_refused() {
+        let response = app()
+            .oneshot(
+                Request::post("/v1/recording")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // 400 without a file-backed database, 501 in a build with no capture at all. Both are
+        // honest refusals; neither is a 2xx and neither is a 500.
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::BAD_REQUEST | StatusCode::NOT_IMPLEMENTED
+            ),
+            "got {}",
+            response.status()
+        );
+
+        let body: serde_json::Value = serde_json::from_slice(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap();
+        // The message has to name the cause, since the fix differs completely between the two.
+        let message = body["error"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("in-memory") || message.contains("features"),
+            "{message}"
+        );
+    }
+
+    /// A stop with nothing running is a 409, not a silent success — a client that got 200 here
+    /// would clear its recording UI while a real recording was still going.
+    #[tokio::test]
+    async fn stopping_when_nothing_is_recording_is_a_conflict() {
+        let response = app()
+            .oneshot(
+                Request::delete("/v1/recording")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body: serde_json::Value = serde_json::from_slice(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap();
+        assert_eq!(body["code"], "conflict");
+    }
+
+    /// The route must accept a bodyless POST, so `curl -X POST /v1/recording` works and a
+    /// client is not forced to send `{}` to take the default device and model.
+    #[tokio::test]
+    async fn starting_a_recording_does_not_require_a_body() {
+        let response = app()
+            .oneshot(Request::post("/v1/recording").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_ne!(
+            response.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "a bodyless start should be accepted"
+        );
+        assert_ne!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

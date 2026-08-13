@@ -12,6 +12,31 @@ export interface Health {
   /** Whether the AI backend keeps data on this machine. Shown in the UI. */
   ai_local: boolean;
   ai_model: string;
+  /**
+   * Whether this engine can capture audio.
+   *
+   * Capture is a compile-time feature and also needs a file-backed database, so the UI has no
+   * way to infer it. Offering a record button that silently does nothing is worse than saying
+   * plainly that this build cannot record.
+   */
+  can_record: boolean;
+  /** Set when a recording is already running, so a reloaded window recovers the live state. */
+  recording_meeting_id: string | null;
+}
+
+export interface RecordingStatus {
+  recording: boolean;
+  meeting_id: string | null;
+  device: string | null;
+  model: string | null;
+  can_record: boolean;
+}
+
+export interface RecordingStopped {
+  meeting_id: string;
+  segments: number;
+  speakers: number;
+  audio_ms: number;
 }
 
 export interface Meeting {
@@ -208,6 +233,22 @@ export const api = {
       `/v1/models/${encodeURIComponent(name)}/download`,
       { method: "POST" },
     ),
+
+  recordingStatus: () => request<RecordingStatus>("/v1/recording"),
+
+  /**
+   * Start capturing. The engine creates the meeting as part of this call, so there is never a
+   * meeting that exists with nothing recording into it.
+   */
+  startRecording: (options: { title?: string; device?: string; model?: string } = {}) =>
+    request<RecordingStatus>("/v1/recording", {
+      method: "POST",
+      body: JSON.stringify(options),
+    }),
+
+  /** Stop capturing. Resolves once the tail of the transcript is flushed and diarized. */
+  stopRecording: () =>
+    request<RecordingStopped>("/v1/recording", { method: "DELETE" }),
 
   tickets: () => request<Ticket[]>("/v1/tickets"),
 

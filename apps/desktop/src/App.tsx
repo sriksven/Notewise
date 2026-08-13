@@ -36,6 +36,8 @@ export default function App() {
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  /** Which input the engine is capturing from, shown so a wrong device is caught early. */
+  const [device, setDevice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -59,11 +61,34 @@ export default function App() {
 
       // Recording state comes from the engine, not local state: the window can be
       // reloaded while a meeting is still running.
-      const live = nextMeetings.find((m) => m.ended_at === null);
-      if (live) {
-        setRecordingId(live.id);
-        setStartedAt(new Date(live.started_at).getTime());
-        setSelectedId((current) => current ?? live.id);
+      //
+      // `recording_meeting_id` is authoritative when the engine can capture. The open-meeting
+      // fallback is only a guess — a meeting left open by a crash has no `ended_at` either, and
+      // treating that as live would leave the UI stuck showing a recording that is not running.
+      const liveId =
+        nextHealth.recording_meeting_id ??
+        (nextHealth.can_record
+          ? null
+          : (nextMeetings.find((m) => m.ended_at === null)?.id ?? null));
+
+      if (liveId) {
+        const live = nextMeetings.find((m) => m.id === liveId);
+        setRecordingId(liveId);
+        if (live) setStartedAt(new Date(live.started_at).getTime());
+        setSelectedId((current) => current ?? liveId);
+
+        // Only asked for while something is actually recording, so an idle app makes two
+        // requests per refresh rather than three.
+        if (nextHealth.recording_meeting_id) {
+          api
+            .recordingStatus()
+            .then((status) => setDevice(status.device))
+            .catch(() => setDevice(null));
+        }
+      } else {
+        setRecordingId(null);
+        setStartedAt(null);
+        setDevice(null);
       }
     } catch (e) {
       report(e);
@@ -132,28 +157,64 @@ export default function App() {
     };
   }, [recordingId, questionsOpen]);
 
+  /**
+   * Start or stop capture.
+   *
+   * Capture belongs to the engine, not this window: `POST /v1/recording` opens the microphone
+   * and creates the meeting in one call. That keeps a reload from orphaning a running recording
+   * and lets the CLI see the same state.
+   *
+   * When the engine reports it cannot record, this falls back to creating a meeting with no
+   * audio — still useful for pasted or imported transcripts — and says so, rather than
+   * pretending the microphone is live.
+   */
   const toggleRecording = async () => {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       if (recordingId) {
-        await api.endMeeting(recordingId);
+        if (health?.can_record) {
+          const stopped = await api.stopRecording();
+          setNotice(
+            `Recording stopped — ${stopped.segments} segment(s)` +
+              (stopped.speakers > 0 ? `, ${stopped.speakers} speaker(s).` : "."),
+          );
+        } else {
+          await api.endMeeting(recordingId);
+        }
         setRecordingId(null);
         setStartedAt(null);
+        setDevice(null);
       } else {
-        const started = new Date();
-        const meeting = await api.createMeeting(
-          `Meeting ${started.toLocaleString([], {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })}`,
-        );
-        setRecordingId(meeting.id);
-        setSelectedId(meeting.id);
-        setStartedAt(new Date(meeting.started_at).getTime());
+        const title = `Meeting ${new Date().toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })}`;
+
+        if (health?.can_record) {
+          const started = await api.startRecording({ title });
+          setRecordingId(started.meeting_id);
+          setSelectedId(started.meeting_id);
+          setStartedAt(Date.now());
+          setDevice(started.device);
+          setNotice(
+            `Recording from ${started.device ?? "the default input"} using ${
+              started.model ?? "the default model"
+            }.`,
+          );
+        } else {
+          const meeting = await api.createMeeting(title);
+          setRecordingId(meeting.id);
+          setSelectedId(meeting.id);
+          setStartedAt(new Date(meeting.started_at).getTime());
+          setNotice(
+            "This engine cannot capture audio, so the meeting was created without it. " +
+              "Import a transcript, or run a build with the record and whisper features.",
+          );
+        }
         setQuestions([]);
       }
       await refresh();
@@ -281,6 +342,8 @@ export default function App() {
               isRecording={isRecording}
               startedAt={startedAt}
               busy={busy}
+              canRecord={health?.can_record ?? false}
+              device={device}
               onToggle={toggleRecording}
               onSummarize={summarize}
               canSummarize={selectedId !== null && !isRecording && segments.length > 0}

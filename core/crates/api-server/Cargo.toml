@@ -22,7 +22,31 @@ thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 
+# Capture is optional. A default build is a read/query/summarize engine with no platform audio
+# SDKs and no cmake; `--features record,whisper` turns it into one that can record.
+notewise-recorder = { workspace = true, optional = true }
+notewise-audio-capture = { workspace = true, optional = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
 http-body-util = "0.1"
+
+[features]
+default = []
+# Microphone capture. Pulls the platform audio SDK.
+record = [
+    "dep:notewise-recorder",
+    "dep:notewise-audio-capture",
+    "notewise-audio-capture/os-capture",
+]
+# Real transcription. Pulls a cmake build of whisper.cpp.
+#
+# `notewise-transcription` itself is not optional — the model catalogue and download endpoints
+# need it whether or not this build can record. Only the inference backend is gated.
+whisper = ["notewise-transcription/whisper", "notewise-recorder?/whisper"]
+whisper-metal = ["whisper", "notewise-transcription/whisper-metal", "notewise-recorder?/whisper-metal"]
+# Everything needed for the desktop app to actually record.
+full = ["record", "whisper"]
+full-metal = ["record", "whisper-metal"]

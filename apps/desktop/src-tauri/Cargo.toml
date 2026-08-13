@@ -1,0 +1,37 @@
+[package]
+name = "notewise-shell"
+description = "Notewise desktop shell"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+
+# Deliberately NOT a workspace member (see the root Cargo.toml `exclude`). Tauri pulls a
+# webview toolchain, and engine CI must not depend on GUI build tooling to run tests.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+notewise-api-server = { path = "../../../core/crates/api-server" }
+notewise-ai-router = { path = "../../../core/crates/ai-router" }
+notewise-storage = { path = "../../../core/crates/storage" }
+notewise-audio-capture = { path = "../../../core/crates/audio-capture", features = ["os-capture"] }
+
+[features]
+# A default `cargo build` produces a shell that can browse, search, summarize, and export but
+# not capture — it needs no platform audio SDK and no cmake, so it builds anywhere.
+default = []
+
+# What a shipped app is built with: microphone capture plus Metal-accelerated Whisper.
+# Recording is driven through the engine's HTTP surface, so these are forwarded rather than
+# implemented here — the shell owns the window, not the pipeline.
+record = ["notewise-api-server/record"]
+whisper = ["notewise-api-server/whisper"]
+whisper-metal = ["notewise-api-server/whisper-metal"]
+bundle = ["record", "whisper-metal"]
