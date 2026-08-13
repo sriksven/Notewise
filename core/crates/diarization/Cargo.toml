@@ -12,3 +12,17 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 notewise-transcription.workspace = true
+notewise-audio-capture.workspace = true
+
+# ONNX Runtime. Optional: a build that only needs PauseDiarizer should not pull a large
+# native dependency.
+ort = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
+onnx = ["dep:ort"]
+# Download the ONNX Runtime binaries rather than expecting a system install.
+onnx-download = ["onnx", "ort/download-binaries", "ort/tls-rustls"]

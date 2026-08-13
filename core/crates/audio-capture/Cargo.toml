@@ -16,6 +16,8 @@ tracing.workspace = true
 # build should not require.
 cpal = { version = "0.15", optional = true }
 
+rustfft.workspace = true
+
 [features]
 default = []
 # Real OS capture backends. Off by default: they pull platform audio SDKs and, on

@@ -56,6 +56,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
 axum = "0.7"
+rustfft = "6"
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }

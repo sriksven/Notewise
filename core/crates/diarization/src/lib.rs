@@ -18,6 +18,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod cluster;
+pub mod embedding;
+
+pub use cluster::{cosine_distance, normalize, ClusterConfig};
+pub use embedding::{SpeakerEmbedder, MIN_EMBEDDING_MS};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -25,6 +31,17 @@ use notewise_transcription::{Segment, Transcript};
 
 #[derive(Debug, Error)]
 pub enum DiarizationError {
+    /// This build cannot do model-based diarization.
+    #[error("model-based diarization is unavailable: {reason}")]
+    Unavailable { reason: &'static str },
+
+    /// Loading or running the model failed.
+    #[error("speaker model: {0}")]
+    Model(String),
+
+    /// Too little audio to identify anyone from.
+    #[error("{got_ms} ms of audio is too short to identify a speaker; {needed_ms} ms is needed")]
+    TooShort { got_ms: i64, needed_ms: i64 },
     #[error("speaker limit must be at least 1")]
     InvalidSpeakerLimit,
 
