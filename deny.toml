@@ -1,0 +1,45 @@
+# cargo-deny configuration.
+#
+# This project is open-core: `core/` and `apps/` are MIT. A copyleft dependency reaching
+# them would be a licensing problem, and one discovered late is expensive to unwind — so
+# the allowlist is deliberately narrow rather than permissive.
+
+[licenses]
+version = 2
+# Permissive licenses only. Adding to this list is a licensing decision, not a build fix:
+# if a dependency needs something else here, raise it in the PR rather than appending.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0", # File-level copyleft; linking is fine, modifications must be published.
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+# Duplicate versions of these are normal during ecosystem transitions and not worth
+# blocking a build over.
+skip-tree = [
+    { name = "windows-sys" },
+    { name = "syn" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Everything comes from crates.io. A git dependency should be a deliberate, reviewed
+# exception rather than something that slips in.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

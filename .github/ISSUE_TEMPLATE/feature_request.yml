@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something Notewise should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+    validations:
+      required: true
+
+  - type: dropdown
+    id: locality
+    attributes:
+      label: Would this work fully locally?
+      description: >
+        Anything needing network access is cloud-tier by nature. Not a blocker — it affects
+        which phase it lands in.
+      options:
+        - Works entirely on-device
+        - Needs network access
+        - Not sure
+    validations:
+      required: true

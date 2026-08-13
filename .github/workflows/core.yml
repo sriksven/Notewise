@@ -1,0 +1,98 @@
+name: core
+
+# The engine is what every platform depends on, so this runs on every push and PR.
+# Platform app builds are separate workflows: they need signing identities and SDKs,
+# and a broken desktop toolchain must not block an engine fix.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail on warnings in CI while leaving local builds quiet.
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The engine ships on all three. SQLite pragmas, path handling, and the
+        # audio-capture backend selection all differ per platform, so testing only
+        # on Linux would miss real breakage.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        # Tests needing a GPU, a signed bundle, a TCC grant, or a paid API key are
+        # marked #[ignore] with a reason, so a green run here never implies they passed.
+        run: cargo test --workspace
+
+      - name: Doc tests
+        run: cargo test --workspace --doc
+
+  msrv:
+    name: minimum supported rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to rust-version in the workspace manifest. Raising the MSRV should be a
+      # deliberate change, not something that happens because a dependency moved.
+      - uses: dtolnay/rust-toolchain@1.82.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo check --workspace
+
+  features:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Optional features are how the local-only build stays local-only. If one stops
+      # compiling in isolation, that guarantee is gone without anyone noticing.
+      - name: storage without encryption
+        run: cargo check -p notewise-storage --no-default-features
+
+      - name: transcription without whisper
+        run: cargo check -p notewise-transcription --no-default-features
+
+      - name: audio-capture without OS backends
+        run: cargo check -p notewise-audio-capture --no-default-features

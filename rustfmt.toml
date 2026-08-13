@@ -1,0 +1,6 @@
+# Defaults, with the line width raised slightly.
+#
+# 100 rather than the default 90: the repository pattern produces long but readable
+# signatures, and forcing them to wrap makes them harder to scan, not easier.
+max_width = 100
+edition = "2021"

@@ -1,0 +1,70 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste real meeting content.** Redact it, or reproduce with synthetic audio.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. notewise serve
+        2. POST /v1/meetings ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Notewise version
+      description: "`notewise --version`"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux, iOS, Android]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audio-path
+    attributes:
+      label: If this involves audio capture, which path?
+      description: >
+        These are entirely separate code per platform. "Audio capture" alone is not enough
+        to narrow it down.
+      options:
+        - Not audio related
+        - Microphone
+        - System audio
+        - Both (combined)
+        - Imported file
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: AI backend
+      options: [Local (Ollama), Own API key, Notewise Cloud, Not applicable]
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Run with `NOTEWISE_LOG=debug`. Redact anything from a real meeting."
+      render: shell

@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/notewise/notewise/security/advisories/new
+    about: >
+      Report privately, never as a public issue. See SECURITY.md.
