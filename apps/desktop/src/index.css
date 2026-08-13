@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    /* System stack rather than a webfont: a desktop app should look native on
+       first paint, and there is no flash of unstyled text to manage. */
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #1c1c1e;
+    background: #ffffff;
+  }
+
+  /* The window chrome is the OS's. Text selection is for transcripts, not the UI. */
+  button,
+  .chrome {
+    user-select: none;
+  }
+}
+
+@layer components {
+  /* The pill controls along the top. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-hairline
+           bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700
+           transition-colors hover:bg-neutral-50 active:bg-neutral-100;
+  }
+
+  .pill-active {
+    @apply border-neutral-300 bg-neutral-100 text-neutral-900;
+  }
+
+  /* Sidebar rail icon target. 32px keeps it comfortably clickable in a 52px rail. */
+  .rail-icon {
+    @apply flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500
+           transition-colors hover:bg-neutral-100 hover:text-neutral-900;
+  }
+
+  .rail-icon-active {
+    @apply bg-neutral-100 text-neutral-900;
+  }
+}
+
+/* Slow, low-amplitude pulse while recording. Fast or large movement in the
+   corner of the eye reads as an error state; this should read as "still on". */
+@keyframes record-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(226, 56, 46, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(226, 56, 46, 0);
+  }
+}
+
+.recording-pulse {
+  animation: record-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-pulse {
+    animation: none;
+  }
+}
