@@ -6,14 +6,21 @@
 //!
 //! # What is implemented here
 //!
+//! [`SingleSpeakerDiarizer`] is **the default**, and it attempts no separation at all. That
+//! reads like a placeholder and is not one: see its docs for why timing-only separation was
+//! removed from the default path after it labelled one person's pause as a second participant.
+//!
 //! [`PauseDiarizer`] is a real, complete algorithm that infers turn-taking from the gaps
 //! between segments. It needs no model and no audio — only segment timings — so it works on
-//! every platform and on imported transcripts.
+//! every platform and on imported transcripts. It is opt-in, because gaps are evidence about
+//! *pacing* and it uses them as evidence about *people*: two speakers alternating cleanly are
+//! separated well, one speaker thinking mid-sentence is split in two. See
+//! [`PauseDiarizer::confidence`] for how to tell when its output is unreliable.
 //!
-//! It is a heuristic, not embedding-based clustering. It reads turn-taking, not voices: two
-//! people alternating cleanly are separated well, two people interrupting each other are not.
-//! [`Diarizer`] exists so an embedding-based implementation can replace it without any caller
-//! changing. See [`PauseDiarizer::confidence`] for how to tell when its output is unreliable.
+//! Separating voices needs the voices. [`SpeakerEmbedder`] and [`cluster`] are the acoustic
+//! half of that, already built and tested; what is missing is a [`Diarizer`] that carries
+//! per-segment audio through to them. Until that exists, no caller is told speakers were
+//! separated when they were not.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

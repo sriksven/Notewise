@@ -184,7 +184,7 @@ impl FileSource {
     /// Read a 32-bit float WAV file.
     pub fn open_wav(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let bytes = std::fs::read(path)?;
-        let (samples, format) = decode_f32_wav(&bytes)?;
+        let (samples, format) = decode_wav(&bytes)?;
         Ok(Self::from_samples(samples, format, 100))
     }
 
@@ -223,7 +223,7 @@ impl AudioSource for FileSource {
 ///
 /// Hand-written rather than pulled from a crate because it handles exactly one format and
 /// the alternative is a dependency for ~40 lines. Anything else is rejected explicitly.
-fn decode_f32_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
+fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
     fn u16_at(bytes: &[u8], offset: usize) -> Option<u16> {
         Some(u16::from_le_bytes(
             bytes.get(offset..offset + 2)?.try_into().ok()?,
@@ -243,6 +243,7 @@ fn decode_f32_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
     // LIST/fact chunks before the data.
     let mut offset = 12;
     let mut format = None;
+    let mut encoding = None;
     let mut data_range = None;
 
     while offset + 8 <= bytes.len() {
@@ -260,13 +261,27 @@ fn decode_f32_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
                 let sample_rate = u32_at(bytes, body + 4).unwrap_or(0);
                 let bits = u16_at(bytes, body + 14).unwrap_or(0);
 
-                // 3 = IEEE float.
-                if audio_format != 3 || bits != 32 {
-                    return Err(CaptureError::BadFormat(format!(
-                        "expected 32-bit float PCM (format 3), got format {audio_format} at \
-                         {bits} bits"
-                    )));
-                }
+                // 1 = integer PCM, 3 = IEEE float, 0xFFFE = extensible (the real format is in
+                // the extension's sub-format GUID, whose first two bytes carry the same code).
+                let audio_format = if audio_format == 0xFFFE {
+                    u16_at(bytes, body + 24).unwrap_or(audio_format)
+                } else {
+                    audio_format
+                };
+
+                encoding = match (audio_format, bits) {
+                    (3, 32) => Some(Encoding::F32),
+                    (1, 16) => Some(Encoding::I16),
+                    (1, 24) => Some(Encoding::I24),
+                    (1, 32) => Some(Encoding::I32),
+                    (1, 8) => Some(Encoding::U8),
+                    _ => {
+                        return Err(CaptureError::BadFormat(format!(
+                            "unsupported WAV encoding: format {audio_format} at {bits} bits. \
+                             Supported: 8/16/24/32-bit integer PCM and 32-bit float"
+                        )))
+                    }
+                };
                 format = Some(AudioFormat::new(SampleRate::from_hz(sample_rate), channels));
             }
             b"data" => data_range = Some((body, (body + size).min(bytes.len()))),
@@ -278,14 +293,57 @@ fn decode_f32_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
     }
 
     let format = format.ok_or_else(|| CaptureError::BadFormat("no fmt chunk".into()))?;
+    let encoding = encoding.ok_or_else(|| CaptureError::BadFormat("no fmt chunk".into()))?;
     let (start, end) = data_range.ok_or_else(|| CaptureError::BadFormat("no data chunk".into()))?;
 
-    let samples = bytes[start..end]
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .collect();
+    Ok((decode_samples(&bytes[start..end], encoding), format))
+}
 
-    Ok((samples, format))
+/// Sample encodings found in the wild.
+///
+/// Integer PCM is what almost every recorder, phone and `ffmpeg` default produces; 32-bit float
+/// is what this codebase uses internally. Accepting only the latter meant the common case — a
+/// perfectly ordinary 16-bit WAV — was rejected as malformed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+    U8,
+    I16,
+    I24,
+    I32,
+    F32,
+}
+
+impl Encoding {
+    fn bytes_per_sample(&self) -> usize {
+        match self {
+            Encoding::U8 => 1,
+            Encoding::I16 => 2,
+            Encoding::I24 => 3,
+            Encoding::I32 | Encoding::F32 => 4,
+        }
+    }
+}
+
+/// Convert raw samples to the -1.0..1.0 floats used everywhere else.
+///
+/// Each integer width is divided by its own maximum rather than a shared constant: dividing
+/// 16-bit samples by the 32-bit maximum would produce audio 48 dB too quiet, which sounds like
+/// silence to the speech gate and transcribes as nothing.
+fn decode_samples(bytes: &[u8], encoding: Encoding) -> Vec<f32> {
+    let width = encoding.bytes_per_sample();
+    bytes
+        .chunks_exact(width)
+        .map(|b| match encoding {
+            // 8-bit WAV is *unsigned*, centred on 128. Treating it as signed inverts it.
+            Encoding::U8 => (b[0] as f32 - 128.0) / 128.0,
+            Encoding::I16 => i16::from_le_bytes([b[0], b[1]]) as f32 / 32_768.0,
+            // 24-bit has no Rust primitive: sign-extend into an i32 by placing the three bytes
+            // in the high position and shifting back down.
+            Encoding::I24 => (i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8) as f32 / 8_388_608.0,
+            Encoding::I32 => i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 / 2_147_483_648.0,
+            Encoding::F32 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -427,7 +485,7 @@ mod tests {
     #[test]
     fn a_float_wav_decodes_to_its_samples() {
         let samples = vec![0.0, 0.5, -0.5, 1.0];
-        let (decoded, format) = decode_f32_wav(&wav(&samples, 1, 16_000)).unwrap();
+        let (decoded, format) = decode_wav(&wav(&samples, 1, 16_000)).unwrap();
 
         assert_eq!(decoded, samples);
         assert_eq!(format, AudioFormat::transcription());
@@ -435,7 +493,7 @@ mod tests {
 
     #[test]
     fn stereo_wav_metadata_is_read_correctly() {
-        let (_, format) = decode_f32_wav(&wav(&[0.0; 8], 2, 48_000)).unwrap();
+        let (_, format) = decode_wav(&wav(&[0.0; 8], 2, 48_000)).unwrap();
         assert_eq!(format, AudioFormat::new(SampleRate::STUDIO, 2));
     }
 
@@ -452,27 +510,31 @@ mod tests {
         };
         bytes.splice(12..12, list);
 
-        let (decoded, _) = decode_f32_wav(&bytes).expect("should skip unknown chunks");
+        let (decoded, _) = decode_wav(&bytes).expect("should skip unknown chunks");
         assert_eq!(decoded, vec![0.25, 0.5]);
     }
 
     #[test]
     fn non_wav_input_is_rejected() {
         assert!(matches!(
-            decode_f32_wav(b"this is not a wav file at all, not even close ok").unwrap_err(),
+            decode_wav(b"this is not a wav file at all, not even close ok").unwrap_err(),
             CaptureError::BadFormat(_)
         ));
     }
 
     #[test]
-    fn integer_wav_is_rejected_with_a_specific_reason() {
+    fn integer_wav_is_accepted() {
+        // This file used to be rejected. Integer PCM is what almost every recorder produces,
+        // so refusing it meant a user could not import an ordinary recording at all.
         let mut bytes = wav(&[0.0; 4], 1, 16_000);
         bytes[20] = 1; // format 1 = integer PCM
         bytes[34] = 16; // 16-bit
 
-        let err = decode_f32_wav(&bytes).expect_err("integer PCM is not supported");
-        let message = err.to_string();
-        assert!(message.contains("32-bit float"), "{message}");
+        let (samples, format) = decode_wav(&bytes).expect("integer PCM is supported");
+        assert_eq!(format.sample_rate.hz(), 16_000);
+        // Four f32 zeros are eight 16-bit samples of silence.
+        assert_eq!(samples.len(), 8);
+        assert!(samples.iter().all(|s| s.abs() < 1e-6));
     }
 
     #[test]
@@ -490,5 +552,125 @@ mod tests {
             assert!(source.next_frame().unwrap().is_some());
             assert!(source.stop().is_ok());
         }
+    }
+
+    // ------------------------------------------------------------------ wav encodings
+
+    /// Build a minimal WAV in memory.
+    fn encoded_wav(audio_format: u16, bits: u16, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend(b"RIFF");
+        out.extend((36u32 + data.len() as u32).to_le_bytes());
+        out.extend(b"WAVE");
+        out.extend(b"fmt ");
+        out.extend(16u32.to_le_bytes());
+        out.extend(audio_format.to_le_bytes());
+        out.extend(1u16.to_le_bytes()); // mono
+        out.extend(16_000u32.to_le_bytes());
+        out.extend(0u32.to_le_bytes()); // byte rate, unread
+        out.extend(0u16.to_le_bytes()); // block align, unread
+        out.extend(bits.to_le_bytes());
+        out.extend(b"data");
+        out.extend((data.len() as u32).to_le_bytes());
+        out.extend(data);
+        out
+    }
+
+    /// The bug: an ordinary 16-bit WAV — what almost every recorder and ffmpeg default
+    /// produces — was rejected as malformed, so importing a real file was impossible.
+    #[test]
+    fn sixteen_bit_integer_wav_is_accepted() {
+        let mut data = Vec::new();
+        for sample in [0i16, 16_384, -16_384, 32_767, -32_768] {
+            data.extend(sample.to_le_bytes());
+        }
+
+        let (samples, format) = decode_wav(&encoded_wav(1, 16, &data)).expect("16-bit wav");
+        assert_eq!(format.sample_rate.hz(), 16_000);
+        assert_eq!(samples.len(), 5);
+        assert!((samples[0] - 0.0).abs() < 1e-6);
+        assert!((samples[1] - 0.5).abs() < 1e-4);
+        assert!((samples[2] + 0.5).abs() < 1e-4);
+        assert!((samples[3] - 1.0).abs() < 1e-4);
+        assert!((samples[4] + 1.0).abs() < 1e-6);
+    }
+
+    /// Each width must divide by its own maximum. Sharing one constant would make 16-bit audio
+    /// 48 dB too quiet — silence as far as the speech gate is concerned.
+    #[test]
+    fn every_integer_width_reaches_full_scale() {
+        let cases: Vec<(u16, Vec<u8>)> = vec![
+            (16, i16::MAX.to_le_bytes().to_vec()),
+            (24, vec![0xFF, 0xFF, 0x7F]),
+            (32, i32::MAX.to_le_bytes().to_vec()),
+        ];
+
+        for (bits, data) in cases {
+            let (samples, _) = decode_wav(&encoded_wav(1, bits, &data)).expect("wav");
+            assert!(
+                (samples[0] - 1.0).abs() < 1e-3,
+                "{bits}-bit full scale decoded as {}",
+                samples[0]
+            );
+        }
+    }
+
+    /// 8-bit WAV is unsigned and centred on 128. Read as signed it comes out inverted.
+    #[test]
+    fn eight_bit_wav_is_unsigned() {
+        let (samples, _) = decode_wav(&encoded_wav(1, 8, &[128, 255, 0])).expect("8-bit wav");
+        assert!(samples[0].abs() < 1e-6, "128 should be silence");
+        assert!(samples[1] > 0.9, "255 should be positive full scale");
+        assert!(samples[2] < -0.9, "0 should be negative full scale");
+    }
+
+    #[test]
+    fn thirty_two_bit_float_still_works() {
+        let mut data = Vec::new();
+        for sample in [0.0f32, 0.5, -0.5] {
+            data.extend(sample.to_le_bytes());
+        }
+        let (samples, _) = decode_wav(&encoded_wav(3, 32, &data)).expect("float wav");
+        assert_eq!(samples, vec![0.0, 0.5, -0.5]);
+    }
+
+    /// WAVE_FORMAT_EXTENSIBLE hides the real encoding in a sub-format GUID. Rejecting it
+    /// outright would refuse files from several common recorders.
+    #[test]
+    fn extensible_wav_reads_its_subformat() {
+        let mut out = Vec::new();
+        let data = i16::MAX.to_le_bytes();
+        out.extend(b"RIFF");
+        out.extend(0u32.to_le_bytes());
+        out.extend(b"WAVE");
+        out.extend(b"fmt ");
+        out.extend(40u32.to_le_bytes());
+        out.extend(0xFFFEu16.to_le_bytes());
+        out.extend(1u16.to_le_bytes());
+        out.extend(16_000u32.to_le_bytes());
+        out.extend(0u32.to_le_bytes());
+        out.extend(0u16.to_le_bytes());
+        out.extend(16u16.to_le_bytes());
+        out.extend(22u16.to_le_bytes()); // extension size
+        out.extend(16u16.to_le_bytes()); // valid bits
+        out.extend(0u32.to_le_bytes()); // channel mask
+        out.extend(1u16.to_le_bytes()); // sub-format: integer PCM
+        out.extend([0u8; 14]); // rest of the GUID
+        out.extend(b"data");
+        out.extend((data.len() as u32).to_le_bytes());
+        out.extend(data);
+
+        let (samples, _) = decode_wav(&out).expect("extensible wav");
+        assert!((samples[0] - 1.0).abs() < 1e-3);
+    }
+
+    /// An encoding that genuinely is not supported must say which, and what is.
+    #[test]
+    fn an_unsupported_encoding_names_what_is_supported() {
+        // Format 6 is A-law.
+        let error = decode_wav(&encoded_wav(6, 8, &[0, 0])).expect_err("should reject");
+        let message = error.to_string();
+        assert!(message.contains("format 6"), "{message}");
+        assert!(message.contains("Supported"), "{message}");
     }
 }
