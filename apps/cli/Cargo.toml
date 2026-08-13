@@ -8,4 +8,19 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "notewise"
+path = "src/main.rs"
+
 [dependencies]
+notewise-storage.workspace = true
+notewise-graph.workspace = true
+notewise-ai-router.workspace = true
+notewise-api-server.workspace = true
+notewise-mcp-server.workspace = true
+clap.workspace = true
+tokio = { workspace = true }
+anyhow.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

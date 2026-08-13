@@ -91,10 +91,6 @@ impl Database {
         &self.conn
     }
 
-    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
-        &mut self.conn
-    }
-
     /// Run a closure inside a transaction, rolling back if it returns `Err`.
     pub fn transaction<T, F>(&mut self, f: F) -> Result<T>
     where
