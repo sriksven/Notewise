@@ -10,14 +10,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use notewise_ai_router::{
-    suggest_questions, AiBackend, BackendKind, ChatMessage, ChatRequest, ClarifierConfig,
-    ClarifierSession, Role, TranscriptInput, Utterance,
+    generate_email_variants, suggest_questions, AiBackend, BackendKind, ChatMessage, ChatRequest,
+    ClarifierConfig, ClarifierSession, EmailContext, EmailTone, Role, TranscriptInput, Utterance,
 };
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
-    meeting_to_markdown, ExportOptions, Id, Meeting, MeetingRepository, MeetingSource, NewMeeting,
-    NewNote, NewSummary, NewTranscriptSegment, Note, NoteRepository, SearchRepository,
-    SummaryRepository, Ticket, TicketRepository, TranscriptSegment,
+    meeting_to_markdown, DraftStatus, EmailDraft, EmailDraftRepository, ExportOptions, Id, Meeting,
+    MeetingRepository, MeetingSource, NewEmailDraft, NewMeeting, NewNote, NewSummary,
+    NewTranscriptSegment, Note, NoteRepository, SearchRepository, SummaryRepository, Ticket,
+    TicketRepository, TranscriptSegment,
 };
 use notewise_transcription::{ModelRegistry, ModelStore};
 
@@ -48,6 +49,13 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/models", get(list_models))
         .route("/v1/models/:name/download", post(download_model))
         .route("/v1/search", get(search))
+        // Drafting only. There is deliberately no route that sends one — see `draft_emails`.
+        .route(
+            "/v1/meetings/:id/emails",
+            get(list_email_drafts).post(draft_emails),
+        )
+        .route("/v1/emails/:id/approve", post(approve_email_draft))
+        .route("/v1/emails/:id", axum::routing::delete(discard_email_draft))
         .route(
             "/v1/recording",
             get(recording_status)
@@ -94,6 +102,215 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         can_record: recording::SUPPORTED && state.db_path().is_some(),
         recording_meeting_id: state.recording().status().await.map(|s| s.meeting_id),
     }))
+}
+
+// ---------------------------------------------------------------- email drafts
+
+/// # There is no send endpoint, and that is the design
+///
+/// This surface can create, list, approve, and discard drafts. It cannot send one, and nothing
+/// else in this repository can either. A wrong auto-send is the highest-consequence failure
+/// this product has: it reaches other people, it cannot be recalled, and the user finds out
+/// from the recipient.
+///
+/// `POST /v1/emails/:id/sent` is also absent even though the storage layer has `mark_sent`.
+/// Exposing it would let a client record a message as sent when nothing sent it, which is worse
+/// than not tracking the state at all — it would put a lie in the user's audit trail.
+#[derive(Debug, Deserialize)]
+struct DraftEmailsBody {
+    /// Which tones to draft. Defaults to a single concise draft.
+    tones: Option<Vec<String>>,
+    /// Who the mail is for, e.g. "the platform team".
+    audience: Option<String>,
+    /// Who is sending, so the model does not invent a sign-off.
+    sender: Option<String>,
+    /// Pre-filled recipients. Never resolved from the transcript: addresses the user did not
+    /// type are exactly the ones that end up wrong.
+    recipients: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+struct EmailDraftBody {
+    id: Id,
+    meeting_id: Option<Id>,
+    subject: String,
+    body: String,
+    recipients: Vec<String>,
+    status: String,
+    variant: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<EmailDraft> for EmailDraftBody {
+    fn from(draft: EmailDraft) -> Self {
+        Self {
+            id: draft.id,
+            meeting_id: draft.meeting_id,
+            subject: draft.subject,
+            body: draft.body,
+            recipients: draft.recipients,
+            status: match draft.status {
+                DraftStatus::Draft => "draft",
+                DraftStatus::Approved => "approved",
+                DraftStatus::Sent => "sent",
+                DraftStatus::Discarded => "discarded",
+            }
+            .to_string(),
+            variant: draft.variant,
+            created_at: draft.created_at,
+        }
+    }
+}
+
+/// Draft one or more follow-up emails for a meeting.
+///
+/// Prefers the meeting's summary as source material: it drafts better than a raw transcript and
+/// costs a fraction of the tokens. Falls back to the transcript when nothing has been
+/// summarised yet.
+async fn draft_emails(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    body: Option<Json<DraftEmailsBody>>,
+) -> ApiResult<(axum::http::StatusCode, Json<Vec<EmailDraftBody>>)> {
+    let meeting_id = parse_id(&id)?;
+    let body = body.map(|Json(b)| b).unwrap_or(DraftEmailsBody {
+        tones: None,
+        audience: None,
+        sender: None,
+        recipients: None,
+    });
+
+    let tones = parse_tones(body.tones.as_deref())?;
+
+    // Everything the model needs, gathered under one short lock and released before the call.
+    let context = {
+        let db = state.db().await;
+        let meetings = MeetingRepository::new(&db);
+        let meeting = meetings.get(meeting_id)?;
+
+        let summaries = SummaryRepository::new(&db);
+        let summary = summaries.latest_for_meeting(meeting_id)?;
+
+        let (source, decisions, action_items) = match &summary {
+            Some(summary) => (
+                summary.text.clone(),
+                summaries
+                    .decisions(summary.id)?
+                    .into_iter()
+                    .map(|d| d.text)
+                    .collect(),
+                summaries
+                    .action_items(summary.id)?
+                    .into_iter()
+                    .map(|a| (a.text, a.owner))
+                    .collect(),
+            ),
+            None => (
+                meetings.transcript_text(meeting_id)?,
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
+
+        let mut context = EmailContext::new(meeting.title, source)
+            .with_decisions(decisions)
+            .with_action_items(action_items);
+        if let Some(sender) = body.sender.clone() {
+            context = context.with_sender(sender);
+        }
+        if let Some(audience) = body.audience.clone() {
+            context = context.with_audience(audience);
+        }
+        context
+    };
+
+    let drafts = generate_email_variants(state.ai(), &context, &tones).await?;
+
+    let db = state.db().await;
+    let repo = EmailDraftRepository::new(&db);
+    let mut stored = Vec::with_capacity(drafts.len());
+
+    for draft in drafts {
+        // Created in `Draft`. The repository has no method that produces any other state.
+        stored.push(
+            repo.create(NewEmailDraft {
+                meeting_id: Some(meeting_id),
+                subject: draft.subject,
+                body: draft.body,
+                recipients: body.recipients.clone().unwrap_or_default(),
+                variant: Some(draft.tone.as_str().to_string()),
+            })?
+            .into(),
+        );
+    }
+
+    Ok((axum::http::StatusCode::CREATED, Json(stored)))
+}
+
+async fn list_email_drafts(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<EmailDraftBody>>> {
+    let meeting_id = parse_id(&id)?;
+    let db = state.db().await;
+    let drafts = EmailDraftRepository::new(&db).list_for_meeting(meeting_id)?;
+    Ok(Json(drafts.into_iter().map(Into::into).collect()))
+}
+
+/// Mark a draft approved.
+///
+/// Approval is not sending. It records that a human read this text and considers it correct —
+/// the prerequisite the state machine enforces before anything could ever send it.
+async fn approve_email_draft(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<EmailDraftBody>> {
+    let draft_id = parse_id(&id)?;
+    let db = state.db().await;
+    Ok(Json(
+        EmailDraftRepository::new(&db).approve(draft_id)?.into(),
+    ))
+}
+
+async fn discard_email_draft(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<EmailDraftBody>> {
+    let draft_id = parse_id(&id)?;
+    let db = state.db().await;
+    Ok(Json(
+        EmailDraftRepository::new(&db).discard(draft_id)?.into(),
+    ))
+}
+
+/// Resolve tone names, rejecting unknown ones rather than silently substituting a default.
+///
+/// A user who asked for "formal" and got a chatty draft would have no way to tell the name was
+/// ignored, and might send it.
+fn parse_tones(names: Option<&[String]>) -> ApiResult<Vec<EmailTone>> {
+    let Some(names) = names else {
+        return Ok(vec![EmailTone::Concise]);
+    };
+
+    if names.is_empty() {
+        return Ok(vec![EmailTone::Concise]);
+    }
+
+    names
+        .iter()
+        .map(|name| {
+            EmailTone::parse(name).ok_or_else(|| {
+                ApiError::BadRequest(format!(
+                    "unknown tone '{name}' — expected one of: {}",
+                    EmailTone::ALL
+                        .iter()
+                        .map(|t| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- recording
@@ -1584,5 +1801,292 @@ mod tests {
             "a bodyless start should be accepted"
         );
         assert_ne!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    // ------------------------------------------------------------------ email drafts
+
+    async fn meeting_with_transcript(app: &AxumRouter) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/meetings")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Infra sync","source":"combined"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let meeting: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let id = meeting["id"].as_str().unwrap().to_string();
+
+        app.clone()
+            .oneshot(
+                Request::post(format!("/v1/meetings/{id}/transcript"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"[{"text":"We agreed to move off SQLite before the launch.",
+                             "start_ms":0,"end_ms":4000,"speaker":"Alex"}]"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn json(app: &AxumRouter, request: Request<Body>) -> (StatusCode, serde_json::Value) {
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, value)
+    }
+
+    #[tokio::test]
+    async fn drafting_produces_one_draft_per_tone_all_in_draft_state() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (status, body) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"tones":["concise","formal"],"sender":"Alex"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let drafts = body.as_array().expect("array");
+        assert_eq!(drafts.len(), 2, "{body}");
+
+        for draft in drafts {
+            // Nothing may be created in any state but Draft.
+            assert_eq!(draft["status"], "draft", "{draft}");
+            assert!(!draft["subject"].as_str().unwrap().is_empty());
+            assert!(!draft["body"].as_str().unwrap().is_empty());
+        }
+        assert_eq!(drafts[0]["variant"], "concise");
+        assert_eq!(drafts[1]["variant"], "formal");
+    }
+
+    #[tokio::test]
+    async fn drafting_defaults_to_a_single_concise_draft() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (status, body) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        assert_eq!(body.as_array().unwrap().len(), 1);
+        assert_eq!(body[0]["variant"], "concise");
+    }
+
+    /// An unknown tone must be rejected, not silently replaced. A user who asked for "formal"
+    /// and received a chatty draft has no way to notice before sending it.
+    #[tokio::test]
+    async fn an_unknown_tone_is_rejected_rather_than_defaulted() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (status, body) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"tones":["shouty"]}"#))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let message = body["error"].as_str().unwrap_or_default();
+        assert!(message.contains("shouty"), "{message}");
+        assert!(
+            message.contains("concise"),
+            "should list valid tones: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn drafts_are_listed_for_their_meeting() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        app.clone()
+            .oneshot(
+                Request::post(format!("/v1/meetings/{id}/emails"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let (status, body) = json(
+            &app,
+            Request::get(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_draft_can_be_approved_and_discarded() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (_, created) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let draft_id = created[0]["id"].as_str().unwrap().to_string();
+
+        let (status, approved) = json(
+            &app,
+            Request::post(format!("/v1/emails/{draft_id}/approve"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{approved}");
+        assert_eq!(approved["status"], "approved");
+
+        let (status, discarded) = json(
+            &app,
+            Request::delete(format!("/v1/emails/{draft_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{discarded}");
+        assert_eq!(discarded["status"], "discarded");
+    }
+
+    /// **The load-bearing test for this feature.**
+    ///
+    /// No route may send an email or mark one sent. A wrong auto-send reaches other people and
+    /// cannot be recalled, so the absence of the capability is enforced here rather than left
+    /// to reviewer memory. If a send route is ever added deliberately, this test is the place
+    /// that has to be argued with first.
+    #[tokio::test]
+    async fn no_route_can_send_an_email_or_mark_one_sent() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (_, created) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let draft_id = created[0]["id"].as_str().unwrap().to_string();
+
+        for path in [
+            format!("/v1/emails/{draft_id}/send"),
+            format!("/v1/emails/{draft_id}/sent"),
+            format!("/v1/emails/{draft_id}/deliver"),
+            format!("/v1/meetings/{id}/emails/send"),
+            "/v1/emails/send".to_string(),
+        ] {
+            for method in ["POST", "PUT", "PATCH"] {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(&path)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert!(
+                    matches!(
+                        response.status(),
+                        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+                    ),
+                    "{method} {path} answered {} — a send path must not exist",
+                    response.status()
+                );
+            }
+        }
+
+        // And the draft is still a draft.
+        let (_, listed) = json(
+            &app,
+            Request::get(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(listed[0]["status"], "draft");
+    }
+
+    /// Recipients come from the caller. Addresses inferred from a transcript are exactly the
+    /// ones that turn out to be wrong.
+    #[tokio::test]
+    async fn recipients_are_only_ever_what_the_caller_supplied() {
+        let app = app();
+        let id = meeting_with_transcript(&app).await;
+
+        let (_, empty) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(empty[0]["recipients"].as_array().unwrap().len(), 0);
+
+        let (_, given) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"recipients":["sam@example.com"]}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(given[0]["recipients"][0], "sam@example.com");
+    }
+
+    #[tokio::test]
+    async fn drafting_a_meeting_with_no_content_is_refused() {
+        let app = app();
+        let (_, meeting) = json(
+            &app,
+            Request::post("/v1/meetings")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"title":"Empty","source":"combined"}"#))
+                .unwrap(),
+        )
+        .await;
+        let id = meeting["id"].as_str().unwrap();
+
+        let (status, _) = json(
+            &app,
+            Request::post(format!("/v1/meetings/{id}/emails"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }

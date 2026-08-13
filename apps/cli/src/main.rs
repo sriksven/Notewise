@@ -57,6 +57,23 @@ enum Command {
     /// Summarize a meeting and store the result.
     Summarize { id: String },
 
+    /// Draft a follow-up email from a meeting.
+    ///
+    /// Drafts only. Nothing here sends mail, and there is no flag that makes it.
+    Email {
+        /// Meeting id.
+        id: String,
+        /// Tones to draft: concise, detailed, formal, friendly. Repeatable.
+        #[arg(long = "tone", default_values_t = [String::from("concise")])]
+        tones: Vec<String>,
+        /// Name to sign off as. Omitted means no sign-off rather than an invented one.
+        #[arg(long)]
+        sender: Option<String>,
+        /// Who the mail is for, e.g. "the platform team".
+        #[arg(long)]
+        audience: Option<String>,
+    },
+
     /// Record a meeting from the microphone.
     #[cfg(all(feature = "record", feature = "whisper"))]
     Record {
@@ -153,6 +170,12 @@ async fn main() -> Result<()> {
         Command::Meetings { limit } => meetings(&config, limit),
         Command::Transcript { id } => transcript(&config, &id),
         Command::Summarize { id } => summarize(&config, &id).await,
+        Command::Email {
+            id,
+            tones,
+            sender,
+            audience,
+        } => email(&config, &id, &tones, sender, audience).await,
         #[cfg(all(feature = "record", feature = "whisper"))]
         Command::Record {
             title,
@@ -360,6 +383,96 @@ fn export(
         }
         None => print!("{markdown}"),
     }
+    Ok(())
+}
+
+/// Draft follow-up emails for a meeting.
+///
+/// Writes them to the database in `Draft` state and prints them. There is no `--send`, and
+/// adding one would need a mail transport this binary deliberately does not link.
+async fn email(
+    config: &Config,
+    id: &str,
+    tones: &[String],
+    sender: Option<String>,
+    audience: Option<String>,
+) -> Result<()> {
+    use notewise_ai_router::{generate_email_variants, EmailContext, EmailTone};
+    use notewise_storage::{EmailDraftRepository, NewEmailDraft, SummaryRepository};
+
+    let meeting_id = parse_id(id)?;
+    let db = open(config)?;
+    let router = config.ai_router()?;
+
+    let tones: Vec<EmailTone> = tones
+        .iter()
+        .map(|name| {
+            EmailTone::parse(name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown tone '{name}' — expected one of: concise, detailed, formal, friendly"
+                )
+            })
+        })
+        .collect::<Result<_>>()?;
+
+    let meetings = MeetingRepository::new(&db);
+    let meeting = meetings.get(meeting_id)?;
+    let summaries = SummaryRepository::new(&db);
+
+    // A summary drafts better than a raw transcript and costs far fewer tokens.
+    let (source, decisions, action_items) = match summaries.latest_for_meeting(meeting_id)? {
+        Some(summary) => (
+            summary.text,
+            summaries
+                .decisions(summary.id)?
+                .into_iter()
+                .map(|d| d.text)
+                .collect(),
+            summaries
+                .action_items(summary.id)?
+                .into_iter()
+                .map(|a| (a.text, a.owner))
+                .collect(),
+        ),
+        None => (
+            meetings.transcript_text(meeting_id)?,
+            Vec::new(),
+            Vec::new(),
+        ),
+    };
+
+    let mut context = EmailContext::new(meeting.title, source)
+        .with_decisions(decisions)
+        .with_action_items(action_items);
+    if let Some(sender) = sender {
+        context = context.with_sender(sender);
+    }
+    if let Some(audience) = audience {
+        context = context.with_audience(audience);
+    }
+
+    let drafts = generate_email_variants(&router, &context, &tones).await?;
+    let repo = EmailDraftRepository::new(&db);
+
+    for draft in drafts {
+        let stored = repo.create(NewEmailDraft {
+            meeting_id: Some(meeting_id),
+            subject: draft.subject.clone(),
+            body: draft.body.clone(),
+            // Never inferred from the transcript; an address the user did not type is
+            // exactly the one that turns out to be wrong.
+            recipients: Vec::new(),
+            variant: Some(draft.tone.as_str().to_string()),
+        })?;
+
+        println!("--- {} ({}) ---", draft.tone, stored.id);
+        println!("Subject: {}", draft.subject);
+        println!();
+        println!("{}", draft.body);
+        println!();
+    }
+
+    eprintln!("saved as drafts. Nothing was sent.");
     Ok(())
 }
 
