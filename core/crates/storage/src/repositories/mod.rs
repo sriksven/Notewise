@@ -1,0 +1,37 @@
+//! Repositories — the only way to reach stored data from outside this crate.
+//!
+//! Each repository borrows the [`Database`](crate::Database) rather than owning it, so a
+//! caller can hold several at once without cloning connections.
+
+mod comms;
+mod edge;
+mod meeting;
+mod note;
+mod search;
+mod summary;
+mod ticket;
+mod workspace;
+
+pub use comms::{EmailDraftRepository, NewEmailDraft, NewNotification, NotificationRepository};
+pub use edge::{EdgeRecord, EdgeRepository, NewEdge};
+pub use meeting::{MeetingRepository, NewMeeting, NewTranscriptSegment};
+pub use note::{NewNote, NoteRepository};
+pub use search::{SearchHit, SearchRepository};
+pub use summary::{NewActionItem, NewDecision, NewSummary, SummaryRepository};
+pub use ticket::{NewTicket, TicketRepository};
+pub use workspace::{NewProject, NewWorkspace, ProjectRepository, WorkspaceRepository};
+
+use crate::error::{Result, StorageError};
+
+/// Decode an enum column, turning an unrecognized value into a `Corrupt` error rather than
+/// a panic. Stored enums can go stale when a database is written by a newer build.
+pub(crate) fn decode_enum<T>(
+    column: &'static str,
+    raw: &str,
+    parse: impl Fn(&str) -> Option<T>,
+) -> Result<T> {
+    parse(raw).ok_or_else(|| StorageError::Corrupt {
+        column,
+        reason: format!("unrecognized value '{raw}'"),
+    })
+}

@@ -1,0 +1,11 @@
+[package]
+name = "notewise-api-server"
+description = "Localhost-bound REST API over the Notewise engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]

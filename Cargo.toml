@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "core/crates/audio-capture",
+    "core/crates/transcription",
+    "core/crates/diarization",
+    "core/crates/ai-router",
+    "core/crates/storage",
+    "core/crates/graph",
+    "core/crates/sync-client",
+    "core/crates/api-server",
+    "core/crates/mcp-server",
+    "core/crates/ffi",
+    "apps/cli",
+]
+
+# apps/desktop/src-tauri is intentionally NOT a workspace member. Tauri pulls a large
+# dependency tree and a webview toolchain; keeping it out means `cargo test --workspace`
+# stays fast and CI for the engine does not depend on GUI build tooling.
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/notewise/notewise"
+authors = ["Notewise contributors"]
+
+[workspace.dependencies]
+# Internal crates. Path-based within the workspace; versioned so core/ can be published
+# independently of the apps that consume it (see ARCHITECTURE.md §versioning).
+notewise-storage = { path = "core/crates/storage", version = "0.1.0" }
+notewise-graph = { path = "core/crates/graph", version = "0.1.0" }
+notewise-ai-router = { path = "core/crates/ai-router", version = "0.1.0" }
+notewise-audio-capture = { path = "core/crates/audio-capture", version = "0.1.0" }
+notewise-transcription = { path = "core/crates/transcription", version = "0.1.0" }
+notewise-diarization = { path = "core/crates/diarization", version = "0.1.0" }
+notewise-sync-client = { path = "core/crates/sync-client", version = "0.1.0" }
+notewise-api-server = { path = "core/crates/api-server", version = "0.1.0" }
+notewise-mcp-server = { path = "core/crates/mcp-server", version = "0.1.0" }
+
+# Shared third-party versions, pinned once so crates cannot drift apart.
+thiserror = "2"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "time", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+axum = "0.7"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

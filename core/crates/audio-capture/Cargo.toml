@@ -1,0 +1,11 @@
+[package]
+name = "notewise-audio-capture"
+description = "Cross-platform system and microphone audio capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
