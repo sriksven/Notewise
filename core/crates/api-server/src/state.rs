@@ -4,6 +4,7 @@ use notewise_ai_router::Router as AiRouter;
 use notewise_storage::Database;
 use tokio::sync::Mutex;
 
+use crate::downloads::DownloadManager;
 use crate::recording::RecordingManager;
 
 /// Shared application state.
@@ -24,6 +25,7 @@ pub struct AppState {
     model_dir: PathBuf,
     ai: AiRouter,
     recording: RecordingManager,
+    downloads: DownloadManager,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
             model_dir: default_model_dir(),
             ai,
             recording: RecordingManager::new(),
+            downloads: DownloadManager::new(),
         }
     }
 
@@ -59,6 +62,19 @@ impl AppState {
     /// The at-most-one live recording.
     pub fn recording(&self) -> &RecordingManager {
         &self.recording
+    }
+
+    /// Model downloads, running and finished.
+    pub fn downloads(&self) -> &DownloadManager {
+        &self.downloads
+    }
+
+    /// The model store this engine reads and writes.
+    ///
+    /// Built from [`Self::model_dir`] rather than re-resolving the environment, so a download
+    /// started through the API lands where recording will look for it.
+    pub fn model_store(&self) -> notewise_transcription::ModelStore {
+        notewise_transcription::ModelStore::new(&self.model_dir)
     }
 
     /// Lock the database.

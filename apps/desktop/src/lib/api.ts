@@ -24,6 +24,15 @@ export interface Health {
   recording_meeting_id: string | null;
 }
 
+export interface DownloadState {
+  model: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+  percent: number;
+  status: "downloading" | "done" | "failed";
+  error: string | null;
+}
+
 export interface RecordingStatus {
   recording: boolean;
   meeting_id: string | null;
@@ -228,11 +237,63 @@ export const api = {
   models: () =>
     request<{ models: ModelInfo[]; directory: string }>("/v1/models"),
 
+  /**
+   * Start a download. Returns as soon as it has started, not when it finishes.
+   *
+   * `large-v3` is 3.1 GB — a request held open that long is indistinguishable from a hang, and
+   * a retry would start a second copy. Follow it with {@link watchDownload}.
+   */
   downloadModel: (name: string) =>
-    request<{ name: string; installed: boolean; already_present: boolean }>(
+    request<DownloadState>(`/v1/models/${encodeURIComponent(name)}/download`, {
+      method: "POST",
+    }),
+
+  downloads: () => request<DownloadState[]>("/v1/downloads"),
+
+  /**
+   * Stream a download's progress.
+   *
+   * Returns a cancel function. The stream is closed automatically on the terminal event, so a
+   * caller that only wants progress does not have to remember to tear it down — but a caller
+   * that navigates away mid-download does.
+   */
+  watchDownload: (
+    name: string,
+    onProgress: (state: DownloadState) => void,
+    onDone: (state: DownloadState) => void,
+    onError: (message: string) => void,
+  ): (() => void) => {
+    const source = new EventSource(
       `/v1/models/${encodeURIComponent(name)}/download`,
-      { method: "POST" },
-    ),
+    );
+
+    const finish = (state: DownloadState) => {
+      source.close();
+      onDone(state);
+    };
+
+    source.addEventListener("progress", (event) =>
+      onProgress(JSON.parse((event as MessageEvent).data) as DownloadState),
+    );
+    source.addEventListener("done", (event) =>
+      finish(JSON.parse((event as MessageEvent).data) as DownloadState),
+    );
+    source.addEventListener("failed", (event) => {
+      const state = JSON.parse((event as MessageEvent).data) as DownloadState;
+      source.close();
+      onError(state.error ?? "The download failed.");
+    });
+
+    // EventSource retries by itself, so this fires on transient drops too. Only treat it as
+    // fatal once the browser has actually given up.
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED) {
+        onError("Lost contact with the engine during the download.");
+      }
+    };
+
+    return () => source.close();
+  },
 
   recordingStatus: () => request<RecordingStatus>("/v1/recording"),
 

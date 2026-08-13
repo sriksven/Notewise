@@ -29,11 +29,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod downloads;
 mod error;
 pub mod recording;
 mod routes;
 mod state;
 
+pub use downloads::{DownloadManager, DownloadState, DownloadStatus};
 pub use error::{ApiError, ApiResult};
 pub use recording::{RecordingError, RecordingManager};
 pub use state::AppState;

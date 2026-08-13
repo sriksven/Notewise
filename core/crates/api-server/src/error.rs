@@ -24,6 +24,10 @@ pub enum ApiError {
     #[error("{0}")]
     BadRequest(String),
 
+    /// Nothing here by that name. Distinct from a storage `NotFound`, which is about a row.
+    #[error("{0}")]
+    NotFound(String),
+
     /// The request was well-formed but conflicts with current state — starting a recording
     /// while one is running, or stopping when none is.
     #[error("{0}")]
@@ -85,6 +89,7 @@ impl ApiError {
             ApiError::Ai(_) => (StatusCode::BAD_GATEWAY, "ai_backend_error"),
 
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             ApiError::NotImplemented(_) => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),

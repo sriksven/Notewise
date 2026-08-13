@@ -22,6 +22,10 @@ use notewise_storage::{
 };
 use notewise_transcription::{ModelRegistry, ModelStore};
 
+use axum::response::sse::Event;
+use futures_util::StreamExt;
+
+use crate::downloads::{DownloadState, DownloadStatus};
 use crate::error::{ApiError, ApiResult};
 use crate::recording::{self, RecordingError, StartRequest};
 use crate::state::AppState;
@@ -47,7 +51,11 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/meetings/:id/chat", post(chat_about_meeting))
         .route("/v1/backends", get(list_backends))
         .route("/v1/models", get(list_models))
-        .route("/v1/models/:name/download", post(download_model))
+        .route(
+            "/v1/models/:name/download",
+            post(download_model).get(download_progress),
+        )
+        .route("/v1/downloads", get(list_downloads))
         .route("/v1/search", get(search))
         // Drafting only. There is deliberately no route that sends one — see `draft_emails`.
         .route(
@@ -845,29 +853,97 @@ async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::
 /// Runs to completion before responding. That is acceptable for a loopback call a user
 /// explicitly started, but it means no progress reporting — a streaming variant is the
 /// obvious next step for the larger models, which are gigabytes.
-async fn download_model(Path(name): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+/// Start downloading a model.
+///
+/// Returns immediately with the download's initial state rather than holding the connection
+/// open. `large-v3` is 3.1 GB: a blocking request would be killed by a sleeping laptop or an
+/// impatient proxy, and a retry would start a second transfer of the same file. Progress comes
+/// from `GET /v1/models/:name/download`.
+async fn download_model(
+    State(state): State<Shared>,
+    Path(name): Path<String>,
+) -> ApiResult<(axum::http::StatusCode, Json<DownloadState>)> {
     let model = ModelRegistry::get(&name).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    let store = model_store();
+    let store = state.model_store();
 
     if store.is_available(&model) {
-        return Ok(Json(serde_json::json!({
-            "name": model.name,
-            "installed": true,
-            "already_present": true,
-        })));
+        // 200 rather than 202: nothing was accepted for later, it is already here.
+        return Ok((
+            axum::http::StatusCode::OK,
+            Json(DownloadState::already_installed(&model)),
+        ));
     }
 
-    let path = store
-        .download(&model)
-        .await
-        .map_err(|e| ApiError::BadRequest(format!("downloading {}: {e}", model.name)))?;
+    let started = state.downloads().start(model, store).await;
+    Ok((axum::http::StatusCode::ACCEPTED, Json(started)))
+}
 
-    Ok(Json(serde_json::json!({
-        "name": model.name,
-        "installed": true,
-        "already_present": false,
-        "path": path.display().to_string(),
-    })))
+/// Stream a download's progress as Server-Sent Events.
+///
+/// SSE rather than WebSockets: this is one-way, it is a plain `GET` that survives proxies, and
+/// the browser reconnects on its own. A polling client would either miss the end of a fast
+/// download or hammer the engine through a slow one.
+///
+/// The stream closes on the terminal event, so a client knows the download is over without
+/// having to time anything out.
+async fn download_progress(
+    State(state): State<Shared>,
+    Path(name): Path<String>,
+) -> ApiResult<
+    axum::response::Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>>,
+> {
+    let model = ModelRegistry::get(&name).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    let receiver = match state.downloads().subscribe(&model.name).await {
+        Some(receiver) => receiver,
+        None if state.model_store().is_available(&model) => {
+            // Already installed and never downloaded by this process. Emit one terminal event
+            // rather than 404 — the client's question is "is it here yet", and the answer is yes.
+            let (sender, receiver) =
+                tokio::sync::watch::channel(DownloadState::already_installed(&model));
+            // Keep the sender alive for the life of the receiver.
+            std::mem::forget(sender);
+            receiver
+        }
+        None => {
+            return Err(ApiError::NotFound(format!(
+                "no download in progress for '{}'",
+                model.name
+            )))
+        }
+    };
+
+    let stream = tokio_stream::wrappers::WatchStream::new(receiver)
+        // `take_while` keeps the terminal event and then ends: inclusive, because a client that
+        // never saw `done` would sit on a stalled progress bar forever.
+        .scan(false, |ended, state| {
+            if *ended {
+                return std::future::ready(None);
+            }
+            *ended = state.status.is_terminal();
+            std::future::ready(Some(state))
+        })
+        .map(|state| {
+            Ok(Event::default()
+                .event(match state.status {
+                    DownloadStatus::Downloading => "progress",
+                    DownloadStatus::Done => "done",
+                    DownloadStatus::Failed => "failed",
+                })
+                .json_data(state)
+                .unwrap_or_else(|_| Event::default().data("{}")))
+        });
+
+    Ok(axum::response::Sse::new(stream).keep_alive(
+        // A 3 GB download over slow wifi can go a long time between megabyte reports, and an
+        // idle proxy will close a connection it thinks is dead.
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
+    ))
+}
+
+/// Every download this engine has started, running or finished.
+async fn list_downloads(State(state): State<Shared>) -> Json<Vec<DownloadState>> {
+    Json(state.downloads().all().await)
 }
 
 /// Where models live.
@@ -2088,5 +2164,131 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // ------------------------------------------------------------------ downloads
+
+    #[tokio::test]
+    async fn no_downloads_are_reported_before_any_start() {
+        let (status, body) = json(
+            &app(),
+            Request::get("/v1/downloads").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_model_cannot_be_downloaded_or_watched() {
+        let app = app();
+
+        let (status, body) = json(
+            &app,
+            Request::post("/v1/models/not-a-model/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+        let (status, _) = json(
+            &app,
+            Request::get("/v1/models/not-a-model/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// Watching a download nobody started is a 404, not an empty stream a client would sit on
+    /// forever waiting for a `done` that is never coming.
+    #[tokio::test]
+    async fn watching_a_download_that_was_never_started_is_a_404() {
+        // `large-v3` is real but certainly not installed in a test environment.
+        let (status, body) = json(
+            &app(),
+            Request::get("/v1/models/large-v3/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "not_found");
+    }
+
+    /// The SSE route must be a real event stream, not JSON. A client using `EventSource`
+    /// fails silently on the wrong content type.
+    #[tokio::test]
+    async fn an_installed_model_streams_a_terminal_event_rather_than_erroring() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = notewise_transcription::ModelRegistry::get("tiny.en").expect("tiny.en");
+        std::fs::write(
+            dir.path().join(format!("ggml-{}.bin", model.name)),
+            vec![0u8; model.bytes as usize],
+        )
+        .expect("fake model");
+
+        let state = AppState::new(
+            Database::open_in_memory().expect("db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("router"),
+        )
+        .with_model_dir(dir.path());
+
+        let response = router(Arc::new(state))
+            .oneshot(
+                Request::get("/v1/models/tiny.en/download")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream"),
+            "EventSource fails silently on anything else"
+        );
+    }
+
+    /// Downloading something already on disk is a 200, not a 202: nothing was accepted for
+    /// later, and a client waiting for a stream would wait forever.
+    #[tokio::test]
+    async fn downloading_an_installed_model_reports_done_immediately() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = notewise_transcription::ModelRegistry::get("tiny.en").expect("tiny.en");
+        std::fs::write(
+            dir.path().join(format!("ggml-{}.bin", model.name)),
+            vec![0u8; model.bytes as usize],
+        )
+        .expect("fake model");
+
+        let state = AppState::new(
+            Database::open_in_memory().expect("db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("router"),
+        )
+        .with_model_dir(dir.path());
+
+        let response = router(Arc::new(state))
+            .oneshot(
+                Request::post("/v1/models/tiny.en/download")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["status"], "done");
+        assert_eq!(body["percent"], 100);
     }
 }

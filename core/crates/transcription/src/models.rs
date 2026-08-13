@@ -118,6 +118,38 @@ impl ModelRegistry {
     }
 }
 
+/// How far a download has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DownloadProgress {
+    pub downloaded_bytes: u64,
+    /// Total size. Taken from `Content-Length` when the server sends one, otherwise the
+    /// registry's recorded size — a progress bar with no end is worse than a slightly wrong one.
+    pub total_bytes: u64,
+    pub done: bool,
+}
+
+impl DownloadProgress {
+    fn complete(total: u64) -> Self {
+        Self {
+            downloaded_bytes: total,
+            total_bytes: total,
+            done: true,
+        }
+    }
+
+    /// Fraction complete, in `0.0..=1.0`.
+    pub fn fraction(&self) -> f32 {
+        if self.total_bytes == 0 {
+            return 0.0;
+        }
+        (self.downloaded_bytes as f32 / self.total_bytes as f32).clamp(0.0, 1.0)
+    }
+
+    pub fn percent(&self) -> u8 {
+        (self.fraction() * 100.0).round() as u8
+    }
+}
+
 /// Models on disk.
 #[derive(Debug, Clone)]
 pub struct ModelStore {
@@ -189,15 +221,67 @@ impl ModelStore {
     /// Writes to a temporary file and renames on success, so an interrupted download never
     /// leaves a partial file that looks installed.
     pub async fn download(&self, model: &ModelInfo) -> Result<PathBuf> {
+        self.download_with_progress(model, |_| {}).await
+    }
+
+    /// Download a model, reporting progress as it goes.
+    ///
+    /// # Streamed, not buffered
+    ///
+    /// Chunks are written to disk as they arrive rather than collected into a `Vec` first.
+    /// `large-v3` is 3.1 GB; buffering it needs 3.1 GB of resident memory on a machine that
+    /// may only have 8, and the user has no idea why the app died.
+    ///
+    /// # Resumable
+    ///
+    /// A partial file is resumed with a `Range` request. A multi-gigabyte download over hotel
+    /// wifi will be interrupted, and restarting from zero every time means it may never finish.
+    /// If the server ignores the range and replies `200`, the partial file is discarded and the
+    /// download restarts — appending to it would silently corrupt the model, and a corrupt
+    /// model is far worse than a slow one.
+    ///
+    /// # Progress
+    ///
+    /// `on_progress` is called as bytes arrive, and once more on completion. It must be cheap:
+    /// it runs on the download path, so blocking in it throttles the transfer.
+    pub async fn download_with_progress(
+        &self,
+        model: &ModelInfo,
+        mut on_progress: impl FnMut(DownloadProgress),
+    ) -> Result<PathBuf> {
+        use futures_util::StreamExt;
+        use std::io::Write;
+
         let final_path = self.path_for(model);
         if self.is_available(model) {
+            on_progress(DownloadProgress::complete(model.bytes));
             return Ok(final_path);
         }
 
         std::fs::create_dir_all(&self.dir)?;
         let temp_path = final_path.with_extension("partial");
 
-        let response = reqwest::get(&model.url)
+        // Resume only from a partial that is plausibly this model. Anything at or past the
+        // expected size is not a resumable prefix — it is junk from an interrupted write or a
+        // different model, and continuing from it would produce a file that fails `verify`
+        // after another multi-gigabyte transfer.
+        let resume_from = match std::fs::metadata(&temp_path) {
+            Ok(meta) if meta.len() > 0 && meta.len() < model.bytes => meta.len(),
+            Ok(_) => {
+                let _ = std::fs::remove_file(&temp_path);
+                0
+            }
+            Err(_) => 0,
+        };
+
+        let mut request = reqwest::Client::new().get(&model.url);
+        if resume_from > 0 {
+            tracing::info!(model = %model.name, resume_from, "resuming download");
+            request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
+        }
+
+        let response = request
+            .send()
             .await
             .map_err(|e| TranscriptionError::Download(e.to_string()))?;
 
@@ -209,16 +293,71 @@ impl ModelStore {
             )));
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| TranscriptionError::Download(e.to_string()))?;
+        // 206 means the range was honoured. A 200 to a range request means it was not, so the
+        // body is the whole file and anything already on disk must go.
+        let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        let mut downloaded = if resumed { resume_from } else { 0 };
 
-        std::fs::write(&temp_path, &bytes)?;
+        if resume_from > 0 && !resumed {
+            tracing::warn!(
+                model = %model.name,
+                "the server ignored the range request; restarting from zero"
+            );
+        }
+
+        let total = response
+            .content_length()
+            .map(|len| len + downloaded)
+            .unwrap_or(model.bytes);
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(resumed)
+            .truncate(!resumed)
+            .open(&temp_path)?;
+
+        on_progress(DownloadProgress {
+            downloaded_bytes: downloaded,
+            total_bytes: total,
+            done: false,
+        });
+
+        let mut stream = response.bytes_stream();
+        // Report on a byte interval rather than per chunk: chunks are ~8 KB, and a callback
+        // that pushes an SSE frame per chunk would send hundreds of thousands of them.
+        const REPORT_EVERY: u64 = 1024 * 1024;
+        let mut next_report = downloaded + REPORT_EVERY;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| TranscriptionError::Download(e.to_string()))?;
+            file.write_all(&chunk)?;
+            downloaded += chunk.len() as u64;
+
+            if downloaded >= next_report {
+                next_report = downloaded + REPORT_EVERY;
+                on_progress(DownloadProgress {
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                    done: false,
+                });
+            }
+        }
+
+        file.flush()?;
+        drop(file);
+
         std::fs::rename(&temp_path, &final_path)?;
 
-        // Verify after the rename so a corrupt artifact is reported rather than trusted.
-        self.verify(model)?;
+        // Verified after the rename so a corrupt artifact is reported rather than trusted.
+        // A failed verify removes the file: leaving it would make `is_available` true and
+        // every later run would load a broken model instead of re-downloading.
+        if let Err(e) = self.verify(model) {
+            let _ = std::fs::remove_file(&final_path);
+            return Err(e);
+        }
+
+        on_progress(DownloadProgress::complete(total));
         Ok(final_path)
     }
 }
@@ -392,5 +531,136 @@ mod tests {
         let path = store.download(&model).await.expect("download");
         assert!(path.exists());
         assert!(store.verify(&model).is_ok());
+    }
+
+    // ------------------------------------------------------------------ download progress
+
+    #[test]
+    fn progress_fraction_and_percent_are_bounded() {
+        let half = DownloadProgress {
+            downloaded_bytes: 50,
+            total_bytes: 100,
+            done: false,
+        };
+        assert!((half.fraction() - 0.5).abs() < f32::EPSILON);
+        assert_eq!(half.percent(), 50);
+
+        // Content-Length can under-report; the bar must not exceed full.
+        let over = DownloadProgress {
+            downloaded_bytes: 150,
+            total_bytes: 100,
+            done: false,
+        };
+        assert_eq!(over.fraction(), 1.0);
+        assert_eq!(over.percent(), 100);
+    }
+
+    /// An unknown total must not divide by zero or report NaN into a progress bar.
+    #[test]
+    fn a_zero_total_reports_no_progress_rather_than_nan() {
+        let unknown = DownloadProgress {
+            downloaded_bytes: 10,
+            total_bytes: 0,
+            done: false,
+        };
+        assert_eq!(unknown.fraction(), 0.0);
+        assert_eq!(unknown.percent(), 0);
+    }
+
+    #[test]
+    fn a_completed_download_reports_full() {
+        let done = DownloadProgress::complete(1_000);
+        assert!(done.done);
+        assert_eq!(done.percent(), 100);
+        assert_eq!(done.downloaded_bytes, done.total_bytes);
+    }
+
+    /// An already-installed model must still report completion, or a UI that waits for a
+    /// terminal event would spin forever on a no-op download.
+    #[tokio::test]
+    async fn downloading_an_installed_model_reports_completion_immediately() {
+        let dir = temp_dir("already-installed");
+        let store = ModelStore::new(&dir);
+        let model = ModelRegistry::get("tiny.en").expect("tiny.en");
+
+        std::fs::write(store.path_for(&model), vec![0u8; model.bytes as usize])
+            .expect("fake model");
+
+        let mut reports = Vec::new();
+        store
+            .download_with_progress(&model, |p| reports.push(p))
+            .await
+            .expect("download");
+
+        assert_eq!(reports.len(), 1);
+        assert!(reports[0].done);
+    }
+
+    /// A `.partial` at or past the expected size is not a resumable prefix — it is junk from
+    /// an interrupted write or a different model. Resuming from it would append onto garbage
+    /// and produce a file that fails `verify` after another multi-gigabyte transfer.
+    #[tokio::test]
+    async fn an_oversized_partial_file_is_discarded_rather_than_resumed() {
+        let dir = temp_dir("bad-partial");
+        let store = ModelStore::new(&dir);
+        let model = ModelRegistry::get("tiny.en").expect("tiny.en");
+
+        let partial = store.path_for(&model).with_extension("partial");
+        std::fs::write(&partial, vec![0u8; model.bytes as usize + 1]).expect("partial");
+
+        // No network here: the call fails at the request, but the junk must already be gone.
+        let _ = store
+            .download_with_progress(&model, |_| {})
+            .await
+            .map_err(|_| ());
+
+        assert!(
+            !partial.exists() || std::fs::metadata(&partial).unwrap().len() < model.bytes,
+            "an unusable partial was kept"
+        );
+    }
+
+    /// The real thing, over the network. Ignored because it moves ~78 MB.
+    ///
+    /// Asserts what a unit test cannot: that progress actually arrives during the transfer
+    /// rather than once at the end, which is the entire point of streaming.
+    #[tokio::test]
+    #[ignore = "downloads ~78MB over the network"]
+    async fn a_real_download_streams_progress_and_verifies() {
+        let dir = temp_dir("real-stream");
+        let store = ModelStore::new(&dir);
+        let model = ModelRegistry::get("tiny.en").expect("tiny.en");
+
+        let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&reports);
+
+        let path = store
+            .download_with_progress(&model, move |p| sink.lock().unwrap().push(p))
+            .await
+            .expect("download");
+
+        let reports = reports.lock().unwrap();
+        println!("{} progress reports for {}", reports.len(), model.name);
+
+        assert!(
+            reports.len() > 5,
+            "expected streamed progress, got {} report(s) — this is buffering, not streaming",
+            reports.len()
+        );
+        assert!(reports.last().expect("final").done);
+
+        // Monotonic: a bar that goes backwards is a bug the user can see.
+        for pair in reports.windows(2) {
+            assert!(
+                pair[1].downloaded_bytes >= pair[0].downloaded_bytes,
+                "progress went backwards: {:?} -> {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+
+        assert!(path.exists());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), model.bytes);
+        store.verify(&model).expect("verify");
     }
 }

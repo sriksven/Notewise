@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Cloud, Download, HardDrive, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { api, ApiError, type BackendInfo, type ModelInfo } from "../lib/api";
+import { api, ApiError, type DownloadState, type BackendInfo, type ModelInfo } from "../lib/api";
 
 /** Bytes as GB/MB. Model sizes span 77 MB to 3 GB, so one unit does not serve both. */
 function size(bytes: number): string {
@@ -16,6 +16,7 @@ export function SettingsView() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [directory, setDirectory] = useState("");
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [progress, setProgress] = useState<DownloadState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -37,16 +38,69 @@ export function SettingsView() {
 
   const download = async (name: string) => {
     setDownloading(name);
+    setProgress(null);
     setError(null);
+
     try {
-      await api.downloadModel(name);
-      await load();
+      const started = await api.downloadModel(name);
+
+      // Already on disk: the POST answers `done` and there is nothing to stream.
+      if (started.status === "done") {
+        setDownloading(null);
+        await load();
+        return;
+      }
+
+      setProgress(started);
+      api.watchDownload(
+        name,
+        setProgress,
+        async () => {
+          setDownloading(null);
+          setProgress(null);
+          await load();
+        },
+        (message) => {
+          setError(message);
+          setDownloading(null);
+          setProgress(null);
+        },
+      );
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Download failed.");
-    } finally {
       setDownloading(null);
     }
   };
+
+  // Recover a download already running when this view mounted — the engine owns it, so
+  // switching away from Settings and back must not lose the progress bar.
+  useEffect(() => {
+    let cancel: (() => void) | undefined;
+
+    void api.downloads().then((states) => {
+      const running = states.find((s) => s.status === "downloading");
+      if (!running) return;
+
+      setDownloading(running.model);
+      setProgress(running);
+      cancel = api.watchDownload(
+        running.model,
+        setProgress,
+        async () => {
+          setDownloading(null);
+          setProgress(null);
+          await load();
+        },
+        (message) => {
+          setError(message);
+          setDownloading(null);
+          setProgress(null);
+        },
+      );
+    });
+
+    return () => cancel?.();
+  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-6">
@@ -175,11 +229,35 @@ export function SettingsView() {
           </ul>
 
           {downloading && (
-            // Honest about the limitation rather than faking a progress bar: the endpoint
-            // returns only on completion, so there is no percentage to report.
-            <p className="mt-2 text-[11px] text-neutral-400">
-              Downloading {downloading} — no progress is reported until it finishes.
-            </p>
+            <div className="mt-3">
+              <div className="mb-1 flex items-baseline justify-between text-[11px] text-neutral-500">
+                <span>Downloading {downloading}</span>
+                <span className="font-mono tabular-nums">
+                  {progress
+                    ? `${size(progress.downloaded_bytes)} / ${size(
+                        progress.total_bytes,
+                      )} · ${progress.percent}%`
+                    : "starting…"}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-valuenow={progress?.percent ?? 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Downloading ${downloading}`}
+                className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100"
+              >
+                <div
+                  className="h-full rounded-full bg-record transition-[width] duration-300"
+                  style={{ width: `${progress?.percent ?? 0}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-[11px] text-neutral-400">
+                The engine owns this download — it continues if you switch views, and resumes
+                where it left off if the connection drops.
+              </p>
+            </div>
           )}
         </section>
       </div>

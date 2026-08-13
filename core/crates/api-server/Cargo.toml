@@ -21,6 +21,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
+tokio-stream.workspace = true
 
 # Capture is optional. A default build is a read/query/summarize engine with no platform audio
 # SDKs and no cmake; `--features record,whisper` turns it into one that can record.

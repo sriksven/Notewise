@@ -31,7 +31,7 @@ mod segment;
 pub use engine::{MockEngine, TranscriptionEngine, WhisperEngine};
 // Re-exported so downstream crates can implement the trait without adding the dependency.
 pub use async_trait::async_trait;
-pub use models::{ModelInfo, ModelRegistry, ModelSize, ModelStore};
+pub use models::{DownloadProgress, ModelInfo, ModelRegistry, ModelSize, ModelStore};
 pub use segment::{Segment, Transcript};
 
 use thiserror::Error;
