@@ -1365,6 +1365,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "notewise-audio-capture",
+ "ort",
  "reqwest",
  "serde",
  "serde_json",

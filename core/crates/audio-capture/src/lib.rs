@@ -35,7 +35,7 @@ mod source;
 mod vad;
 
 pub use convert::{resample_linear, rms, to_mono};
-pub use features::{Fbank, FbankConfig, FbankExtractor};
+pub use features::{Fbank, FbankConfig, FbankExtractor, Normalization, WindowType};
 pub use format::{AudioFormat, SampleRate};
 #[cfg(feature = "os-capture")]
 pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};

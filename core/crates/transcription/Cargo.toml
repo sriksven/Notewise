@@ -14,6 +14,7 @@ serde_json.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true
+ort = { workspace = true, optional = true }
 tokio = { workspace = true }
 async-trait.workspace = true
 notewise-audio-capture.workspace = true
@@ -29,6 +30,9 @@ default = []
 # whisper.cpp inference. Off by default: needs a C++ toolchain (cmake + clang) and a
 # 150MB-1.5GB model download, neither of which belongs in a default `cargo build`.
 whisper = ["dep:whisper-rs"]
+# NVIDIA Parakeet via ONNX Runtime.
+parakeet = ["dep:ort"]
+parakeet-download = ["parakeet", "ort/download-binaries", "ort/tls-rustls"]
 # GPU acceleration via Metal on Apple silicon. Measured ~1.5x over CPU on an M4.
 whisper-metal = ["whisper", "whisper-rs/metal"]
 # GPU acceleration via CUDA on NVIDIA hardware.

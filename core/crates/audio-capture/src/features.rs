@@ -24,6 +24,32 @@
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
 
+/// Analysis window shape.
+///
+/// Kaldi and NeMo disagree, and the models trained under each expect their own. The difference
+/// is a few percent per sample — invisible in a plot, and consistently wrong in the features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowType {
+    /// Hann raised to 0.85. Kaldi's default; WeSpeaker and 3D-Speaker expect it.
+    Povey,
+    /// Plain Hann. NeMo's default, so Parakeet and Canary expect it.
+    Hann,
+}
+
+/// What to subtract, and whether to divide, after the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Normalization {
+    /// Leave features as they are.
+    None,
+    /// Subtract each bin's mean over time. Removes the constant channel component.
+    Mean,
+    /// Subtract each bin's mean and divide by its standard deviation.
+    ///
+    /// NeMo's `per_feature` normalisation. Parakeet was trained on features normalised this
+    /// way; feeding it merely mean-subtracted features leaves every bin on the wrong scale.
+    MeanAndStd,
+}
+
 /// How to compute the filterbank.
 ///
 /// The defaults are Kaldi's defaults, which is what the supported models expect. Changing one
@@ -42,6 +68,13 @@ pub struct FbankConfig {
     /// top band — `-400` at 16 kHz gives 7600 Hz.
     pub high_freq_hz: f32,
     pub preemphasis: f32,
+    pub window: WindowType,
+    /// Added inside the log, guarding `log(0)`.
+    ///
+    /// Kaldi floors the energy; NeMo adds a small constant (`2^-24`). Not interchangeable: the
+    /// floor leaves near-silent bins at a fixed value, the offset keeps them continuous.
+    pub log_offset: f32,
+    pub normalization: Normalization,
     /// Multiplied into every sample before analysis.
     ///
     /// Kaldi computes filterbanks over **int16-scaled** audio (-32768..32767), not the
@@ -50,10 +83,6 @@ pub struct FbankConfig {
     /// ≈ 20.8 larger than the same audio produces here. Cepstral mean normalisation cancels a
     /// constant offset, which is why the mismatch hides when it is on and bites when it is off.
     pub input_scale: f32,
-    /// Subtract each bin's mean over time. WeSpeaker and 3D-Speaker apply this; skipping it
-    /// leaves a channel/recording bias in the embedding that clustering then reads as speaker
-    /// identity.
-    pub mean_normalize: bool,
 }
 
 impl Default for FbankConfig {
@@ -66,8 +95,10 @@ impl Default for FbankConfig {
             low_freq_hz: 20.0,
             high_freq_hz: -400.0,
             preemphasis: 0.97,
+            window: WindowType::Povey,
+            log_offset: 0.0,
+            normalization: Normalization::Mean,
             input_scale: 32_768.0,
-            mean_normalize: true,
         }
     }
 }
@@ -146,7 +177,7 @@ impl FbankExtractor {
 
         let mut planner = FftPlanner::new();
         Self {
-            window: povey_window(frame_length),
+            window: analysis_window(config.window, frame_length),
             filters: mel_filters(&config, fft_size),
             planner: planner.plan_fft_forward(fft_size),
             config,
@@ -229,9 +260,14 @@ impl FbankExtractor {
                     .map(|(i, w)| w * power.get(offset + i).copied().unwrap_or(0.0))
                     .sum();
 
-                // Natural log, floored. Kaldi uses ln, not log10; a base mismatch scales every
-                // feature by 2.3 and the model silently underperforms.
-                data.push(energy.max(f32::EPSILON).ln());
+                // Natural log, not log10; a base mismatch scales every feature by 2.3 and the
+                // model silently underperforms rather than failing.
+                let guarded = if self.config.log_offset > 0.0 {
+                    energy + self.config.log_offset
+                } else {
+                    energy.max(f32::EPSILON)
+                };
+                data.push(guarded.ln());
             }
         }
 
@@ -241,18 +277,20 @@ impl FbankExtractor {
             num_bins,
         };
 
-        if self.config.mean_normalize {
-            mean_normalize(&mut fbank);
+        match self.config.normalization {
+            Normalization::None => {}
+            Normalization::Mean => normalize_features(&mut fbank, false),
+            Normalization::MeanAndStd => normalize_features(&mut fbank, true),
         }
         fbank
     }
 }
 
-/// Subtract each bin's mean across time.
+/// Centre each bin across time, optionally scaling it to unit variance.
 ///
 /// Removes the constant part of the channel — microphone response, room, gain — which is
-/// otherwise a strong, speaker-independent signal that clustering happily latches onto.
-fn mean_normalize(fbank: &mut Fbank) {
+/// otherwise a strong, content-independent signal a model will happily latch onto.
+fn normalize_features(fbank: &mut Fbank, scale: bool) {
     if fbank.frames == 0 {
         return;
     }
@@ -272,6 +310,49 @@ fn mean_normalize(fbank: &mut Fbank) {
             *value -= mean;
         }
     }
+
+    if !scale {
+        return;
+    }
+
+    let mut variance = vec![0.0f32; fbank.num_bins];
+    for frame in fbank.data.chunks_exact(fbank.num_bins) {
+        for (v, value) in variance.iter_mut().zip(frame) {
+            *v += value * value;
+        }
+    }
+
+    // Divided by n-1 to match NeMo, which uses the unbiased estimator. On a short utterance
+    // the difference from n is large enough to shift every feature.
+    let divisor = (fbank.frames.saturating_sub(1)).max(1) as f32;
+    for v in variance.iter_mut() {
+        // A floor, because a constant bin has zero variance and would divide to infinity.
+        *v = (*v / divisor).sqrt().max(1e-5);
+    }
+
+    for frame in fbank.data.chunks_exact_mut(fbank.num_bins) {
+        for (value, sd) in frame.iter_mut().zip(&variance) {
+            *value /= sd;
+        }
+    }
+}
+
+fn analysis_window(kind: WindowType, length: usize) -> Vec<f32> {
+    match kind {
+        WindowType::Povey => povey_window(length),
+        WindowType::Hann => hann_window(length),
+    }
+}
+
+/// Plain Hann, NeMo's default.
+fn hann_window(length: usize) -> Vec<f32> {
+    if length <= 1 {
+        return vec![1.0; length];
+    }
+    let denominator = length as f32;
+    (0..length)
+        .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / denominator).cos())
+        .collect()
 }
 
 /// Kaldi's default window: Hann raised to 0.85.
@@ -416,7 +497,7 @@ mod tests {
     #[test]
     fn a_tone_peaks_in_the_mel_bin_containing_its_frequency() {
         let config = FbankConfig {
-            mean_normalize: false,
+            normalization: Normalization::None,
             ..Default::default()
         };
         let extractor = FbankExtractor::new(config);
@@ -451,7 +532,7 @@ mod tests {
     #[test]
     fn the_log_is_natural_not_base_ten() {
         let extractor = FbankExtractor::new(FbankConfig {
-            mean_normalize: false,
+            normalization: Normalization::None,
             ..Default::default()
         });
 
@@ -589,11 +670,11 @@ mod tests {
     fn preemphasis_boosts_high_frequencies_relative_to_low() {
         let plain = FbankExtractor::new(FbankConfig {
             preemphasis: 0.0,
-            mean_normalize: false,
+            normalization: Normalization::None,
             ..Default::default()
         });
         let emphasised = FbankExtractor::new(FbankConfig {
-            mean_normalize: false,
+            normalization: Normalization::None,
             ..Default::default()
         });
 
