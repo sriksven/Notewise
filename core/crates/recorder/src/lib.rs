@@ -30,7 +30,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use notewise_audio_capture::{AudioSource, CaptureError, MixedSource, Mixer};
-use notewise_diarization::{DiarizationError, Diarizer, PauseDiarizer};
+use notewise_diarization::{DiarizationError, Diarizer, SingleSpeakerDiarizer};
 use notewise_graph::{EdgeKind, Graph, GraphError, NodeKind, NodeRef};
 use notewise_storage::{Database, Id, MeetingRepository, NewTranscriptSegment, StorageError};
 use notewise_transcription::{Segment, Transcript, TranscriptionEngine, TranscriptionError};
@@ -99,10 +99,17 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// A pipeline with the default diarizer.
+    ///
+    /// The default is [`SingleSpeakerDiarizer`], not the pause heuristic. Gaps are not evidence
+    /// about who was speaking, and treating them as such labelled one person's pause as a
+    /// second participant in a real recording. Callers wanting the heuristic — an imported
+    /// transcript of a call where people did alternate cleanly, say — opt in with
+    /// [`Pipeline::with_diarizer`].
     pub fn new(engine: Box<dyn TranscriptionEngine>) -> Self {
         Self {
             engine,
-            diarizer: Box::new(PauseDiarizer::default()),
+            diarizer: Box::new(SingleSpeakerDiarizer),
             config: PipelineConfig::default(),
         }
     }
@@ -625,6 +632,71 @@ mod tests {
             "diarization did not run"
         );
         assert!(stored.iter().all(|s| s.end_ms > s.start_ms));
+    }
+
+    /// The regression test for the phantom speaker.
+    ///
+    /// These are the exact rows a real 15-second recording left in the database: one person
+    /// said "hello how are you", stopped, and the transcript came back attributed to two
+    /// people. The eight-second hole is what the old fixed-window engine left behind, and the
+    /// pause heuristic read it as a change of speaker.
+    ///
+    /// Fixing the windowing removes the hole, but this asserts the other half: the pipeline's
+    /// default must not invent a second person out of silence even when a hole is there. A gap
+    /// is not evidence about who was talking.
+    #[tokio::test]
+    async fn a_gap_in_the_transcript_is_not_a_second_speaker() {
+        /// Emits a fixed script of segments, so the shape of a real recording can be replayed
+        /// without a model.
+        #[derive(Debug)]
+        struct ScriptedEngine(Vec<Segment>);
+
+        #[notewise_transcription::async_trait]
+        impl TranscriptionEngine for ScriptedEngine {
+            fn name(&self) -> &str {
+                "scripted"
+            }
+            async fn feed(
+                &mut self,
+                _frame: &notewise_audio_capture::AudioFrame,
+            ) -> notewise_transcription::Result<Vec<Segment>> {
+                Ok(Vec::new())
+            }
+            async fn finish(&mut self) -> notewise_transcription::Result<Vec<Segment>> {
+                Ok(std::mem::take(&mut self.0))
+            }
+        }
+
+        let db = db();
+        let id = meeting(&db);
+
+        let engine = ScriptedEngine(vec![
+            Segment::new("hello how are you", 0, 2_000),
+            Segment::new("Okay.", 10_000, 11_000),
+            Segment::new("Okay.", 11_000, 12_000),
+            Segment::new("Okay.", 12_000, 13_000),
+            Segment::new("Okay.", 13_000, 14_000),
+        ]);
+
+        let stats = Pipeline::new(Box::new(engine))
+            .run(&db, id, &mut tone(300), never_stop())
+            .await
+            .expect("pipeline");
+
+        assert_eq!(
+            stats.speakers_detected, 1,
+            "one person in the room became {} speakers",
+            stats.speakers_detected
+        );
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let speakers: std::collections::HashSet<_> =
+            stored.iter().filter_map(|s| s.speaker.clone()).collect();
+        assert_eq!(speakers.len(), 1, "labelled {speakers:?}");
+        assert!(
+            stored.iter().all(|s| s.speaker.is_some()),
+            "segments should still be attributed, just not to invented people"
+        );
     }
 
     #[tokio::test]

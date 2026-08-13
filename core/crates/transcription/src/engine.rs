@@ -6,6 +6,10 @@ use notewise_audio_capture::{AudioFormat, AudioFrame, Vad};
 
 use crate::models::{ModelInfo, ModelStore};
 use crate::segment::{Segment, Transcript};
+use crate::stream::UtteranceBuffer;
+// Only named by the feature-gated inference path.
+#[cfg(feature = "whisper")]
+use crate::stream::Utterance;
 use crate::{Result, TranscriptionError};
 
 /// A speech recognition engine.
@@ -64,34 +68,29 @@ pub trait TranscriptionEngine: std::fmt::Debug + Send {
 /// acceleration. Without the feature the type still exists and every method returns
 /// [`TranscriptionError::EngineUnavailable`], so callers compile either way.
 ///
-/// # Windowing
+/// # Segmentation
 ///
 /// whisper.cpp transcribes a buffer, not a stream. Feeding it one 100 ms frame at a time
-/// would produce nonsense — the model needs enough context to resolve a phrase. Audio is
-/// therefore accumulated and decoded a window at a time, with segment timings offset back
-/// into the meeting's own time base so the transcript lines up with the recording.
+/// would produce nonsense — the model needs enough context to resolve a phrase — so audio has
+/// to be grouped before it is decoded.
+///
+/// Grouping is delegated to [`UtteranceBuffer`], which cuts on the *speaker pausing* rather
+/// than on a clock. That module's docs explain what a fixed window got wrong; the short
+/// version is that a ten-second window meant a ten-second lag, decoded room tone the model
+/// then invented text for, and segment timings that bore no relation to when things were
+/// said. Timings here are offset back into the meeting's own time base, so the transcript
+/// lines up with the recording.
 pub struct WhisperEngine {
     model: ModelInfo,
     #[allow(dead_code)] // Only read by the feature-gated inference path.
     store: ModelStore,
 
-    /// Audio accumulated since the last decode.
-    buffer: Vec<f32>,
-    /// Milliseconds of audio already decoded, for offsetting segment timings.
-    offset_ms: i64,
-    /// How much audio to accumulate before decoding.
-    #[allow(dead_code)] // Only read by the feature-gated inference path.
-    window_samples: usize,
+    /// Groups incoming frames into buffers worth decoding.
+    stream: UtteranceBuffer,
 
-    /// Speech gate. See [`WhisperEngine::decode`] for why a transcription engine owns one.
-    #[allow(dead_code)] // Only read by the feature-gated inference path.
-    vad: Vad,
-    /// Whether to skip decoding windows the gate finds no speech in.
-    #[allow(dead_code)]
-    gate_on_speech: bool,
     /// Spoken language, or `None` to let Whisper detect it.
     ///
-    /// Detection costs a pass over the first window and is occasionally wrong — a meeting that
+    /// Detection costs a pass over the first buffer and is occasionally wrong — a meeting that
     /// opens in English and is detected as Welsh transcribes as nonsense for its whole length.
     /// Naming the language removes that failure entirely, so a picker is worth having.
     #[allow(dead_code)]
@@ -108,30 +107,20 @@ impl std::fmt::Debug for WhisperEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WhisperEngine")
             .field("model", &self.model.name)
-            .field("buffered_samples", &self.buffer.len())
-            .field("offset_ms", &self.offset_ms)
+            .field("buffered_ms", &self.stream.buffered_ms())
+            .field("offset_ms", &self.stream.offset_ms())
             .field("gpu", &Self::gpu_enabled())
             .finish()
     }
 }
 
 impl WhisperEngine {
-    /// Decode window, in seconds.
-    ///
-    /// A tradeoff between latency to the first visible text and accuracy: shorter windows
-    /// show text sooner but cut phrases in half, which the model then mis-transcribes.
-    /// Ten seconds is comfortably longer than most sentences.
-    pub const WINDOW_SECONDS: usize = 10;
-
     /// Create an engine for a model.
     ///
     /// Verifies the model is present and intact before claiming the engine is usable, so a
     /// missing model surfaces here rather than at the first frame of a live meeting.
     pub fn new(model: ModelInfo, store: ModelStore) -> Result<Self> {
         store.verify(&model)?;
-
-        let window_samples =
-            AudioFormat::transcription().sample_rate.hz() as usize * Self::WINDOW_SECONDS;
 
         #[cfg(feature = "whisper")]
         let context = {
@@ -146,11 +135,7 @@ impl WhisperEngine {
         Ok(Self {
             model,
             store,
-            buffer: Vec::with_capacity(window_samples),
-            offset_ms: 0,
-            window_samples,
-            vad: Vad::default(),
-            gate_on_speech: true,
+            stream: UtteranceBuffer::new(AudioFormat::transcription().sample_rate.hz()),
             language: None,
             #[cfg(feature = "whisper")]
             context,
@@ -164,7 +149,7 @@ impl WhisperEngine {
     /// Set the spoken language, e.g. `en`. `None` asks Whisper to detect it.
     ///
     /// English-only models (`*.en`) reject any language but English, so this is ignored for
-    /// them rather than passed through to fail at the first window.
+    /// them rather than passed through to fail at the first buffer.
     pub fn with_language(mut self, language: Option<String>) -> Self {
         self.language = language.filter(|_| !self.model.name.ends_with(".en"));
         self
@@ -172,23 +157,23 @@ impl WhisperEngine {
 
     /// Tune the speech gate.
     pub fn with_vad(mut self, vad: Vad) -> Self {
-        self.vad = vad;
+        self.stream.set_vad(vad);
         self
     }
 
-    /// Decode every window, including ones containing no speech.
+    /// Decode every buffer, including ones containing no speech.
     ///
     /// Off by default, and turning it on brings the hallucinations back. It exists for
     /// diagnosing the gate itself: if a transcript is missing words, running once ungated
     /// answers whether the gate or the model dropped them.
     pub fn without_speech_gate(mut self) -> Self {
-        self.gate_on_speech = false;
+        self.stream.disable_speech_gate();
         self
     }
 
     /// The noise floor the gate has settled on, in dBFS.
     pub fn noise_floor_db(&self) -> f32 {
-        self.vad.noise_floor_db()
+        self.stream.noise_floor_db()
     }
 
     /// Whether GPU acceleration was compiled in.
@@ -208,37 +193,21 @@ impl WhisperEngine {
         }
     }
 
-    /// Decode whatever is buffered and return its segments.
+    /// Decode one utterance.
+    ///
+    /// The buffer arrives already gated: [`UtteranceBuffer`] guarantees it holds real speech,
+    /// so there is no silence check here. That gate is not optional politeness — fed room
+    /// tone, Whisper does not return nothing, it invents. Ten seconds of it in a live test
+    /// here produced "I know. You're happy to see a new work to grow.", indistinguishable in
+    /// the transcript from something a person said.
     #[cfg(feature = "whisper")]
-    fn decode(&mut self) -> Result<Vec<Segment>> {
-        if self.buffer.is_empty() {
+    fn decode(&mut self, utterance: Utterance) -> Result<Vec<Segment>> {
+        if utterance.samples.is_empty() {
             return Ok(Vec::new());
         }
 
-        let audio = std::mem::take(&mut self.buffer);
-        let rate = AudioFormat::transcription().sample_rate.hz() as i64;
-        let duration_ms = (audio.len() as i64 * 1000) / rate;
-
-        // The speech gate.
-        //
-        // Whisper does not return nothing when given non-speech — it invents. Ten seconds of
-        // room tone in a live test here produced "I know. You're happy to see a new work to
-        // grow.", indistinguishable in the transcript from something a person said.
-        //
-        // The offset still advances by the full window. Skipping the *decode* must not skip
-        // the *time*, or every silent stretch would pull the rest of the transcript earlier
-        // and desynchronise it from the recording.
-        let report = self.vad.analyze(&audio, rate as u32);
-        if self.gate_on_speech && !report.has_speech() {
-            tracing::debug!(
-                duration_ms,
-                noise_floor_db = report.noise_floor_db,
-                peak_db = report.peak_db,
-                "no speech in window; skipping inference"
-            );
-            self.offset_ms += duration_ms;
-            return Ok(Vec::new());
-        }
+        let audio = utterance.samples;
+        let offset_ms = utterance.offset_ms;
 
         let mut state = self.context.create_state().map_err(|e| {
             TranscriptionError::BadAudio(format!("could not create a decode state: {e}"))
@@ -253,8 +222,8 @@ impl WhisperEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
 
-        // whisper.cpp's own defences against inventing text. The VAD above removes windows
-        // with no speech at all; these catch the harder case of a window that has some speech
+        // whisper.cpp's own defences against inventing text. The gate upstream removes buffers
+        // with no speech in them; these catch the harder case of a buffer that has some speech
         // and some silence, where the model will happily fill the silence.
         //
         // Values are whisper.cpp's own defaults for these thresholds, which are *not* applied
@@ -286,10 +255,10 @@ impl WhisperEngine {
                 .full_get_segment_text(i)
                 .map_err(|e| TranscriptionError::BadAudio(format!("reading segment {i}: {e}")))?;
 
-            // whisper.cpp reports centiseconds relative to this window; shift into the
+            // whisper.cpp reports centiseconds relative to this buffer; shift into the
             // meeting's time base so the transcript lines up with the recording.
-            let start = state.full_get_segment_t0(i).unwrap_or(0) * 10 + self.offset_ms;
-            let end = state.full_get_segment_t1(i).unwrap_or(0) * 10 + self.offset_ms;
+            let start = state.full_get_segment_t0(i).unwrap_or(0) * 10 + offset_ms;
+            let end = state.full_get_segment_t1(i).unwrap_or(0) * 10 + offset_ms;
 
             let trimmed = text.trim();
             if !trimmed.is_empty() && !is_non_speech_marker(trimmed) {
@@ -297,8 +266,7 @@ impl WhisperEngine {
             }
         }
 
-        self.offset_ms += duration_ms;
-        Ok(segments)
+        Ok(collapse_repetitions(segments))
     }
 }
 
@@ -318,12 +286,10 @@ impl TranscriptionEngine for WhisperEngine {
             )));
         }
 
-        self.buffer.extend_from_slice(&frame.samples);
-
-        if self.buffer.len() >= self.window_samples {
-            return self.decode();
+        match self.stream.push(&frame.samples) {
+            Some(utterance) => self.decode(utterance),
+            None => Ok(Vec::new()),
         }
-        Ok(Vec::new())
     }
 
     #[cfg(not(feature = "whisper"))]
@@ -335,7 +301,10 @@ impl TranscriptionEngine for WhisperEngine {
 
     #[cfg(feature = "whisper")]
     async fn finish(&mut self) -> Result<Vec<Segment>> {
-        self.decode()
+        match self.stream.flush() {
+            Some(utterance) => self.decode(utterance),
+            None => Ok(Vec::new()),
+        }
     }
 
     #[cfg(not(feature = "whisper"))]
@@ -389,6 +358,62 @@ fn is_non_speech_marker(text: &str) -> bool {
         "background noise",
     ];
     MARKERS.contains(&inner.as_str())
+}
+
+/// Collapse a decoder repetition loop into the one thing that was probably said.
+///
+/// Whisper, given a buffer it cannot resolve, sometimes emits the same short phrase over and
+/// over until the buffer runs out. Observed in this repository: five seconds of room tone at
+/// the end of a recording became `Okay.` four times, one per second, stored as four transcript
+/// lines. The speech gate upstream is the primary defence and removes the buffers that cause
+/// this; this is the second line, for a buffer that holds real speech and loops anyway.
+///
+/// A run of three or more *adjacent, identical* segments collapses to one spanning the run.
+/// Three is the threshold because two is ordinary speech — "No. No." is a thing people say —
+/// while a phrase repeated verbatim three times in consecutive segments, with no other words
+/// between them, is the decoder rather than the speaker.
+// Called only from the feature-gated inference path; its tests are not gated.
+#[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+fn collapse_repetitions(segments: Vec<Segment>) -> Vec<Segment> {
+    /// Adjacent segments must repeat at least this many times to count as a loop.
+    const RUN: usize = 3;
+
+    if segments.len() < RUN {
+        return segments;
+    }
+
+    let key = |segment: &Segment| segment.text.trim().to_lowercase();
+
+    let mut out: Vec<Segment> = Vec::with_capacity(segments.len());
+    let mut index = 0;
+
+    while index < segments.len() {
+        let text = key(&segments[index]);
+        let mut end = index + 1;
+        while end < segments.len() && key(&segments[end]) == text {
+            end += 1;
+        }
+
+        let run = end - index;
+        if run >= RUN {
+            // Keep one occurrence, spanning the whole run: something was said in that audio,
+            // and claiming only the first second of it would be its own small lie.
+            let mut collapsed = segments[index].clone();
+            collapsed.end_ms = segments[end - 1].end_ms;
+            tracing::debug!(
+                text = %collapsed.text,
+                repeats = run,
+                "collapsed a decoder repetition loop"
+            );
+            out.push(collapsed);
+        } else {
+            out.extend_from_slice(&segments[index..end]);
+        }
+
+        index = end;
+    }
+
+    out
 }
 
 /// A deterministic engine that emits a segment per frame of non-silent audio.
@@ -641,6 +666,66 @@ mod tests {
         ] {
             assert!(is_non_speech_marker(marker), "{marker} should be filtered");
         }
+    }
+
+    /// The exact output of the bug this filter was written for: the tail of a real recording,
+    /// four identical one-second segments where a quiet room had been.
+    #[test]
+    fn a_decoder_repetition_loop_collapses_to_one_segment() {
+        let looped = vec![
+            Segment::new("Okay.", 10_000, 11_000),
+            Segment::new("Okay.", 11_000, 12_000),
+            Segment::new("Okay.", 12_000, 13_000),
+            Segment::new("Okay.", 13_000, 14_000),
+        ];
+
+        let out = collapse_repetitions(looped);
+        assert_eq!(out.len(), 1, "got {:?}", out);
+        assert_eq!(out[0].text, "Okay.");
+        // Spanning the whole run, not just the first second of it.
+        assert_eq!((out[0].start_ms, out[0].end_ms), (10_000, 14_000));
+    }
+
+    /// Repetition is a thing people genuinely do. Two in a row is speech, not a loop.
+    #[test]
+    fn ordinary_repetition_is_left_alone() {
+        let real = vec![
+            Segment::new("No.", 0, 500),
+            Segment::new("No.", 500, 1_000),
+            Segment::new("I disagree.", 1_000, 2_000),
+        ];
+
+        assert_eq!(collapse_repetitions(real.clone()), real);
+    }
+
+    /// A loop must not swallow the words around it.
+    #[test]
+    fn a_loop_between_real_speech_keeps_the_real_speech() {
+        let out = collapse_repetitions(vec![
+            Segment::new("Let us start.", 0, 1_000),
+            Segment::new("Yeah.", 1_000, 2_000),
+            Segment::new("yeah.", 2_000, 3_000),
+            Segment::new("Yeah. ", 3_000, 4_000),
+            Segment::new("So the migration lands Friday.", 4_000, 6_000),
+        ]);
+
+        let texts: Vec<_> = out.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec!["Let us start.", "Yeah.", "So the migration lands Friday."],
+            "case and trailing space must not hide a loop, and real words must survive"
+        );
+    }
+
+    #[test]
+    fn collapsing_is_a_no_op_on_short_or_empty_output() {
+        assert!(collapse_repetitions(Vec::new()).is_empty());
+
+        let two = vec![
+            Segment::new("Okay.", 0, 500),
+            Segment::new("Okay.", 500, 1_000),
+        ];
+        assert_eq!(collapse_repetitions(two.clone()), two);
     }
 
     /// The filter must not eat speech. A bracketed aside inside a real sentence, or a long

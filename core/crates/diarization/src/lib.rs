@@ -209,6 +209,61 @@ impl Diarizer for NoopDiarizer {
     }
 }
 
+/// Labels every segment as one speaker.
+///
+/// # Why this is the default
+///
+/// Timing cannot tell a pause from a person. [`PauseDiarizer`] reads a gap as a change of
+/// speaker, which is right for two people alternating cleanly and wrong for everything else —
+/// including the common case of one person pausing to think, who comes out of it labelled as a
+/// room full of people taking turns.
+///
+/// That is not a threshold that needs tuning; it is the wrong kind of evidence. A recording of
+/// one person saying "hello how are you", followed by silence, produced a confident
+/// `Speaker 1` / `Speaker 2` transcript here — and a user who can see there was only one
+/// person in the room now has a reason to distrust every label in the app.
+///
+/// So this claims what the available evidence supports and nothing more: the words, in order,
+/// attributed to a single voice. Separating real voices needs the voices — see
+/// [`SpeakerEmbedder`], which does the acoustic half of that job and is waiting on a
+/// [`Diarizer`] to cluster per-segment audio with it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SingleSpeakerDiarizer;
+
+impl SingleSpeakerDiarizer {
+    /// The label every segment receives.
+    pub const LABEL: &'static str = "Speaker 1";
+}
+
+impl Diarizer for SingleSpeakerDiarizer {
+    fn name(&self) -> &str {
+        "single-speaker"
+    }
+
+    fn diarize(&self, transcript: &Transcript) -> Result<Transcript> {
+        Ok(Transcript::new(
+            transcript
+                .segments
+                .iter()
+                .map(|segment| {
+                    let mut segment = segment.clone();
+                    segment.speaker = Some(Self::LABEL.to_string());
+                    segment
+                })
+                .collect(),
+        ))
+    }
+
+    /// Zero, and deliberately.
+    ///
+    /// Not "certain there was one speaker" — no separation was attempted, so a caller asking
+    /// how much to trust the *separation* must not be told to trust it. A UI reading this
+    /// should offer to split speakers, not present these labels as findings.
+    fn confidence(&self, _transcript: &Transcript) -> f32 {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,13 +483,80 @@ mod tests {
 
     #[test]
     fn diarizers_are_usable_behind_a_trait_object() {
-        let diarizers: Vec<Box<dyn Diarizer>> =
-            vec![Box::new(PauseDiarizer::default()), Box::new(NoopDiarizer)];
+        let diarizers: Vec<Box<dyn Diarizer>> = vec![
+            Box::new(PauseDiarizer::default()),
+            Box::new(NoopDiarizer),
+            Box::new(SingleSpeakerDiarizer),
+        ];
         let input = transcript(&[(0, 1000), (5000, 6000)]);
 
         for diarizer in &diarizers {
             assert!(diarizer.diarize(&input).is_ok());
             assert!((0.0..=1.0).contains(&diarizer.confidence(&input)));
         }
+    }
+
+    /// The behaviour the pipeline now depends on: silence, however long, is not a person.
+    ///
+    /// The spans are the real ones from the recording that motivated this — a phrase, an
+    /// eight-second hole, then four more segments.
+    #[test]
+    fn a_single_speaker_survives_any_gap() {
+        let input = transcript(&[
+            (0, 2_000),
+            (10_000, 11_000),
+            (11_000, 12_000),
+            (12_000, 13_000),
+            (13_000, 14_000),
+        ]);
+
+        let output = SingleSpeakerDiarizer.diarize(&input).unwrap();
+
+        assert_eq!(speakers(&output), vec!["Speaker 1"; 5]);
+        assert_eq!(
+            PauseDiarizer::default()
+                .diarize(&input)
+                .unwrap()
+                .segments
+                .iter()
+                .filter_map(|s| s.speaker.clone())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            2,
+            "the heuristic this replaced should still behave as documented — it splits here, \
+             which is exactly why it is no longer the default"
+        );
+    }
+
+    /// Everything gets a label. "Unattributed" in a transcript reads as a failure, and the
+    /// words are not in doubt even when the speaker is.
+    #[test]
+    fn single_speaker_labels_every_segment_and_changes_nothing_else() {
+        let input = transcript(&[(0, 1_000), (60_000, 61_000)]);
+        let output = SingleSpeakerDiarizer.diarize(&input).unwrap();
+
+        assert!(output.segments.iter().all(|s| s.speaker.is_some()));
+        for (before, after) in input.segments.iter().zip(output.segments.iter()) {
+            assert_eq!(before.text, after.text);
+            assert_eq!(
+                (before.start_ms, before.end_ms),
+                (after.start_ms, after.end_ms)
+            );
+        }
+    }
+
+    /// It must not claim confidence in a separation it never attempted.
+    #[test]
+    fn single_speaker_claims_no_confidence_in_separation() {
+        let input = transcript(&[(0, 1_000), (5_000, 6_000)]);
+        assert_eq!(SingleSpeakerDiarizer.confidence(&input), 0.0);
+    }
+
+    #[test]
+    fn single_speaker_handles_an_empty_transcript() {
+        let output = SingleSpeakerDiarizer
+            .diarize(&Transcript::default())
+            .unwrap();
+        assert!(output.is_empty());
     }
 }

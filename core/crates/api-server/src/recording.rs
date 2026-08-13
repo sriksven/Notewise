@@ -275,8 +275,12 @@ mod imp {
             MicrophoneSource::open(&capture).map_err(|e| RecordingError::Failed(e.to_string()))?;
         let device = source.device_name().to_string();
 
+        // The language the caller picked has to reach the engine here, not just on the import
+        // path: without it a live meeting is detected from its first buffer, and a meeting
+        // detected wrong transcribes as nonsense for its whole length.
         let engine = WhisperEngine::new(model.clone(), store)
-            .map_err(|e| RecordingError::Failed(e.to_string()))?;
+            .map_err(|e| RecordingError::Failed(e.to_string()))?
+            .with_language(request.language.clone());
 
         // A dedicated connection for the recording; see the module docs.
         let db = Database::open(&db_path).map_err(|e| RecordingError::Failed(e.to_string()))?;

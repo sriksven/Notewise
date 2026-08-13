@@ -54,10 +54,10 @@ impl Utterance {
 pub struct UtteranceConfig {
     /// Trailing silence that marks the end of an utterance.
     ///
-    /// This is the dominant term in how quickly text appears: a phrase reaches the decoder
-    /// this long after the speaker stops. Comfortably above [`Vad`]'s hangover, so the gate
-    /// closing on a word-final consonant does not end the phrase early; short enough that the
-    /// wait is not noticeable.
+    /// Counted from when the gate *closes*, not from when energy drops — so [`Vad`]'s hangover
+    /// (280 ms by default, protecting word-final consonants) is added to this before a phrase
+    /// is handed over. The delay a user actually sees is therefore hangover + this + decode,
+    /// which at the default lands a little under a second after the speaker stops.
     pub endpoint_silence_ms: i64,
 
     /// Decode even mid-phrase once a buffer reaches this length.
@@ -146,9 +146,8 @@ impl UtteranceBuffer {
     }
 
     /// Replace the speech gate.
-    pub fn with_vad(mut self, vad: Vad) -> Self {
+    pub fn set_vad(&mut self, vad: Vad) {
         self.vad = vad;
-        self
     }
 
     /// Hand out every buffer, including ones with no speech in them.
@@ -156,9 +155,8 @@ impl UtteranceBuffer {
     /// Turning this on brings the invented text back, and it exists for diagnosing the gate:
     /// if a transcript is missing words, running once ungated answers whether the gate or the
     /// model dropped them. With the gate off, buffers are cut on the length cap alone.
-    pub fn without_speech_gate(mut self) -> Self {
+    pub fn disable_speech_gate(&mut self) {
         self.gate_on_speech = false;
-        self
     }
 
     pub fn config(&self) -> &UtteranceConfig {
@@ -344,24 +342,32 @@ mod tests {
     }
 
     /// The headline defect: with a ten-second fixed window, nothing reached the decoder for
-    /// ten seconds. A phrase followed by a pause must be handed over as soon as the pause is
-    /// long enough to be an endpoint — about a second in, not ten.
+    /// ten seconds. A phrase followed by a pause must be handed over shortly after the pause
+    /// starts — about a second, not ten.
     #[test]
     fn a_phrase_is_handed_over_as_soon_as_the_speaker_pauses() {
+        const PHRASE_MS: i64 = 1_500;
         let mut buffer = UtteranceBuffer::new(RATE);
 
-        let mut audio = speech(1_500);
-        audio.extend(silence(600));
+        let mut audio = speech(PHRASE_MS);
+        audio.extend(silence(1_500));
         let out = feed(&mut buffer, &audio);
 
         assert_eq!(out.len(), 1, "expected one utterance, got {}", out.len());
         assert_eq!(out[0].offset_ms, 0);
 
-        let handed_over_at = out[0].duration_ms(RATE);
+        // What a user perceives: how long after they stopped talking the decoder got the
+        // phrase. The gate's hangover is part of this, which is why it is not just
+        // `endpoint_silence_ms`.
+        let latency_ms = out[0].duration_ms(RATE) - PHRASE_MS;
         assert!(
-            handed_over_at < 2_500,
-            "text should reach the decoder about a second after the phrase ends, not \
-             {handed_over_at} ms in"
+            latency_ms <= 1_000,
+            "a phrase should reach the decoder within a second of the speaker stopping, \
+             took {latency_ms} ms"
+        );
+        assert!(
+            latency_ms >= 300,
+            "handed over {latency_ms} ms after the phrase — too eager to call it an endpoint"
         );
     }
 
@@ -407,15 +413,18 @@ mod tests {
     fn the_clock_tracks_real_speech_rather_than_window_boundaries() {
         let mut buffer = UtteranceBuffer::new(RATE);
 
+        const TOTAL_MS: i64 = 1_000 + 1_200 + 1_000 + 1_200;
+
         let mut audio = speech(1_000);
-        audio.extend(silence(700));
+        audio.extend(silence(1_200));
         audio.extend(speech(1_000));
-        audio.extend(silence(700));
+        audio.extend(silence(1_200));
 
         let out = feed(&mut buffer, &audio);
         assert_eq!(out.len(), 2, "two phrases, two utterances");
 
-        // The second utterance starts where the first ended — no invented hole.
+        // The second utterance starts where the first ended — no invented hole. This is the
+        // property the phantom speaker came from: with a fixed window the hole was 8000 ms.
         let first_end = out[0].offset_ms + out[0].duration_ms(RATE);
         let gap = out[1].offset_ms - first_end;
         assert!(
@@ -423,9 +432,16 @@ mod tests {
             "utterance 2 starts {gap} ms after utterance 1 ends; the clock has drifted"
         );
 
-        // And the whole thing lands inside the recording, not past its end.
+        // And the clock never runs past the audio actually fed.
         let total = out[1].offset_ms + out[1].duration_ms(RATE);
-        assert!(total <= 3_400 + FRAME_MS, "clock ran to {total} ms of 3400");
+        assert!(
+            total <= TOTAL_MS,
+            "clock ran to {total} ms on {TOTAL_MS} ms of audio"
+        );
+        assert!(
+            total >= TOTAL_MS - 1_000,
+            "clock at {total} ms lost most of {TOTAL_MS} ms of audio"
+        );
     }
 
     /// Someone reading a list aloud never pauses long enough to trip the endpoint. The
@@ -518,8 +534,8 @@ mod tests {
                 max_utterance_ms: 1_000,
                 ..Default::default()
             },
-        )
-        .without_speech_gate();
+        );
+        buffer.disable_speech_gate();
 
         let out = feed(&mut buffer, &silence(3_000));
         assert!(!out.is_empty(), "ungated, silence should reach the decoder");
