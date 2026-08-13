@@ -28,6 +28,11 @@ local Ollama, or set `ANTHROPIC_API_KEY` for BYOK.
 | Path | Purpose |
 |---|---|
 | `src/components/Sidebar.tsx` | 52px icon rail; shows capture state from any view |
+| `src/components/QuestionsPanel.tsx` | Live clarifying questions |
+| `src/views/SettingsView.tsx` | Backend list + model download |
+| `src/views/ChatView.tsx` | Ask questions about one meeting |
+| `src/views/CalendarView.tsx` | Meeting history grouped by day |
+| `src/views/AboutView.tsx` | What works and what does not |
 | `src/components/TopBar.tsx` | Model / Devices / Language pills, panel toggle, local-or-cloud badge |
 | `src/components/MeetingList.tsx` | Collapsible meeting list |
 | `src/components/TranscriptView.tsx` | Live transcript, grouped by speaker |
@@ -53,6 +58,27 @@ reloaded while a meeting is running, and the dock has to come back correct.
 **Transcript polling is 1s against loopback.** The engine has no push channel yet; a
 WebSocket is not worth the protocol for a same-machine request.
 
+## Design decisions in the new views
+
+**The questions panel never interrupts.** No toast, no sound, no focus steal — a panel a user
+can ignore is one they leave open. Only the two highest-cost ambiguity kinds get colour; if
+everything is highlighted, nothing is.
+
+**Settings leads with where audio goes.** The active backend banner is green for local and
+amber for remote, and every backend row carries a drive or cloud icon. RAM is shown next to
+each model because that is the number deciding whether it runs at all.
+
+**Chat is scoped to one meeting.** Grounding on a single transcript keeps answers checkable
+against something the user can read; cross-meeting recall is what search and the graph are for.
+The conversation resets when the meeting changes, so answers are never grounded in the wrong
+material.
+
+**History is a list, not a month grid.** There is no calendar integration yet, so there is
+nothing in the future to show — a grid of empty squares would imply scheduling this cannot do.
+
+**About states the gaps.** A user who finds out system audio does not work by recording a call
+and getting half a transcript is worse off than one who was told up front.
+
 ## Not built yet
 
 - **The Tauri shell.** Needs the Tauri CLI and a webview toolchain. `src-tauri/` is excluded
@@ -60,4 +86,3 @@ WebSocket is not worth the protocol for a same-machine request.
 - **Live audio.** The record button creates and ends a real meeting, but nothing feeds it
   audio — that needs the OS capture backends, which are blocked on a signed bundle and a TCC
   grant (see [`audio-capture`](../../core/crates/audio-capture/)).
-- Calendar, settings, and about views are rail entries only.

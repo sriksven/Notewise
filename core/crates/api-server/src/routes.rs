@@ -10,7 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use notewise_ai_router::{
-    suggest_questions, AiBackend, ClarifierConfig, ClarifierSession, TranscriptInput, Utterance,
+    suggest_questions, AiBackend, BackendKind, ChatMessage, ChatRequest, ClarifierConfig,
+    ClarifierSession, Role, TranscriptInput, Utterance,
 };
 use notewise_transcription::{ModelRegistry, ModelStore};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
@@ -42,6 +43,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/notes", get(list_notes).post(create_note))
         .route("/v1/tickets", get(list_tickets))
         .route("/v1/meetings/:id/questions", post(clarifying_questions))
+        .route("/v1/meetings/:id/chat", post(chat_about_meeting))
+        .route("/v1/backends", get(list_backends))
         .route("/v1/models", get(list_models))
         .route("/v1/models/:name/download", post(download_model))
         .route("/v1/search", get(search))
@@ -372,6 +375,99 @@ async fn clarifying_questions(
     Ok(Json(serde_json::json!({
         "questions": questions,
         "window_ms": session.config().window_ms,
+    })))
+}
+
+// ---------------------------------------------------------------- chat
+
+#[derive(Debug, Deserialize)]
+struct ChatBody {
+    messages: Vec<IncomingMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IncomingMessage {
+    role: String,
+    content: String,
+}
+
+/// Ask a question about one meeting, grounded in its transcript.
+async fn chat_about_meeting(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<ChatBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let meeting_id = parse_id(&id)?;
+
+    if body.messages.is_empty() {
+        return Err(ApiError::BadRequest("messages must not be empty".into()));
+    }
+
+    let (title, transcript) = {
+        let db = state.db().await;
+        let repo = MeetingRepository::new(&db);
+        let meeting = repo.get(meeting_id)?;
+        (meeting.title, repo.transcript_text(meeting_id)?)
+    }; // lock released before the model call
+
+    if transcript.trim().is_empty() {
+        return Err(ApiError::BadRequest(
+            "this meeting has no transcript to ask about".into(),
+        ));
+    }
+
+    let messages: Vec<ChatMessage> = body
+        .messages
+        .into_iter()
+        .map(|m| ChatMessage {
+            // Anything that is not explicitly the assistant is treated as the user; a
+            // client-supplied role is not worth failing a request over.
+            role: if m.role == "assistant" {
+                Role::Assistant
+            } else {
+                Role::User
+            },
+            content: m.content,
+        })
+        .collect();
+
+    let request = ChatRequest::new(messages)
+        .with_context(vec![format!("Meeting: {title}\n\nTranscript:\n{transcript}")]);
+
+    let response = state.ai().chat(&request).await?;
+
+    Ok(Json(serde_json::json!({
+        "text": response.text,
+        "model": response.model,
+    })))
+}
+
+// ---------------------------------------------------------------- backends
+
+/// Every selectable AI backend, with what it needs and where it runs.
+///
+/// Locality comes from the kind rather than a live probe so a settings screen can show the
+/// privacy implication of each option before the user commits to one.
+async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
+    let backends: Vec<_> = BackendKind::ALL
+        .iter()
+        .map(|kind| {
+            serde_json::json!({
+                "kind": kind.as_str(),
+                "label": kind.label(),
+                "is_local": kind.is_local(),
+                "requires_api_key": kind.requires_api_key(),
+                "requires_endpoint": kind.requires_endpoint(),
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "backends": backends,
+        "active": {
+            "model": state.ai().model_id(),
+            "is_local": state.ai().is_local(),
+        },
     })))
 }
 
@@ -1089,6 +1185,87 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn chat_needs_a_transcript_to_ground_on() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/chat"),
+                serde_json::json!({"messages": [{"role": "user", "content": "What happened?"}]}),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].as_str().unwrap().contains("no transcript"));
+    }
+
+    #[tokio::test]
+    async fn chat_answers_against_the_transcript() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "We agreed to ship Friday.", "start_ms": 0, "end_ms": 3000}]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/chat"),
+                serde_json::json!({"messages": [{"role": "user", "content": "When do we ship?"}]}),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert!(!json["text"].as_str().unwrap().is_empty());
+        assert_eq!(json["model"], "mock");
+    }
+
+    #[tokio::test]
+    async fn chat_rejects_an_empty_conversation() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/chat"),
+                serde_json::json!({"messages": []}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn backends_are_listed_with_their_privacy_implication() {
+        let (status, json) = call(&app(), get("/v1/backends")).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let backends = json["backends"].as_array().unwrap();
+        assert!(backends.len() >= 8);
+
+        let ollama = backends.iter().find(|b| b["kind"] == "ollama").unwrap();
+        assert_eq!(ollama["is_local"], true);
+        assert_eq!(ollama["requires_api_key"], false);
+
+        let anthropic = backends.iter().find(|b| b["kind"] == "anthropic").unwrap();
+        assert_eq!(anthropic["is_local"], false);
+        assert_eq!(anthropic["requires_api_key"], true);
+
+        assert_eq!(json["active"]["model"], "mock");
+        assert_eq!(json["active"]["is_local"], true);
     }
 
     #[tokio::test]

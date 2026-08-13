@@ -33,6 +33,49 @@ export interface Segment {
   confidence: number | null;
 }
 
+export interface ModelInfo {
+  name: string;
+  size: string;
+  bytes: number;
+  approx_ram_mb: number;
+  multilingual: boolean;
+  installed: boolean;
+  recommended: boolean;
+}
+
+export interface BackendInfo {
+  kind: string;
+  label: string;
+  is_local: boolean;
+  requires_api_key: boolean;
+  requires_endpoint: boolean;
+}
+
+export type AmbiguityKind =
+  | "vague_reference"
+  | "unquantified"
+  | "unassigned_action"
+  | "missing_deadline"
+  | "undefined_term"
+  | "contradiction"
+  | "unstated_rationale";
+
+export interface ClarifyingQuestion {
+  question: string;
+  about: string;
+  kind: AmbiguityKind;
+  at_ms: number;
+}
+
+export interface Ticket {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  owner: string | null;
+  due_at: string | null;
+}
+
 export interface SearchHit {
   kind: string;
   id: string;
@@ -138,6 +181,35 @@ export const api = {
    */
   exportUrl: (id: string, variant: "full" | "brief" | "transcript" = "full") =>
     `/v1/meetings/${id}/export?variant=${variant}`,
+
+  questions: (id: string) =>
+    request<{ questions: ClarifyingQuestion[]; reason?: string }>(
+      `/v1/meetings/${id}/questions`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  chat: (id: string, messages: Array<{ role: string; content: string }>) =>
+    request<{ text: string; model: string }>(`/v1/meetings/${id}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ messages }),
+    }),
+
+  backends: () =>
+    request<{
+      backends: BackendInfo[];
+      active: { model: string; is_local: boolean };
+    }>("/v1/backends"),
+
+  models: () =>
+    request<{ models: ModelInfo[]; directory: string }>("/v1/models"),
+
+  downloadModel: (name: string) =>
+    request<{ name: string; installed: boolean; already_present: boolean }>(
+      `/v1/models/${encodeURIComponent(name)}/download`,
+      { method: "POST" },
+    ),
+
+  tickets: () => request<Ticket[]>("/v1/tickets"),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

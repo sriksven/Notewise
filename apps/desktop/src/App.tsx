@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, HelpCircle } from "lucide-react";
 
 import { MeetingList } from "./components/MeetingList";
+import { QuestionsPanel } from "./components/QuestionsPanel";
 import { RecordDock } from "./components/RecordDock";
 import { Sidebar, type View } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { TranscriptView } from "./components/TranscriptView";
-import { api, ApiError, type Health, type Meeting, type Segment } from "./lib/api";
+import { AboutView } from "./views/AboutView";
+import { CalendarView } from "./views/CalendarView";
+import { ChatView } from "./views/ChatView";
+import { SettingsView } from "./views/SettingsView";
+import {
+  api,
+  ApiError,
+  type ClarifyingQuestion,
+  type Health,
+  type Meeting,
+  type Segment,
+} from "./lib/api";
+
+/** How often to ask the engine for clarifying questions while recording. */
+const QUESTION_POLL_MS = 30_000;
 
 export default function App() {
   const [view, setView] = useState<View>("home");
   const [panelOpen, setPanelOpen] = useState(false);
+  const [questionsOpen, setQuestionsOpen] = useState(true);
 
   const [health, setHealth] = useState<Health | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
+  const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -24,6 +41,7 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const isRecording = recordingId !== null;
+  const selectedMeeting = meetings.find((m) => m.id === selectedId) ?? null;
 
   const report = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : "Something went wrong.");
@@ -39,8 +57,8 @@ export default function App() {
       setMeetings(nextMeetings);
       setError(null);
 
-      // Recover recording state from the engine rather than from local state:
-      // the UI can be reloaded while a meeting is still running.
+      // Recording state comes from the engine, not local state: the window can be
+      // reloaded while a meeting is still running.
       const live = nextMeetings.find((m) => m.ended_at === null);
       if (live) {
         setRecordingId(live.id);
@@ -56,7 +74,7 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
-  // Load the selected transcript, and poll it while that meeting is recording.
+  // Load the selected transcript, polling while that meeting records.
   useEffect(() => {
     if (!selectedId) {
       setSegments([]);
@@ -76,14 +94,43 @@ export default function App() {
     void load();
     if (selectedId !== recordingId) return;
 
-    // Polling rather than a socket: the engine has no push channel yet, and one
-    // request a second against loopback is not worth a protocol for.
     const id = setInterval(load, 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, [selectedId, recordingId, report]);
+
+  // Ask for clarifying questions while recording.
+  //
+  // Polled rather than pushed, and the engine gates on its own cooldown, so an over-eager
+  // interval here cannot become an over-eager panel. Failures are swallowed: a suggestion
+  // that did not arrive is not worth an error banner during someone's meeting.
+  useEffect(() => {
+    if (!recordingId || !questionsOpen) return;
+
+    let cancelled = false;
+    const ask = async () => {
+      try {
+        const result = await api.questions(recordingId);
+        if (cancelled || result.questions.length === 0) return;
+
+        setQuestions((current) => {
+          const seen = new Set(current.map((q) => q.question));
+          return [...current, ...result.questions.filter((q) => !seen.has(q.question))];
+        });
+      } catch {
+        // Deliberately silent.
+      }
+    };
+
+    void ask();
+    const id = setInterval(ask, QUESTION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [recordingId, questionsOpen]);
 
   const toggleRecording = async () => {
     setBusy(true);
@@ -107,6 +154,7 @@ export default function App() {
         setRecordingId(meeting.id);
         setSelectedId(meeting.id);
         setStartedAt(new Date(meeting.started_at).getTime());
+        setQuestions([]);
       }
       await refresh();
     } catch (e) {
@@ -135,10 +183,12 @@ export default function App() {
 
   const exportMeeting = (variant: "full" | "brief") => {
     if (!selectedId) return;
-    // Navigating to the URL lets the browser handle the download, so the filename from
-    // Content-Disposition is preserved. Building a blob here would lose it.
+    // Navigating lets the browser handle the download, preserving the filename from
+    // Content-Disposition that a JS-built blob would lose.
     window.location.href = api.exportUrl(selectedId, variant);
   };
+
+  const showsTranscript = view === "home" || view === "record";
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -152,7 +202,7 @@ export default function App() {
         />
 
         <div className="relative flex min-h-0 flex-1">
-          {panelOpen && (
+          {panelOpen && showsTranscript && (
             <MeetingList
               meetings={meetings}
               selectedId={selectedId}
@@ -177,19 +227,67 @@ export default function App() {
               </div>
             )}
 
-            <TranscriptView segments={segments} isRecording={isRecording} />
+            {showsTranscript && (
+              <TranscriptView segments={segments} isRecording={isRecording} />
+            )}
+            {view === "calendar" && (
+              <CalendarView
+                meetings={meetings}
+                selectedId={selectedId}
+                onSelect={(id) => {
+                  setSelectedId(id);
+                  setView("home");
+                }}
+              />
+            )}
+            {view === "chat" && (
+              <ChatView
+                meetingId={selectedId}
+                meetingTitle={selectedMeeting?.title ?? null}
+                hasTranscript={segments.length > 0}
+              />
+            )}
+            {view === "settings" && <SettingsView />}
+            {view === "about" && <AboutView health={health} />}
           </main>
 
-          <RecordDock
-            isRecording={isRecording}
-            startedAt={startedAt}
-            busy={busy}
-            onToggle={toggleRecording}
-            onSummarize={summarize}
-            canSummarize={selectedId !== null && !isRecording && segments.length > 0}
-            onExport={exportMeeting}
-            canExport={selectedId !== null}
-          />
+          {showsTranscript && questionsOpen && isRecording && (
+            <QuestionsPanel
+              questions={questions}
+              onDismiss={(question) =>
+                setQuestions((current) => current.filter((q) => q !== question))
+              }
+              onClose={() => setQuestionsOpen(false)}
+            />
+          )}
+
+          {/* Re-open affordance, so dismissing the panel is not a one-way door. */}
+          {showsTranscript && !questionsOpen && isRecording && (
+            <button
+              type="button"
+              onClick={() => setQuestionsOpen(true)}
+              aria-label="Show suggested questions"
+              title="Show suggested questions"
+              className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center
+                         rounded-full border border-hairline bg-white text-neutral-500
+                         shadow-sm transition hover:text-neutral-900"
+            >
+              <HelpCircle size={14} aria-hidden />
+            </button>
+          )}
+
+          {showsTranscript && (
+            <RecordDock
+              isRecording={isRecording}
+              startedAt={startedAt}
+              busy={busy}
+              onToggle={toggleRecording}
+              onSummarize={summarize}
+              canSummarize={selectedId !== null && !isRecording && segments.length > 0}
+              onExport={exportMeeting}
+              canExport={selectedId !== null}
+            />
+          )}
         </div>
       </div>
     </div>

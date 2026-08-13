@@ -2,12 +2,13 @@ import {
   CalendarDays,
   Home,
   Info,
+  MessageSquare,
   Mic,
   Settings,
   PenLine,
 } from "lucide-react";
 
-export type View = "home" | "record" | "calendar" | "settings" | "about";
+export type View = "home" | "record" | "calendar" | "chat" | "settings" | "about";
 
 interface Props {
   view: View;
@@ -19,7 +20,8 @@ interface Props {
 const ITEMS: Array<{ id: View; label: string; Icon: typeof Home }> = [
   { id: "home", label: "Home", Icon: Home },
   { id: "record", label: "Record", Icon: Mic },
-  { id: "calendar", label: "Calendar", Icon: CalendarDays },
+  { id: "calendar", label: "History", Icon: CalendarDays },
+  { id: "chat", label: "Ask", Icon: MessageSquare },
   { id: "settings", label: "Settings", Icon: Settings },
   { id: "about", label: "About", Icon: Info },
 ];
