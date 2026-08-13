@@ -58,3 +58,12 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Long-form documentation.
+#
+# Kept out of the repository on purpose. `docs/` holds detail that goes stale faster than the
+# code it describes — build walkthroughs, endpoint listings, generated design specs — and a
+# published document that disagrees with the source is worse than no document. What a reader
+# genuinely needs to trust lives at the root (README, ARCHITECTURE, ROADMAP, SECURITY) or in
+# the code's own doc comments, which cannot drift from what they document.
+docs/

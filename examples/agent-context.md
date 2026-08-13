@@ -1,7 +1,7 @@
 # Gathering context as an agent
 
-Notes on using the MCP tools well. The tools are documented in
-[../docs/mcp-server.md](../docs/mcp-server.md); this is about which to reach for.
+Notes on using the MCP tools well. The tool surface is defined in
+`core/crates/mcp-server/src/`; this is about which to reach for.
 
 ## Prefer traversal over search
 

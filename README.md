@@ -135,6 +135,6 @@ curl -X DELETE 127.0.0.1:47821/v1/recording          # stop, flush, diarize
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the pieces fit and why the boundaries sit where they do
 - [ROADMAP.md](ROADMAP.md) — phased build order
 - [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents working in this repo
-- [docs/](docs/) — build instructions, API reference, MCP tool list
+- `docs/` — build walkthroughs, REST reference, MCP tool list. Local only and not published; see the doc comments in `core/crates/` for anything load-bearing.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — conventions, commit format, review process
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure
