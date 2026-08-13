@@ -11,6 +11,9 @@ cargo run -p notewise-cli -- status
 
 | Command | Purpose |
 |---|---|
+| `record [--seconds] [--device] [--model] [--no-diarize]` | **Record from the microphone** (needs `--features full`) |
+| `import <file.wav> [--title]` | **Transcribe a WAV into a new meeting** (needs `--features whisper`) |
+| `devices` | List audio input devices (needs `--features record`) |
 | `status` | Database, schema version, and whether the AI backend is local |
 | `meetings [--limit]` | Recent meetings |
 | `transcript <id>` | Print a transcript |
@@ -23,6 +26,24 @@ cargo run -p notewise-cli -- status
 | `mcp` | MCP server on stdio, for agents |
 
 Global: `--db <path>` to pick a database, `--ephemeral` for a throwaway in-memory one.
+
+## Features
+
+Recording is behind feature flags because each pulls a heavy toolchain.
+
+| Feature | Adds | Cost |
+|---|---|---|
+| `record` | Microphone capture via cpal | Platform audio SDK |
+| `whisper` | whisper.cpp inference (CPU) | cmake + clang build |
+| `whisper-metal` | GPU on Apple silicon | as above |
+| `full` | `record` + `whisper-metal` | — |
+
+```sh
+cargo run -p notewise-cli --features full -- record --seconds 60
+```
+
+Ctrl-C stops a recording cleanly — the transcript is flushed and diarization still runs, so
+stopping never loses the tail of a meeting.
 
 ## Environment
 

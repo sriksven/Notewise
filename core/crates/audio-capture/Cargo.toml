@@ -12,9 +12,12 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+# Optional: real device capture. Pulls in the platform audio SDK, which a default
+# build should not require.
+cpal = { version = "0.15", optional = true }
 
 [features]
 default = []
 # Real OS capture backends. Off by default: they pull platform audio SDKs and, on
 # macOS, require a signed bundle with a TCC grant that cannot be obtained headlessly.
-os-capture = []
+os-capture = ["dep:cpal"]

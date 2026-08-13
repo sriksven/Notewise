@@ -65,6 +65,40 @@ enum Command {
         id: String,
     },
 
+    /// Record a meeting from the microphone.
+    #[cfg(all(feature = "record", feature = "whisper"))]
+    Record {
+        /// Meeting title. Defaults to the current date and time.
+        #[arg(long)]
+        title: Option<String>,
+        /// Stop after this many seconds. Without it, records until Ctrl-C.
+        #[arg(long)]
+        seconds: Option<u64>,
+        /// Input device name. Defaults to the system default.
+        #[arg(long)]
+        device: Option<String>,
+        /// Transcription model.
+        #[arg(long, default_value = "base.en")]
+        model: String,
+        /// Skip speaker separation.
+        #[arg(long)]
+        no_diarize: bool,
+    },
+
+    /// Transcribe an existing 32-bit float WAV file into a new meeting.
+    #[cfg(feature = "whisper")]
+    Import {
+        path: PathBuf,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, default_value = "base.en")]
+        model: String,
+    },
+
+    /// List available audio input devices.
+    #[cfg(feature = "record")]
+    Devices,
+
     /// Export a meeting as Markdown.
     Export {
         id: String,
@@ -127,6 +161,18 @@ async fn main() -> Result<()> {
         Command::Meetings { limit } => meetings(&config, limit),
         Command::Transcript { id } => transcript(&config, &id),
         Command::Summarize { id } => summarize(&config, &id).await,
+        #[cfg(all(feature = "record", feature = "whisper"))]
+        Command::Record {
+            title,
+            seconds,
+            device,
+            model,
+            no_diarize,
+        } => record(&config, title, seconds, device, &model, no_diarize).await,
+        #[cfg(feature = "whisper")]
+        Command::Import { path, title, model } => import(&config, &path, title, &model).await,
+        #[cfg(feature = "record")]
+        Command::Devices => devices(),
         Command::Export {
             id,
             out,
@@ -316,6 +362,207 @@ fn export(
         }
         None => print!("{markdown}"),
     }
+    Ok(())
+}
+
+/// Build a Whisper engine, downloading the model first if it is missing.
+#[cfg(feature = "whisper")]
+async fn whisper_engine(
+    model_name: &str,
+) -> Result<Box<dyn notewise_transcription::TranscriptionEngine>> {
+    use notewise_transcription::{ModelRegistry, ModelStore, WhisperEngine};
+
+    let model = ModelRegistry::get(model_name)?;
+    let store = ModelStore::new(model_store_dir()?);
+
+    if !store.is_available(&model) {
+        // Downloading here rather than erroring: a user asking to record should not have to
+        // run a separate command first.
+        eprintln!(
+            "downloading {} ({:.0} MB)...",
+            model.name,
+            model.bytes as f64 / 1_000_000.0
+        );
+        store.download(&model).await?;
+        eprintln!("done");
+    }
+
+    Ok(Box::new(WhisperEngine::new(model, store)?))
+}
+
+#[cfg(feature = "whisper")]
+fn model_store_dir() -> Result<PathBuf> {
+    if let Ok(dir) = std::env::var("NOTEWISE_MODEL_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    let base = match std::env::var("NOTEWISE_DATA_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .map_err(|_| anyhow::anyhow!("could not determine the home directory"))?;
+            if cfg!(target_os = "macos") {
+                PathBuf::from(home).join("Library/Application Support/notewise")
+            } else if cfg!(target_os = "windows") {
+                PathBuf::from(home).join("AppData/Roaming/notewise")
+            } else {
+                PathBuf::from(home).join(".local/share/notewise")
+            }
+        }
+    };
+    Ok(base.join("models"))
+}
+
+#[cfg(feature = "record")]
+fn devices() -> Result<()> {
+    let devices = notewise_audio_capture::input_devices()?;
+
+    if devices.is_empty() {
+        println!("No input devices found.");
+        return Ok(());
+    }
+
+    for device in devices {
+        println!(
+            "{}{}  {} Hz, {} ch",
+            if device.is_default { "* " } else { "  " },
+            device.name,
+            device.sample_rate,
+            device.channels
+        );
+    }
+    println!("\n* = system default");
+    Ok(())
+}
+
+#[cfg(all(feature = "record", feature = "whisper"))]
+async fn record(
+    config: &Config,
+    title: Option<String>,
+    seconds: Option<u64>,
+    device: Option<String>,
+    model: &str,
+    no_diarize: bool,
+) -> Result<()> {
+    use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
+    use notewise_recorder::{Pipeline, PipelineConfig};
+    use notewise_storage::{MeetingSource, NewMeeting};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let engine = whisper_engine(model).await?;
+    let db = open(config)?;
+
+    let capture = CaptureConfig {
+        device,
+        ..Default::default()
+    };
+    let mut source = MicrophoneSource::open(&capture)?;
+
+    let meeting = MeetingRepository::new(&db).create(NewMeeting {
+        project_id: None,
+        title: title.unwrap_or_else(|| {
+            format!("Meeting {}", Utc::now().format("%Y-%m-%d %H:%M"))
+        }),
+        source: MeetingSource::Microphone,
+        started_at: Utc::now(),
+    })?;
+
+    println!("recording from {}", source.device_name());
+    println!("meeting {}", meeting.id);
+    match seconds {
+        Some(s) => println!("stopping after {s}s"),
+        None => println!("press Ctrl-C to stop"),
+    }
+
+    // Ctrl-C sets the flag rather than killing the process, so the transcript is flushed
+    // and diarization still runs — otherwise stopping a meeting would lose its tail.
+    let stop = Arc::new(AtomicBool::new(false));
+    let signal_stop = Arc::clone(&stop);
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("\nstopping...");
+            signal_stop.store(true, Ordering::Relaxed);
+        }
+    });
+
+    let deadline = seconds.map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s));
+    let poll_stop = Arc::clone(&stop);
+
+    let mut pipeline = Pipeline::new(engine).with_config(PipelineConfig {
+        diarize: !no_diarize,
+        ..Default::default()
+    });
+
+    let stats = pipeline
+        .run(&db, meeting.id, &mut source, move || {
+            poll_stop.load(Ordering::Relaxed)
+                || deadline.is_some_and(|d| std::time::Instant::now() >= d)
+        })
+        .await?;
+
+    MeetingRepository::new(&db).end(meeting.id, Utc::now())?;
+
+    println!(
+        "\n{} frames, {:.1}s of audio, {} segments, {} speaker(s)",
+        stats.frames_processed,
+        stats.audio_ms as f64 / 1000.0,
+        stats.segments_stored,
+        stats.speakers_detected
+    );
+
+    let text = MeetingRepository::new(&db).transcript_text(meeting.id)?;
+    if text.trim().is_empty() {
+        println!("\n(no speech detected)");
+    } else {
+        println!("\n{text}");
+    }
+    Ok(())
+}
+
+#[cfg(feature = "whisper")]
+async fn import(
+    config: &Config,
+    path: &std::path::Path,
+    title: Option<String>,
+    model: &str,
+) -> Result<()> {
+    use notewise_audio_capture::FileSource;
+    use notewise_recorder::Pipeline;
+    use notewise_storage::{MeetingSource, NewMeeting};
+
+    let engine = whisper_engine(model).await?;
+    let db = open(config)?;
+
+    let mut source = FileSource::open_wav(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+
+    let meeting = MeetingRepository::new(&db).create(NewMeeting {
+        project_id: None,
+        title: title.unwrap_or_else(|| {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Imported meeting".into())
+        }),
+        source: MeetingSource::Import,
+        started_at: Utc::now(),
+    })?;
+
+    eprintln!("transcribing {}...", path.display());
+    let stats = Pipeline::new(engine)
+        .run(&db, meeting.id, &mut source, || false)
+        .await?;
+
+    MeetingRepository::new(&db).end(meeting.id, Utc::now())?;
+
+    eprintln!(
+        "{:.1}s of audio, {} segments, {} speaker(s) -> meeting {}",
+        stats.audio_ms as f64 / 1000.0,
+        stats.segments_stored,
+        stats.speakers_detected,
+        meeting.id
+    );
+    print!("{}", MeetingRepository::new(&db).transcript_text(meeting.id)?);
     Ok(())
 }
 

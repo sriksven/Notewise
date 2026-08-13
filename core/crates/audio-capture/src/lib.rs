@@ -14,6 +14,11 @@
 //! returns [`CaptureError::Unsupported`] with a specific reason rather than silently
 //! producing nothing.
 //!
+//! **Microphone capture is implemented** ([`MicrophoneSource`], `os-capture` feature) — it
+//! needs only the OS microphone permission, no signed bundle. **System audio is not**: on
+//! macOS it requires a ScreenCaptureKit grant against a signed bundle, a TCC prompt no build
+//! process can answer.
+//!
 //! [`FileSource`] and [`SyntheticSource`] are real and work everywhere, which is what lets
 //! the transcription pipeline above be developed and tested with no audio hardware.
 
@@ -22,10 +27,14 @@
 
 mod convert;
 mod format;
+#[cfg(feature = "os-capture")]
+mod microphone;
 mod mixer;
 mod source;
 
 pub use convert::{resample_linear, rms, to_mono};
+#[cfg(feature = "os-capture")]
+pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};
 pub use mixer::{soft_clip, MixedSource, Mixer};
 pub use format::{AudioFormat, SampleRate};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};

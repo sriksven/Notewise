@@ -73,8 +73,9 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | `storage`, `graph`, `ai-router` | Implemented, tested |
 | `api-server`, `mcp-server`, `cli` | Implemented, tested |
 | Markdown export | Implemented |
+| `recorder` | **Pipeline implemented** — capture → mix → transcribe → diarize → store |
 | `transcription` | **Whisper implemented** (`--features whisper-metal`), Parakeet pending |
-| `audio-capture` | Mixing and conversion implemented; OS capture pending |
+| `audio-capture` | **Microphone capture implemented** (`--features os-capture`); system audio pending |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
 | `apps/` (except CLI), `cloud/` | Scaffolded, awaiting their phase |
 
@@ -87,10 +88,19 @@ its specific state. Directories that are scaffolds say so at the top.
 # Requires Rust 1.82+
 cargo build --workspace
 cargo test --workspace
-
-# Run the CLI
-cargo run -p notewise-cli -- --help
 ```
+
+### Record a meeting
+
+Needs a C++ toolchain (cmake + clang) for whisper.cpp. The model downloads on first use.
+
+```sh
+cargo run -p notewise-cli --features full -- devices
+cargo run -p notewise-cli --features full -- record --seconds 60
+cargo run -p notewise-cli --features full -- import meeting.wav
+```
+
+On an Apple M4 with `base.en`, transcription runs at **37.6x realtime on Metal**.
 
 ## Documentation
 

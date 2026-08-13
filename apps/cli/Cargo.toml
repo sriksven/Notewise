@@ -18,9 +18,22 @@ notewise-graph.workspace = true
 notewise-ai-router.workspace = true
 notewise-api-server.workspace = true
 notewise-mcp-server.workspace = true
+notewise-recorder.workspace = true
+notewise-audio-capture.workspace = true
+notewise-transcription.workspace = true
 clap.workspace = true
 tokio = { workspace = true }
 anyhow.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+default = []
+# Live device capture. Pulls the platform audio SDK.
+record = ["notewise-audio-capture/os-capture"]
+# Real transcription. Pulls a cmake build of whisper.cpp.
+whisper = ["notewise-recorder/whisper"]
+whisper-metal = ["whisper", "notewise-recorder/whisper-metal"]
+# Everything needed to actually record a meeting on this machine.
+full = ["record", "whisper-metal"]

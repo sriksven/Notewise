@@ -1,0 +1,29 @@
+[package]
+name = "notewise-recorder"
+description = "Orchestrates capture, mixing, transcription, diarization, and storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+notewise-audio-capture.workspace = true
+notewise-transcription.workspace = true
+notewise-diarization.workspace = true
+notewise-storage.workspace = true
+notewise-graph.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
+# Forwarded so a caller can build the whole pipeline with real inference in one flag.
+whisper = ["notewise-transcription/whisper"]
+whisper-metal = ["whisper", "notewise-transcription/whisper-metal"]
