@@ -309,6 +309,40 @@ mod tests {
             same < different,
             "the embedding is not separating speakers at all: {same:.3} vs {different:.3}"
         );
+
+        // The classes must not merely differ on average — they must not overlap, or no single
+        // threshold can separate them and clustering is guessing.
+        let worst_same =
+            crate::cosine_distance(&e[0], &e[1]).max(crate::cosine_distance(&e[2], &e[3]));
+        let best_different = [
+            crate::cosine_distance(&e[0], &e[2]),
+            crate::cosine_distance(&e[0], &e[3]),
+            crate::cosine_distance(&e[1], &e[2]),
+            crate::cosine_distance(&e[1], &e[3]),
+        ]
+        .into_iter()
+        .fold(f32::MAX, f32::min);
+
+        println!("worst same {worst_same:.3}, best different {best_different:.3}");
+        assert!(
+            worst_same < best_different,
+            "the classes overlap: same-speaker reached {worst_same:.3} while different \
+             speakers came as close as {best_different:.3}"
+        );
+
+        let threshold = crate::ClusterConfig::default().threshold;
+        assert!(
+            (worst_same..best_different).contains(&threshold),
+            "the configured threshold {threshold:.3} is outside the measured gap \
+             {worst_same:.3}..{best_different:.3}"
+        );
+
+        // End to end: the clustering must actually recover two speakers.
+        let labels = crate::cluster::cluster(&e, crate::ClusterConfig::default());
+        println!("clustered as {labels:?}");
+        assert_eq!(labels[0], labels[1], "speaker A split apart");
+        assert_eq!(labels[2], labels[3], "speaker B split apart");
+        assert_ne!(labels[0], labels[2], "the two speakers merged");
     }
 
     /// Diagnostic: the full distance matrix, with and without cepstral mean normalisation.

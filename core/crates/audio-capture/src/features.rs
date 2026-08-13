@@ -42,6 +42,14 @@ pub struct FbankConfig {
     /// top band — `-400` at 16 kHz gives 7600 Hz.
     pub high_freq_hz: f32,
     pub preemphasis: f32,
+    /// Multiplied into every sample before analysis.
+    ///
+    /// Kaldi computes filterbanks over **int16-scaled** audio (-32768..32767), not the
+    /// -1.0..1.0 floats the rest of this codebase uses. Every model trained through Kaldi's
+    /// pipeline — WeSpeaker, 3D-Speaker, NeMo — therefore saw features about `2·ln(32768)`
+    /// ≈ 20.8 larger than the same audio produces here. Cepstral mean normalisation cancels a
+    /// constant offset, which is why the mismatch hides when it is on and bites when it is off.
+    pub input_scale: f32,
     /// Subtract each bin's mean over time. WeSpeaker and 3D-Speaker apply this; skipping it
     /// leaves a channel/recording bias in the embedding that clustering then reads as speaker
     /// identity.
@@ -58,6 +66,7 @@ impl Default for FbankConfig {
             low_freq_hz: 20.0,
             high_freq_hz: -400.0,
             preemphasis: 0.97,
+            input_scale: 32_768.0,
             mean_normalize: true,
         }
     }
@@ -176,6 +185,12 @@ impl FbankExtractor {
         for f in 0..frames {
             let start = f * frame_shift;
             frame.copy_from_slice(&samples[start..start + frame_length]);
+
+            if self.config.input_scale != 1.0 {
+                for sample in frame.iter_mut() {
+                    *sample *= self.config.input_scale;
+                }
+            }
 
             // Kaldi removes the DC offset per frame, before pre-emphasis.
             let mean = frame.iter().sum::<f32>() / frame_length as f32;

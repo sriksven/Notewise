@@ -32,8 +32,14 @@ pub struct ClusterConfig {
     /// (`0.0` identical, `2.0` opposite).
     ///
     /// The single most consequential number here. Too low and one person becomes several; too
-    /// high and a meeting becomes one speaker. 0.55 is around where CAM++ and WeSpeaker
-    /// embeddings separate speakers on 16 kHz conversational audio.
+    /// high and a meeting becomes one speaker.
+    ///
+    /// 0.41 is measured, not borrowed. On CAM++ embeddings of two speakers saying two
+    /// utterances each, the worst same-speaker distance was 0.397 and the best
+    /// different-speaker distance 0.422; this sits between them. The margin is thin and the
+    /// sample is small, so treat it as a starting point rather than a constant — the
+    /// `print_the_distance_matrix` diagnostic in `embedding.rs` regenerates these numbers for
+    /// any model or corpus.
     pub threshold: f32,
 
     /// Never produce more than this many speakers.
@@ -53,7 +59,7 @@ pub struct ClusterConfig {
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
-            threshold: 0.55,
+            threshold: 0.41,
             max_speakers: 10,
             min_duration_ms: 1_000,
         }
