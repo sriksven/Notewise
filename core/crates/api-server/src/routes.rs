@@ -43,6 +43,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             get(get_transcript).post(append_segments),
         )
         .route("/v1/meetings/:id/summarize", post(summarize_meeting))
+        .route("/v1/meetings/:id/summary", get(get_summary))
         .route("/v1/meetings/:id/related", get(related_to_meeting))
         .route("/v1/meetings/:id/export", get(export_meeting))
         .route("/v1/notes", get(list_notes).post(create_note))
@@ -114,6 +115,55 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         can_record: recording::SUPPORTED && state.db_path().is_some(),
         recording_meeting_id: state.recording().status().await.map(|s| s.meeting_id),
     }))
+}
+
+/// The stored summary for a meeting, with its decisions and action items.
+///
+/// Read-only and separate from `POST /summarize`: a summary is generated once and looked at
+/// many times, and re-running a model every time someone opens a meeting would be both slow
+/// and non-deterministic.
+async fn get_summary(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let meeting_id = parse_id(&id)?;
+    let db = state.db().await;
+    let repo = SummaryRepository::new(&db);
+
+    // 200 with `summary: null` rather than 404: the meeting exists, it simply has not been
+    // summarised, and a client should render "not summarised yet" rather than an error.
+    let Some(summary) = repo.latest_for_meeting(meeting_id)? else {
+        return Ok(Json(serde_json::json!({ "summary": null })));
+    };
+
+    let decisions = repo.decisions(summary.id)?;
+    let action_items = repo.action_items(summary.id)?;
+
+    Ok(Json(serde_json::json!({
+        "summary": {
+            "id": summary.id,
+            "text": summary.text,
+            "model": summary.model,
+            "created_at": summary.created_at,
+            "decisions": decisions
+                .into_iter()
+                .map(|d| serde_json::json!({
+                    "id": d.id,
+                    "text": d.text,
+                    "reasoning": d.reasoning,
+                }))
+                .collect::<Vec<_>>(),
+            "action_items": action_items
+                .into_iter()
+                .map(|a| serde_json::json!({
+                    "id": a.id,
+                    "text": a.text,
+                    "owner": a.owner,
+                    "due_at": a.due_at,
+                }))
+                .collect::<Vec<_>>(),
+        }
+    })))
 }
 
 // ---------------------------------------------------------------- devices and languages

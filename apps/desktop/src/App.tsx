@@ -11,6 +11,7 @@ import { AboutView } from "./views/AboutView";
 import { CalendarView } from "./views/CalendarView";
 import { ChatView } from "./views/ChatView";
 import { SettingsView } from "./views/SettingsView";
+import { SummaryView } from "./views/SummaryView";
 import {
   api,
   ApiError,
@@ -239,6 +240,7 @@ export default function App() {
     setError(null);
     try {
       const result = await api.summarize(selectedId);
+      setView("summary");
       setNotice(
         `Summarized with ${result.model} — ${result.decisions} decision(s), ` +
           `${result.action_items} action item(s).`,
@@ -352,6 +354,13 @@ export default function App() {
             )}
             {view === "chat" && (
               <ChatView
+                meetingId={selectedId}
+                meetingTitle={selectedMeeting?.title ?? null}
+                hasTranscript={segments.length > 0}
+              />
+            )}
+            {view === "summary" && (
+              <SummaryView
                 meetingId={selectedId}
                 meetingTitle={selectedMeeting?.title ?? null}
                 hasTranscript={segments.length > 0}

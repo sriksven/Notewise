@@ -33,6 +33,28 @@ export interface DownloadState {
   error: string | null;
 }
 
+export interface Decision {
+  id: string;
+  text: string;
+  reasoning: string | null;
+}
+
+export interface ActionItem {
+  id: string;
+  text: string;
+  owner: string | null;
+  due_at: string | null;
+}
+
+export interface Summary {
+  id: string;
+  text: string;
+  model: string;
+  created_at: string;
+  decisions: Decision[];
+  action_items: ActionItem[];
+}
+
 export interface DeviceInfo {
   name: string;
   is_default: boolean;
@@ -307,6 +329,10 @@ export const api = {
 
     return () => source.close();
   },
+
+  /** The stored summary, or null when the meeting has not been summarized. */
+  summary: (id: string) =>
+    request<{ summary: Summary | null }>(`/v1/meetings/${id}/summary`),
 
   recordingStatus: () => request<RecordingStatus>("/v1/recording"),
 
