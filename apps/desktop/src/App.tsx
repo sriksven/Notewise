@@ -38,6 +38,10 @@ export default function App() {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   /** Which input the engine is capturing from, shown so a wrong device is caught early. */
   const [device, setDevice] = useState<string | null>(null);
+  /** Chosen input device, or null for the system default. Applies to the next recording. */
+  const [preferredDevice, setPreferredDevice] = useState<string | null>(null);
+  /** Chosen spoken language, or null to let the model detect it. */
+  const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -195,7 +199,11 @@ export default function App() {
         })}`;
 
         if (health?.can_record) {
-          const started = await api.startRecording({ title });
+          const started = await api.startRecording({
+            title,
+            device: preferredDevice ?? undefined,
+            language: language ?? undefined,
+          });
           setRecordingId(started.meeting_id);
           setSelectedId(started.meeting_id);
           setStartedAt(Date.now());
@@ -242,6 +250,40 @@ export default function App() {
     }
   };
 
+  /**
+   * Transcribe a file already on this machine.
+   *
+   * A path rather than a file upload: the engine runs on this machine, so uploading would copy
+   * gigabytes through HTTP to reach a file that is already there.
+   */
+  const importAudio = async () => {
+    const path = window.prompt(
+      "Path to a 32-bit float WAV file on this machine:",
+    );
+    if (!path?.trim()) return;
+
+    setBusy(true);
+    setError(null);
+    setNotice("Transcribing — this runs at about 25x realtime.");
+    try {
+      const result = await api.importAudio({
+        path: path.trim(),
+        language: language ?? undefined,
+      });
+      setSelectedId(result.meeting_id);
+      setNotice(
+        `Imported ${Math.round(result.audio_ms / 1000)}s of audio — ` +
+          `${result.segments} segment(s), ${result.speakers} speaker(s).`,
+      );
+      await refresh();
+    } catch (e) {
+      report(e);
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const exportMeeting = (variant: "full" | "brief") => {
     if (!selectedId) return;
     // Navigating lets the browser handle the download, preserving the filename from
@@ -260,6 +302,13 @@ export default function App() {
           health={health}
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((open) => !open)}
+          isRecording={isRecording}
+          device={preferredDevice}
+          onDeviceChange={setPreferredDevice}
+          language={language}
+          onLanguageChange={setLanguage}
+          onBackendChange={() => void refresh()}
+          onError={setError}
         />
 
         <div className="relative flex min-h-0 flex-1">
@@ -349,6 +398,8 @@ export default function App() {
               canSummarize={selectedId !== null && !isRecording && segments.length > 0}
               onExport={exportMeeting}
               canExport={selectedId !== null}
+              onImport={importAudio}
+              canImport={(health?.can_record ?? false) && !isRecording}
             />
           )}
         </div>

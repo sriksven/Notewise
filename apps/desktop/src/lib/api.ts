@@ -33,11 +33,24 @@ export interface DownloadState {
   error: string | null;
 }
 
+export interface DeviceInfo {
+  name: string;
+  is_default: boolean;
+  sample_rate: number;
+  channels: number;
+}
+
+export interface LanguageOption {
+  code: string;
+  label: string;
+}
+
 export interface RecordingStatus {
   recording: boolean;
   meeting_id: string | null;
   device: string | null;
   model: string | null;
+  language: string | null;
   can_record: boolean;
 }
 
@@ -297,11 +310,51 @@ export const api = {
 
   recordingStatus: () => request<RecordingStatus>("/v1/recording"),
 
+  devices: () =>
+    request<{ devices: DeviceInfo[]; available: boolean; error?: string }>(
+      "/v1/devices",
+    ),
+
+  languages: () => request<{ languages: LanguageOption[] }>("/v1/languages"),
+
+  /**
+   * Switch the active AI backend.
+   *
+   * No API key is sent: the engine reads keys from its own environment, so a key never
+   * travels over HTTP — not even on loopback — and never lands in a log.
+   */
+  switchBackend: (kind: string, model?: string, endpoint?: string) =>
+    request<{ kind: string; model: string; is_local: boolean }>("/v1/backend", {
+      method: "POST",
+      body: JSON.stringify({ kind, model, endpoint }),
+    }),
+
+  /** Transcribe a file already on this machine into a new meeting. */
+  importAudio: (options: {
+    path: string;
+    title?: string;
+    model?: string;
+    language?: string;
+  }) =>
+    request<{
+      meeting_id: string;
+      segments: number;
+      speakers: number;
+      audio_ms: number;
+    }>("/v1/import", { method: "POST", body: JSON.stringify(options) }),
+
   /**
    * Start capturing. The engine creates the meeting as part of this call, so there is never a
    * meeting that exists with nothing recording into it.
    */
-  startRecording: (options: { title?: string; device?: string; model?: string } = {}) =>
+  startRecording: (
+    options: {
+      title?: string;
+      device?: string;
+      model?: string;
+      language?: string;
+    } = {},
+  ) =>
     request<RecordingStatus>("/v1/recording", {
       method: "POST",
       body: JSON.stringify(options),

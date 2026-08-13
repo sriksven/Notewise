@@ -14,7 +14,7 @@
 //! thread — which on most platforms causes dropouts rather than merely lag.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -136,11 +136,10 @@ impl MicrophoneSource {
 
     /// Drain whatever the callback has queued.
     fn drain(&mut self) {
-        loop {
-            match self.receiver.try_recv() {
-                Ok(chunk) => self.pending.extend(chunk),
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
+        // A disconnected channel ends the drain the same way an empty one does: the device is
+        // gone, and whatever is already buffered is still worth keeping.
+        while let Ok(chunk) = self.receiver.try_recv() {
+            self.pending.extend(chunk);
         }
     }
 

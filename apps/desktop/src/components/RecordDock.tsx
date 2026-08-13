@@ -20,6 +20,9 @@ interface Props {
   canSummarize: boolean;
   onExport: (variant: "full" | "brief") => void;
   canExport: boolean;
+  onImport: () => void;
+  /** False when the engine cannot transcribe, or is already busy recording. */
+  canImport: boolean;
 }
 
 /** Elapsed time as mm:ss, or h:mm:ss once a meeting runs past an hour. */
@@ -49,6 +52,8 @@ export function RecordDock({
   canSummarize,
   onExport,
   canExport,
+  onImport,
+  canImport,
 }: Props) {
   const [, tick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -162,6 +167,27 @@ export function RecordDock({
               {canSummarize
                 ? "Runs on the configured backend."
                 : "Needs a finished meeting with a transcript."}
+            </p>
+
+            <div className="my-1 border-t border-hairline" />
+
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canImport}
+              onClick={() => {
+                setMenuOpen(false);
+                onImport();
+              }}
+              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
+                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+            >
+              Import an audio file
+            </button>
+            <p className="px-3 pb-1 pt-1 text-[11px] leading-snug text-neutral-400">
+              {canImport
+                ? "Transcribes a WAV already on this machine."
+                : "Needs a build that can transcribe."}
             </p>
 
             <div className="my-1 border-t border-hairline" />

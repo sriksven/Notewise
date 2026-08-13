@@ -56,6 +56,10 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             post(download_model).get(download_progress),
         )
         .route("/v1/downloads", get(list_downloads))
+        .route("/v1/devices", get(list_devices))
+        .route("/v1/languages", get(list_languages))
+        .route("/v1/backend", post(switch_backend))
+        .route("/v1/import", post(import_audio))
         .route("/v1/search", get(search))
         // Drafting only. There is deliberately no route that sends one — see `draft_emails`.
         .route(
@@ -110,6 +114,178 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         can_record: recording::SUPPORTED && state.db_path().is_some(),
         recording_meeting_id: state.recording().status().await.map(|s| s.meeting_id),
     }))
+}
+
+// ---------------------------------------------------------------- devices and languages
+
+// Only constructed by the feature-gated device enumeration.
+#[cfg_attr(not(feature = "record"), allow(dead_code))]
+#[derive(Debug, Serialize)]
+struct DeviceBody {
+    name: String,
+    is_default: bool,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Input devices this machine can record from.
+///
+/// Returns an empty list rather than an error in a build without capture. A picker with nothing
+/// in it is self-explanatory; a 501 makes a client decide whether to show an error for a
+/// feature it may not even offer.
+async fn list_devices() -> Json<serde_json::Value> {
+    #[cfg(feature = "record")]
+    match notewise_audio_capture::input_devices() {
+        Ok(devices) => {
+            let devices: Vec<DeviceBody> = devices
+                .into_iter()
+                .map(|d| DeviceBody {
+                    name: d.name,
+                    is_default: d.is_default,
+                    sample_rate: d.sample_rate,
+                    channels: d.channels,
+                })
+                .collect();
+            Json(serde_json::json!({ "devices": devices, "available": true }))
+        }
+        Err(e) => {
+            // Reported rather than swallowed: an empty picker and a broken audio subsystem
+            // look identical to a user otherwise.
+            tracing::warn!(error = %e, "could not enumerate input devices");
+            Json(serde_json::json!({
+                "devices": [],
+                "available": true,
+                "error": e.to_string(),
+            }))
+        }
+    }
+
+    #[cfg(not(feature = "record"))]
+    Json(serde_json::json!({ "devices": [], "available": false }))
+}
+
+/// Languages Whisper can be told to expect.
+///
+/// A subset, not all ninety-nine: a picker with every language is harder to use than one with
+/// the languages a meeting is plausibly in, and "Detect" covers the rest.
+async fn list_languages() -> Json<serde_json::Value> {
+    const LANGUAGES: [(&str, &str); 14] = [
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("nl", "Dutch"),
+        ("hi", "Hindi"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh", "Chinese"),
+        ("ru", "Russian"),
+        ("ar", "Arabic"),
+        ("tr", "Turkish"),
+    ];
+
+    Json(serde_json::json!({
+        "languages": LANGUAGES
+            .iter()
+            .map(|(code, label)| serde_json::json!({ "code": code, "label": label }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+// ---------------------------------------------------------------- backend switching
+
+#[derive(Debug, Deserialize)]
+struct SwitchBackendBody {
+    /// Backend identifier, e.g. `ollama` or `anthropic`.
+    kind: String,
+    /// Model id. Omit for the backend's default.
+    model: Option<String>,
+    /// Endpoint for backends that need one (LM Studio, a custom OpenAI-compatible server).
+    endpoint: Option<String>,
+}
+
+/// Switch the active AI backend.
+///
+/// The API key is *not* accepted here. It is read from the environment, so a key never travels
+/// over even a loopback HTTP request and never lands in a log or a shell history. A backend
+/// whose key is missing is refused with a message naming the variable to set.
+async fn switch_backend(
+    State(state): State<Shared>,
+    Json(body): Json<SwitchBackendBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let kind = BackendKind::parse(body.kind.trim())
+        .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{}'", body.kind)))?;
+
+    state
+        .switch_backend(kind, body.model.clone(), body.endpoint.clone())
+        .await?;
+
+    let ai = state.ai();
+    Ok(Json(serde_json::json!({
+        "kind": kind.as_str(),
+        "model": ai.model_id(),
+        "is_local": ai.is_local(),
+    })))
+}
+
+// ---------------------------------------------------------------- import
+
+// Fields are read only by the feature-gated import path, but the shape must exist in every
+// build so the route can return a clear 501 rather than a deserialization error.
+#[cfg_attr(not(all(feature = "record", feature = "whisper")), allow(dead_code))]
+#[derive(Debug, Deserialize)]
+struct ImportBody {
+    /// Absolute path to a WAV file on this machine.
+    ///
+    /// A path rather than an upload: the engine is loopback-only and the file is already on the
+    /// same machine, so uploading would copy gigabytes through HTTP for no reason.
+    path: String,
+    title: Option<String>,
+    model: Option<String>,
+    language: Option<String>,
+}
+
+/// Transcribe an existing audio file into a new meeting.
+///
+/// Runs to completion before responding. Unlike a live recording there is no "stop", and a
+/// caller has nothing useful to do with a half-imported meeting.
+#[allow(unused_variables)]
+async fn import_audio(
+    State(state): State<Shared>,
+    Json(body): Json<ImportBody>,
+) -> ApiResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    #[cfg(all(feature = "record", feature = "whisper"))]
+    {
+        let result = crate::recording::import_file(
+            state.db_path().map(|p| p.to_path_buf()),
+            state.model_dir().to_path_buf(),
+            crate::recording::ImportRequest {
+                path: std::path::PathBuf::from(&body.path),
+                title: body.title.clone(),
+                model: body.model.clone(),
+                language: body.language.clone(),
+            },
+        )
+        .await?;
+
+        Ok((
+            axum::http::StatusCode::CREATED,
+            Json(serde_json::json!({
+                "meeting_id": result.0,
+                "segments": result.1.segments,
+                "speakers": result.1.speakers,
+                "audio_ms": result.1.audio_ms,
+            })),
+        ))
+    }
+    #[cfg(not(all(feature = "record", feature = "whisper")))]
+    Err(ApiError::NotImplemented(
+        "this build cannot transcribe: it was compiled without the 'record' and 'whisper' \
+         features"
+            .into(),
+    ))
 }
 
 // ---------------------------------------------------------------- email drafts
@@ -232,7 +408,8 @@ async fn draft_emails(
         context
     };
 
-    let drafts = generate_email_variants(state.ai(), &context, &tones).await?;
+    let ai = state.ai();
+    let drafts = generate_email_variants(&*ai, &context, &tones).await?;
 
     let db = state.db().await;
     let repo = EmailDraftRepository::new(&db);
@@ -330,6 +507,8 @@ struct StartRecordingBody {
     device: Option<String>,
     /// Transcription model, e.g. `base.en`. Omit for the default.
     model: Option<String>,
+    /// Spoken language, e.g. `en`. Omit to let the model detect it.
+    language: Option<String>,
     /// Separate speakers when the recording stops. Defaults to on.
     diarize: Option<bool>,
 }
@@ -340,6 +519,7 @@ struct RecordingStatusBody {
     meeting_id: Option<Id>,
     device: Option<String>,
     model: Option<String>,
+    language: Option<String>,
     /// So a client can tell "not recording" from "cannot record".
     can_record: bool,
 }
@@ -359,6 +539,7 @@ async fn recording_status(State(state): State<Shared>) -> Json<RecordingStatusBo
         meeting_id: status.as_ref().map(|s| s.meeting_id),
         device: status.as_ref().map(|s| s.device.clone()),
         model: status.as_ref().map(|s| s.model.clone()),
+        language: status.as_ref().and_then(|s| s.language.clone()),
         can_record: recording::SUPPORTED && state.db_path().is_some(),
     })
 }
@@ -379,6 +560,7 @@ async fn start_recording(
                 title: body.as_ref().and_then(|b| b.title.clone()),
                 device: body.as_ref().and_then(|b| b.device.clone()),
                 model: body.as_ref().and_then(|b| b.model.clone()),
+                language: body.as_ref().and_then(|b| b.language.clone()),
                 diarize: body.as_ref().and_then(|b| b.diarize).unwrap_or(true),
             },
         )
@@ -391,6 +573,7 @@ async fn start_recording(
             meeting_id: Some(status.meeting_id),
             device: Some(status.device),
             model: Some(status.model),
+            language: status.language,
             can_record: true,
         }),
     ))
@@ -417,6 +600,8 @@ impl From<RecordingError> for ApiError {
             // the caller was wrong, and a 500 would suggest a bug.
             RecordingError::Unsupported => ApiError::NotImplemented(error.to_string()),
             RecordingError::Ephemeral => ApiError::BadRequest(error.to_string()),
+            // A path that does not exist is the caller's error, so 400 rather than 500.
+            RecordingError::NoSuchFile(_) => ApiError::BadRequest(error.to_string()),
             RecordingError::AlreadyRecording(_) | RecordingError::NotRecording => {
                 ApiError::Conflict(error.to_string())
             }
@@ -716,7 +901,7 @@ async fn clarifying_questions(
     }
 
     let window = session.window_text(&utterances, now_ms);
-    let questions = suggest_questions(state.ai(), &window, now_ms).await?;
+    let questions = suggest_questions(&*state.ai(), &window, now_ms).await?;
 
     Ok(Json(serde_json::json!({
         "questions": questions,

@@ -51,6 +51,10 @@ pub enum RecordingError {
     #[error("not recording")]
     NotRecording,
 
+    /// The caller named a file that is not there. Their mistake, not the engine's.
+    #[error("no file at {0}")]
+    NoSuchFile(String),
+
     #[error("recording failed: {0}")]
     Failed(String),
 }
@@ -65,7 +69,39 @@ pub struct StartRequest {
     pub device: Option<String>,
     /// Transcription model name, e.g. `base.en`.
     pub model: Option<String>,
+    /// Spoken language, e.g. `en`. `None` lets the model detect it.
+    pub language: Option<String>,
     pub diarize: bool,
+}
+
+/// What a caller asked to import.
+#[derive(Debug, Clone)]
+pub struct ImportRequest {
+    pub path: PathBuf,
+    pub title: Option<String>,
+    pub model: Option<String>,
+    pub language: Option<String>,
+}
+
+/// Transcribe a file into a new meeting.
+///
+/// Blocking work on a dedicated thread for the same reason live recording is: Whisper
+/// inference is a long CPU burn, and running it on a runtime worker would stall every other
+/// request for the length of the file.
+#[allow(unused_variables)]
+pub async fn import_file(
+    db_path: Option<PathBuf>,
+    model_dir: PathBuf,
+    request: ImportRequest,
+) -> Result<(Id, Outcome)> {
+    #[cfg(all(feature = "record", feature = "whisper"))]
+    {
+        imp::import(db_path, model_dir, request).await
+    }
+    #[cfg(not(all(feature = "record", feature = "whisper")))]
+    {
+        Err(RecordingError::Unsupported)
+    }
 }
 
 /// A recording in progress, as reported to a client.
@@ -74,6 +110,7 @@ pub struct Status {
     pub meeting_id: Id,
     pub device: String,
     pub model: String,
+    pub language: Option<String>,
 }
 
 /// What a finished recording produced.
@@ -183,6 +220,7 @@ mod imp {
         meeting_id: Id,
         device: String,
         model: String,
+        language: Option<String>,
         stop: Arc<AtomicBool>,
         done: oneshot::Receiver<std::result::Result<Outcome, String>>,
     }
@@ -193,6 +231,7 @@ mod imp {
                 meeting_id: self.meeting_id,
                 device: self.device.clone(),
                 model: self.model.clone(),
+                language: self.language.clone(),
             }
         }
     }
@@ -306,6 +345,7 @@ mod imp {
             meeting_id,
             device: device.clone(),
             model: model.name.to_string(),
+            language: request.language.clone(),
         };
 
         tracing::info!(%meeting_id, device = %device, model = %model.name, "recording started");
@@ -314,11 +354,102 @@ mod imp {
             meeting_id,
             device,
             model: model.name.to_string(),
+            language: request.language.clone(),
             stop,
             done,
         });
 
         Ok(status)
+    }
+
+    /// Transcribe an existing file into a new meeting.
+    pub(super) async fn import(
+        db_path: Option<PathBuf>,
+        model_dir: PathBuf,
+        request: ImportRequest,
+    ) -> Result<(Id, Outcome)> {
+        use notewise_audio_capture::FileSource;
+
+        let db_path = db_path.ok_or(RecordingError::Ephemeral)?;
+
+        if !request.path.exists() {
+            return Err(RecordingError::NoSuchFile(
+                request.path.display().to_string(),
+            ));
+        }
+
+        let model = ModelRegistry::get(request.model.as_deref().unwrap_or("base.en"))
+            .map_err(|e| RecordingError::Failed(e.to_string()))?;
+        let store = ModelStore::new(&model_dir);
+        if !store.is_available(&model) {
+            return Err(RecordingError::Failed(format!(
+                "the '{}' model is not installed — download it first",
+                model.name
+            )));
+        }
+
+        let (tx, done) = oneshot::channel();
+        let title = request.title.clone().unwrap_or_else(|| {
+            request
+                .path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Imported meeting".into())
+        });
+        let language = request.language.clone();
+        let path = request.path.clone();
+
+        std::thread::Builder::new()
+            .name("notewise-import".into())
+            .spawn(move || {
+                let result = (|| -> Result<(Id, Outcome)> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    let engine = WhisperEngine::new(model, store)
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?
+                        .with_language(language);
+
+                    let mut source = FileSource::open_wav(&path)
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    let db = Database::open(&db_path)
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    let meeting = MeetingRepository::new(&db)
+                        .create(NewMeeting {
+                            project_id: None,
+                            title,
+                            source: MeetingSource::Import,
+                            started_at: Utc::now(),
+                        })
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    let mut pipeline = Pipeline::new(Box::new(engine));
+                    let stats = runtime
+                        .block_on(pipeline.run(&db, meeting.id, &mut source, || false))
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    MeetingRepository::new(&db)
+                        .end(meeting.id, Utc::now())
+                        .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    Ok((
+                        meeting.id,
+                        Outcome {
+                            segments: stats.segments_stored,
+                            speakers: stats.speakers_detected,
+                            audio_ms: stats.audio_ms,
+                        },
+                    ))
+                })();
+                let _ = tx.send(result);
+            })
+            .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+        done.await
+            .map_err(|_| RecordingError::Failed("the import thread stopped unexpectedly".into()))?
     }
 
     pub(super) async fn stop(manager: &RecordingManager) -> Result<(Id, Outcome)> {

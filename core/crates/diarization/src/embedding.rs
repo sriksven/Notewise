@@ -79,7 +79,7 @@ impl SpeakerEmbedder {
             // same-speaker/different-speaker means were 0.380/0.790; without it, 0.285/0.781.
             // The wider margin wins. See `print_the_distance_matrix`.
             extractor: FbankExtractor::new(FbankConfig {
-                mean_normalize: false,
+                normalization: notewise_audio_capture::Normalization::None,
                 ..Default::default()
             }),
             dimensions: std::sync::atomic::AtomicUsize::new(0),
@@ -373,10 +373,13 @@ mod tests {
         let audio: Vec<Vec<f32>> = files.iter().map(|f| load(f)).collect();
         let labels = ["A_s1", "A_s2", "B_s1", "B_s2"];
 
-        for mean_normalize in [true, false] {
+        for normalization in [
+            notewise_audio_capture::Normalization::Mean,
+            notewise_audio_capture::Normalization::None,
+        ] {
             let mut embedder = SpeakerEmbedder::load(&path).expect("load");
             embedder.extractor = FbankExtractor::new(FbankConfig {
-                mean_normalize,
+                normalization,
                 ..Default::default()
             });
 
@@ -385,7 +388,7 @@ mod tests {
                 .map(|a| embedder.embed(a, 16_000).expect("embed"))
                 .collect();
 
-            println!("\n=== mean_normalize = {mean_normalize} ===");
+            println!("\n=== normalization = {normalization:?} ===");
             print!("{:>8}", "");
             for l in &labels {
                 print!("{l:>8}");

@@ -1,20 +1,187 @@
-import { Globe, Mic, Settings2, ChevronRight, ShieldCheck, ShieldAlert } from "lucide-react";
-import type { Health } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import {
+  Check,
+  ChevronRight,
+  Globe,
+  Mic,
+  Settings2,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
+
+import { api, type BackendInfo, type DeviceInfo, type Health, type LanguageOption } from "../lib/api";
 
 interface Props {
   health: Health | null;
   onTogglePanel: () => void;
   panelOpen: boolean;
+  /** Locked while recording: changing input or language mid-meeting cannot take effect. */
+  isRecording: boolean;
+  device: string | null;
+  onDeviceChange: (device: string | null) => void;
+  language: string | null;
+  onLanguageChange: (language: string | null) => void;
+  onBackendChange: () => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * A pill with a dropdown.
+ *
+ * Closes on outside click and on Escape. A menu that only closes by re-clicking its own trigger
+ * is a menu users end up dismissing by clicking something they did not mean to press.
+ */
+function Pill({
+  icon,
+  label,
+  disabled,
+  disabledReason,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={container}>
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen((o) => !o)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={disabled ? disabledReason : label}
+        className="pill disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {icon}
+        {label}
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-1/2 top-full z-20 mt-1.5 max-h-80 w-60 -translate-x-1/2
+                     overflow-y-auto rounded-xl border border-hairline bg-white py-1 shadow-dock"
+        >
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Item({
+  selected,
+  onClick,
+  title,
+  subtitle,
+  disabled,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+  subtitle?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-[13px]
+                 text-neutral-700 transition hover:bg-neutral-50
+                 disabled:cursor-not-allowed disabled:text-neutral-300"
+    >
+      <span className="mt-0.5 w-3.5 shrink-0">
+        {selected && <Check size={13} className="text-record" aria-hidden />}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate">{title}</span>
+        {subtitle && (
+          <span className="block truncate text-[11px] text-neutral-400">{subtitle}</span>
+        )}
+      </span>
+    </button>
+  );
 }
 
 /**
  * The three configuration pills, plus the panel toggle.
  *
- * These sit above the content rather than in a settings screen because model,
- * input device, and language are decisions a user revisits per meeting — burying
- * them costs more than the header space.
+ * These sit above the content rather than in a settings screen because model, input device, and
+ * language are decisions a user revisits per meeting — burying them costs more than the header
+ * space. Each one is backed by a real endpoint; a pill that only looked like a control would be
+ * worse than no pill at all.
  */
-export function TopBar({ health, onTogglePanel, panelOpen }: Props) {
+export function TopBar({
+  health,
+  onTogglePanel,
+  panelOpen,
+  isRecording,
+  device,
+  onDeviceChange,
+  language,
+  onLanguageChange,
+  onBackendChange,
+  onError,
+}: Props) {
+  const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [languages, setLanguages] = useState<LanguageOption[]>([]);
+
+  // Loaded once. None of these change while the app is open, and re-fetching on every menu
+  // open would make the first paint of the menu wait on the network.
+  useEffect(() => {
+    void api.backends().then((r) => setBackends(r.backends)).catch(() => setBackends([]));
+    void api.devices().then((r) => setDevices(r.devices)).catch(() => setDevices([]));
+    void api.languages().then((r) => setLanguages(r.languages)).catch(() => setLanguages([]));
+  }, []);
+
+  const switchTo = async (backend: BackendInfo, close: () => void) => {
+    close();
+    try {
+      await api.switchBackend(backend.kind);
+      onBackendChange();
+    } catch (e) {
+      onError(
+        e instanceof Error
+          ? e.message
+          : `Could not switch to ${backend.label}.`,
+      );
+    }
+  };
+
+  // Named only once chosen. A pill reading "Detect" on its own says nothing about what it
+  // controls; "Language" does, and the menu explains the default.
+  const languageLabel = language
+    ? (languages.find((l) => l.code === language)?.label ?? language)
+    : "Language";
+
   return (
     <header className="chrome relative flex h-14 shrink-0 items-center justify-center border-b border-hairline px-3">
       <button
@@ -34,21 +201,127 @@ export function TopBar({ health, onTogglePanel, panelOpen }: Props) {
       </button>
 
       <div className="flex items-center gap-2">
-        <button type="button" className="pill">
-          <Settings2 size={14} aria-hidden />
-          {/* Falls back to a label rather than an empty pill before health loads. */}
-          {health?.ai_model ?? "Model"}
-        </button>
+        <Pill
+          icon={<Settings2 size={14} aria-hidden />}
+          label={health?.ai_model ?? "Model"}
+        >
+          {(close) => (
+            <>
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                AI backend
+              </p>
+              {backends.length === 0 && (
+                <p className="px-3 py-2 text-[12px] text-neutral-400">
+                  Could not reach the engine.
+                </p>
+              )}
+              {backends.map((backend) => {
+                // A cloud backend with no key on the engine cannot be selected. Showing it
+                // greyed with the reason beats hiding it and leaving the user wondering why
+                // their provider is missing.
+                const blocked = backend.requires_api_key;
+                return (
+                  <Item
+                    key={backend.kind}
+                    selected={health?.ai_model === backend.kind || false}
+                    disabled={blocked}
+                    onClick={() => void switchTo(backend, close)}
+                    title={backend.label}
+                    subtitle={
+                      blocked
+                        ? "needs an API key in the engine's environment"
+                        : backend.is_local
+                          ? "runs on this machine"
+                          : "sends transcripts to the provider"
+                    }
+                  />
+                );
+              })}
+            </>
+          )}
+        </Pill>
 
-        <button type="button" className="pill">
-          <Mic size={14} aria-hidden />
-          Devices
-        </button>
+        <Pill
+          icon={<Mic size={14} aria-hidden />}
+          label={device ? device.split(" ")[0] : "Devices"}
+          disabled={isRecording}
+          disabledReason="Stop recording to change the input device"
+        >
+          {(close) => (
+            <>
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                Input device
+              </p>
+              <Item
+                selected={device === null}
+                onClick={() => {
+                  onDeviceChange(null);
+                  close();
+                }}
+                title="System default"
+                subtitle="follows whatever macOS is using"
+              />
+              {devices.map((d) => (
+                <Item
+                  key={d.name}
+                  selected={device === d.name}
+                  onClick={() => {
+                    onDeviceChange(d.name);
+                    close();
+                  }}
+                  title={d.name}
+                  subtitle={`${(d.sample_rate / 1000).toFixed(1)} kHz · ${d.channels} ch${
+                    d.is_default ? " · default" : ""
+                  }`}
+                />
+              ))}
+              {devices.length === 0 && (
+                <p className="px-3 py-2 text-[12px] text-neutral-400">
+                  No input devices found.
+                </p>
+              )}
+            </>
+          )}
+        </Pill>
 
-        <button type="button" className="pill">
-          <Globe size={14} aria-hidden />
-          Language
-        </button>
+        <Pill
+          icon={<Globe size={14} aria-hidden />}
+          label={languageLabel}
+          disabled={isRecording}
+          disabledReason="Stop recording to change the language"
+        >
+          {(close) => (
+            <>
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                Spoken language
+              </p>
+              <Item
+                selected={language === null}
+                onClick={() => {
+                  onLanguageChange(null);
+                  close();
+                }}
+                title="Detect"
+                subtitle="let the model work it out"
+              />
+              {languages.map((l) => (
+                <Item
+                  key={l.code}
+                  selected={language === l.code}
+                  onClick={() => {
+                    onLanguageChange(l.code);
+                    close();
+                  }}
+                  title={l.label}
+                  subtitle={l.code}
+                />
+              ))}
+              <p className="px-3 pb-1.5 pt-1 text-[11px] leading-snug text-neutral-400">
+                English-only models ignore this.
+              </p>
+            </>
+          )}
+        </Pill>
       </div>
 
       {/* Where a user's audio goes is the product's central claim, so it is stated
@@ -67,9 +340,7 @@ export function TopBar({ health, onTogglePanel, panelOpen }: Props) {
           ) : (
             <ShieldAlert size={14} className="text-amber-600" aria-hidden />
           )}
-          <span className="hidden sm:inline">
-            {health.ai_local ? "Local" : "Cloud"}
-          </span>
+          <span className="hidden sm:inline">{health.ai_local ? "Local" : "Cloud"}</span>
         </div>
       )}
     </header>

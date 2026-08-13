@@ -28,6 +28,7 @@ mod engine;
 mod models;
 pub mod parakeet;
 mod segment;
+mod stream;
 
 pub use engine::{MockEngine, TranscriptionEngine, WhisperEngine};
 // Re-exported so downstream crates can implement the trait without adding the dependency.
@@ -35,6 +36,7 @@ pub use async_trait::async_trait;
 pub use models::{DownloadProgress, ModelInfo, ModelRegistry, ModelSize, ModelStore};
 pub use parakeet::{ParakeetEngine, ParakeetPaths, Vocabulary};
 pub use segment::{Segment, Transcript};
+pub use stream::{Utterance, UtteranceBuffer, UtteranceConfig};
 
 use thiserror::Error;
 

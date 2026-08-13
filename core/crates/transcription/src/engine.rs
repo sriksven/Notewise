@@ -89,6 +89,13 @@ pub struct WhisperEngine {
     /// Whether to skip decoding windows the gate finds no speech in.
     #[allow(dead_code)]
     gate_on_speech: bool,
+    /// Spoken language, or `None` to let Whisper detect it.
+    ///
+    /// Detection costs a pass over the first window and is occasionally wrong — a meeting that
+    /// opens in English and is detected as Welsh transcribes as nonsense for its whole length.
+    /// Naming the language removes that failure entirely, so a picker is worth having.
+    #[allow(dead_code)]
+    language: Option<String>,
 
     #[cfg(feature = "whisper")]
     context: whisper_rs::WhisperContext,
@@ -144,6 +151,7 @@ impl WhisperEngine {
             window_samples,
             vad: Vad::default(),
             gate_on_speech: true,
+            language: None,
             #[cfg(feature = "whisper")]
             context,
         })
@@ -151,6 +159,15 @@ impl WhisperEngine {
 
     pub fn model(&self) -> &ModelInfo {
         &self.model
+    }
+
+    /// Set the spoken language, e.g. `en`. `None` asks Whisper to detect it.
+    ///
+    /// English-only models (`*.en`) reject any language but English, so this is ignored for
+    /// them rather than passed through to fail at the first window.
+    pub fn with_language(mut self, language: Option<String>) -> Self {
+        self.language = language.filter(|_| !self.model.name.ends_with(".en"));
+        self
     }
 
     /// Tune the speech gate.
@@ -249,6 +266,11 @@ impl WhisperEngine {
         // "(wind blowing)" — subtitle-corpus artefacts that are not meeting content.
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
+
+        // Set before inference, and only for multilingual models.
+        if let Some(language) = &self.language {
+            params.set_language(Some(language));
+        }
 
         state
             .full(params, &audio)

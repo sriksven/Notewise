@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use notewise_ai_router::Router as AiRouter;
+use std::sync::Arc;
+
+use notewise_ai_router::{BackendKind, Router as AiRouter, RouterConfig};
 use notewise_storage::Database;
 use tokio::sync::Mutex;
 
@@ -23,7 +25,12 @@ pub struct AppState {
     /// instead of holding this mutex for the length of a meeting. `None` when in-memory.
     db_path: Option<PathBuf>,
     model_dir: PathBuf,
-    ai: AiRouter,
+    /// Swappable at runtime, so a user can change backend without restarting the app.
+    ///
+    /// An `RwLock<Arc<_>>` rather than an `RwLock<AiRouter>`: handlers clone the `Arc` and drop
+    /// the lock immediately, so a summarization that takes thirty seconds does not block
+    /// someone switching model in another window.
+    ai: std::sync::RwLock<Arc<AiRouter>>,
     recording: RecordingManager,
     downloads: DownloadManager,
 }
@@ -35,7 +42,7 @@ impl AppState {
             db: Mutex::new(db),
             db_path,
             model_dir: default_model_dir(),
-            ai,
+            ai: std::sync::RwLock::new(Arc::new(ai)),
             recording: RecordingManager::new(),
             downloads: DownloadManager::new(),
         }
@@ -85,10 +92,55 @@ impl AppState {
         self.db.lock().await
     }
 
-    /// The AI router. Not behind the database lock, so a slow model call does not block reads.
-    pub fn ai(&self) -> &AiRouter {
-        &self.ai
+    /// The active AI router.
+    ///
+    /// Returns an owned handle rather than a borrow, so the lock is released before a caller
+    /// spends thirty seconds inside a model call.
+    pub fn ai(&self) -> Arc<AiRouter> {
+        Arc::clone(&self.ai.read().expect("ai router lock poisoned"))
     }
+
+    /// Replace the active backend.
+    ///
+    /// Built and validated *before* the swap, so a backend that cannot be constructed leaves
+    /// the working one in place. Half-switching would leave the app with no usable model and
+    /// no obvious way back.
+    pub async fn switch_backend(
+        &self,
+        kind: BackendKind,
+        model: Option<String>,
+        endpoint: Option<String>,
+    ) -> Result<(), notewise_ai_router::AiError> {
+        let mut config = RouterConfig::new(kind);
+
+        // Read from the environment, never from the request: a key must not travel over HTTP
+        // or land in a log, even on loopback.
+        if let Some(key) = api_key_for(kind) {
+            config = config.with_api_key(key);
+        }
+        if let Some(model) = model {
+            config = config.with_model(model);
+        }
+        if let Some(endpoint) = endpoint {
+            config = config.with_endpoint(endpoint);
+        }
+
+        let router = Arc::new(AiRouter::from_config(config)?);
+        *self.ai.write().expect("ai router lock poisoned") = router;
+        Ok(())
+    }
+}
+
+/// The API key for a backend, from the environment.
+fn api_key_for(kind: BackendKind) -> Option<String> {
+    let name = match kind {
+        BackendKind::Anthropic => "ANTHROPIC_API_KEY",
+        BackendKind::Gemini => "GEMINI_API_KEY",
+        BackendKind::Groq => "GROQ_API_KEY",
+        BackendKind::OpenRouter => "OPENROUTER_API_KEY",
+        _ => return None,
+    };
+    std::env::var(name).ok().filter(|k| !k.trim().is_empty())
 }
 
 /// Where transcription models live by default.

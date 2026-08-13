@@ -31,9 +31,17 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 # Live device capture. Pulls the platform audio SDK.
-record = ["notewise-audio-capture/os-capture"]
+#
+# Forwarded to api-server as well, or `notewise serve` would start an engine that cannot
+# record, list devices, or import — while the same binary's `notewise record` could. One
+# binary reporting two different sets of capabilities is a bug report waiting to happen.
+record = ["notewise-audio-capture/os-capture", "notewise-api-server/record"]
 # Real transcription. Pulls a cmake build of whisper.cpp.
-whisper = ["notewise-recorder/whisper"]
-whisper-metal = ["whisper", "notewise-recorder/whisper-metal"]
+whisper = ["notewise-recorder/whisper", "notewise-api-server/whisper"]
+whisper-metal = [
+    "whisper",
+    "notewise-recorder/whisper-metal",
+    "notewise-api-server/whisper-metal",
+]
 # Everything needed to actually record a meeting on this machine.
 full = ["record", "whisper-metal"]
