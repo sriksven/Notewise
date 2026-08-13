@@ -305,7 +305,10 @@ mod tests {
         let backend = OllamaBackend::new().with_endpoint("http://127.0.0.1:1/unreachable");
         let request = ChatRequest::new(vec![ChatMessage::assistant("hello")]);
 
-        let err = backend.chat(&request).await.expect_err("should be rejected");
+        let err = backend
+            .chat(&request)
+            .await
+            .expect_err("should be rejected");
         assert!(
             matches!(err, AiError::InvalidRequest(_)),
             "expected local validation, not a transport error: {err:?}"

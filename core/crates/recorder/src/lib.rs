@@ -32,12 +32,8 @@ use thiserror::Error;
 use notewise_audio_capture::{AudioSource, CaptureError, MixedSource, Mixer};
 use notewise_diarization::{DiarizationError, Diarizer, PauseDiarizer};
 use notewise_graph::{EdgeKind, Graph, GraphError, NodeKind, NodeRef};
-use notewise_storage::{
-    Database, Id, MeetingRepository, NewTranscriptSegment, StorageError,
-};
-use notewise_transcription::{
-    Segment, Transcript, TranscriptionEngine, TranscriptionError,
-};
+use notewise_storage::{Database, Id, MeetingRepository, NewTranscriptSegment, StorageError};
+use notewise_transcription::{Segment, Transcript, TranscriptionEngine, TranscriptionError};
 
 #[derive(Debug, Error)]
 pub enum RecorderError {
@@ -341,8 +337,10 @@ mod tests {
         // part-way must still leave rows written by the loop, not just by the final flush.
         let db = db();
         let id = meeting(&db);
-        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()))
-            .with_config(PipelineConfig { diarize: false, ..Default::default() });
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new())).with_config(PipelineConfig {
+            diarize: false,
+            ..Default::default()
+        });
 
         let mut frames = 0;
         pipeline
@@ -586,11 +584,9 @@ mod tests {
         let db = db();
         let id = meeting(&db);
 
-        let engine = WhisperEngine::new(
-            ModelRegistry::default_model(),
-            ModelStore::new(&model_dir),
-        )
-        .expect("whisper engine");
+        let engine =
+            WhisperEngine::new(ModelRegistry::default_model(), ModelStore::new(&model_dir))
+                .expect("whisper engine");
 
         let mut source = FileSource::open_wav(&sample).expect("wav");
         let mut pipeline = Pipeline::new(Box::new(engine));
@@ -624,7 +620,10 @@ mod tests {
         // And the rows are real rows, with speakers and sane timings.
         let stored = repo.segments(id).unwrap();
         assert!(!stored.is_empty());
-        assert!(stored.iter().all(|s| s.speaker.is_some()), "diarization did not run");
+        assert!(
+            stored.iter().all(|s| s.speaker.is_some()),
+            "diarization did not run"
+        );
         assert!(stored.iter().all(|s| s.end_ms > s.start_ms));
     }
 

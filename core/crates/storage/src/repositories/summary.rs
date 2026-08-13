@@ -170,7 +170,9 @@ impl<'a> SummaryRepository<'a> {
              FROM action_items WHERE summary_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(rusqlite::params![summary_id], map_action_item)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     /// Open action items past their due date. Drives overdue notifications.
@@ -183,7 +185,9 @@ impl<'a> SummaryRepository<'a> {
              ORDER BY due_at",
         )?;
         let rows = stmt.query_map(rusqlite::params![now], map_action_item)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     pub fn set_action_item_status(&self, id: Id, status: WorkStatus) -> Result<()> {
@@ -253,7 +257,9 @@ mod tests {
     use chrono::TimeZone;
 
     fn ts(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(secs, 0).single().expect("valid timestamp")
+        Utc.timestamp_opt(secs, 0)
+            .single()
+            .expect("valid timestamp")
     }
 
     fn setup() -> (Database, Summary) {
@@ -279,7 +285,10 @@ mod tests {
     #[test]
     fn round_trips_a_summary() {
         let (db, summary) = setup();
-        assert_eq!(SummaryRepository::new(&db).get(summary.id).unwrap(), summary);
+        assert_eq!(
+            SummaryRepository::new(&db).get(summary.id).unwrap(),
+            summary
+        );
     }
 
     #[test]
@@ -366,7 +375,8 @@ mod tests {
             })
             .unwrap();
 
-        repo.set_action_item_status(item.id, WorkStatus::Done).unwrap();
+        repo.set_action_item_status(item.id, WorkStatus::Done)
+            .unwrap();
 
         let stored = &repo.action_items(summary.id).unwrap()[0];
         assert_eq!(stored.status, WorkStatus::Done);
@@ -449,7 +459,9 @@ mod tests {
         })
         .unwrap();
 
-        MeetingRepository::new(&db).delete(summary.meeting_id).unwrap();
+        MeetingRepository::new(&db)
+            .delete(summary.meeting_id)
+            .unwrap();
 
         assert!(repo.get(summary.id).is_err());
         assert_eq!(repo.decisions(summary.id).unwrap().len(), 0);
@@ -461,6 +473,12 @@ mod tests {
         let err = SummaryRepository::new(&db)
             .set_action_item_status(Id::new(), WorkStatus::Done)
             .expect_err("should be missing");
-        assert!(matches!(err, StorageError::NotFound { kind: "ActionItem", .. }));
+        assert!(matches!(
+            err,
+            StorageError::NotFound {
+                kind: "ActionItem",
+                ..
+            }
+        ));
     }
 }

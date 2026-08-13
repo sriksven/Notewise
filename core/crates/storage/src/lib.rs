@@ -34,8 +34,8 @@ mod models;
 mod repositories;
 
 pub use db::Database;
-pub use export::{meeting_to_markdown, ExportOptions};
 pub use error::{Result, StorageError};
+pub use export::{meeting_to_markdown, ExportOptions};
 pub use id::Id;
 pub use migrations::SUPPORTED_VERSION;
 pub use models::*;

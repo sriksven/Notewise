@@ -88,10 +88,10 @@ impl<'a> WorkspaceRepository<'a> {
 
     /// Deletes the workspace and, by cascade, its projects.
     pub fn delete(&self, id: Id) -> Result<()> {
-        let changed = self
-            .db
-            .conn()
-            .execute("DELETE FROM workspaces WHERE id = ?1", rusqlite::params![id])?;
+        let changed = self.db.conn().execute(
+            "DELETE FROM workspaces WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
         if changed == 0 {
             return Err(StorageError::not_found("Workspace", id));
         }
@@ -213,7 +213,11 @@ mod tests {
     fn creates_and_reads_back_a_workspace() {
         let db = db();
         let repo = WorkspaceRepository::new(&db);
-        let created = repo.create(NewWorkspace { name: "Acme".into() }).unwrap();
+        let created = repo
+            .create(NewWorkspace {
+                name: "Acme".into(),
+            })
+            .unwrap();
         assert_eq!(repo.get(created.id).unwrap(), created);
     }
 
@@ -223,15 +227,27 @@ mod tests {
         let err = WorkspaceRepository::new(&db)
             .get(Id::new())
             .expect_err("should be missing");
-        assert!(matches!(err, StorageError::NotFound { kind: "Workspace", .. }));
+        assert!(matches!(
+            err,
+            StorageError::NotFound {
+                kind: "Workspace",
+                ..
+            }
+        ));
     }
 
     #[test]
     fn lists_workspaces_alphabetically() {
         let db = db();
         let repo = WorkspaceRepository::new(&db);
-        repo.create(NewWorkspace { name: "Zulu".into() }).unwrap();
-        repo.create(NewWorkspace { name: "Alpha".into() }).unwrap();
+        repo.create(NewWorkspace {
+            name: "Zulu".into(),
+        })
+        .unwrap();
+        repo.create(NewWorkspace {
+            name: "Alpha".into(),
+        })
+        .unwrap();
 
         let names: Vec<_> = repo.list().unwrap().into_iter().map(|w| w.name).collect();
         assert_eq!(names, vec!["Alpha", "Zulu"]);
@@ -291,7 +307,13 @@ mod tests {
         WorkspaceRepository::new(&db).delete(ws.id).unwrap();
 
         let err = projects.get(project.id).expect_err("should have cascaded");
-        assert!(matches!(err, StorageError::NotFound { kind: "Project", .. }));
+        assert!(matches!(
+            err,
+            StorageError::NotFound {
+                kind: "Project",
+                ..
+            }
+        ));
     }
 
     #[test]

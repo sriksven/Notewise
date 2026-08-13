@@ -171,7 +171,10 @@ mod tests {
             ChatMessage::assistant("hello"),
         ]);
 
-        let err = backend.chat(&request).await.expect_err("should be rejected");
+        let err = backend
+            .chat(&request)
+            .await
+            .expect_err("should be rejected");
         assert!(matches!(err, AiError::InvalidRequest(_)));
     }
 

@@ -140,7 +140,10 @@ impl OpenAiCompatBackend {
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.preset.base_url().trim_end_matches('/'))
+        format!(
+            "{}/chat/completions",
+            self.preset.base_url().trim_end_matches('/')
+        )
     }
 
     fn body(&self, system: &str, messages: Vec<Value>, json_mode: bool) -> Value {
@@ -206,14 +209,15 @@ impl OpenAiCompatBackend {
             source,
         })?;
 
-        let choice = parsed
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| AiError::MalformedResponse {
-                backend: BACKEND,
-                reason: "response contained no choices".into(),
-            })?;
+        let choice =
+            parsed
+                .choices
+                .into_iter()
+                .next()
+                .ok_or_else(|| AiError::MalformedResponse {
+                    backend: BACKEND,
+                    reason: "response contained no choices".into(),
+                })?;
 
         // Content filters across these providers surface as a finish_reason rather than an
         // HTTP error, so a declined request would otherwise look like an empty answer.
@@ -469,12 +473,19 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(trailing.endpoint(), "http://localhost:9000/v1/chat/completions");
+        assert_eq!(
+            trailing.endpoint(),
+            "http://localhost:9000/v1/chat/completions"
+        );
     }
 
     #[test]
     fn the_system_prompt_is_the_first_message() {
-        let body = groq().body("be brief", vec![json!({"role": "user", "content": "hi"})], false);
+        let body = groq().body(
+            "be brief",
+            vec![json!({"role": "user", "content": "hi"})],
+            false,
+        );
         let messages = body["messages"].as_array().unwrap();
 
         assert_eq!(messages[0]["role"], "system");
@@ -485,7 +496,10 @@ mod tests {
     #[test]
     fn json_mode_is_opt_in() {
         let backend = groq();
-        assert!(backend.body("s", vec![], false).get("response_format").is_none());
+        assert!(backend
+            .body("s", vec![], false)
+            .get("response_format")
+            .is_none());
         assert_eq!(
             backend.body("s", vec![], true)["response_format"]["type"],
             "json_object"

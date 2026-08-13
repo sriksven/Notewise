@@ -127,6 +127,9 @@ mod tests {
 
     #[test]
     fn missing_key_is_not_retryable() {
-        assert!(!AiError::MissingApiKey { backend: "anthropic" }.is_retryable());
+        assert!(!AiError::MissingApiKey {
+            backend: "anthropic"
+        }
+        .is_retryable());
     }
 }

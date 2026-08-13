@@ -111,10 +111,18 @@ mod tests {
             ticket: n(NodeKind::Ticket),
             note: n(NodeKind::Note),
         };
-        graph.connect(c.summary, EdgeKind::DerivedFrom, c.meeting).unwrap();
-        graph.connect(c.action_item, EdgeKind::DerivedFrom, c.summary).unwrap();
-        graph.connect(c.action_item, EdgeKind::BecameTicket, c.ticket).unwrap();
-        graph.connect(c.note, EdgeKind::References, c.meeting).unwrap();
+        graph
+            .connect(c.summary, EdgeKind::DerivedFrom, c.meeting)
+            .unwrap();
+        graph
+            .connect(c.action_item, EdgeKind::DerivedFrom, c.summary)
+            .unwrap();
+        graph
+            .connect(c.action_item, EdgeKind::BecameTicket, c.ticket)
+            .unwrap();
+        graph
+            .connect(c.note, EdgeKind::References, c.meeting)
+            .unwrap();
         c
     }
 
@@ -162,7 +170,10 @@ mod tests {
 
         let mut sorted = distances.clone();
         sorted.sort_unstable();
-        assert_eq!(distances, sorted, "breadth-first order should be nearest first");
+        assert_eq!(
+            distances, sorted,
+            "breadth-first order should be nearest first"
+        );
     }
 
     #[test]
@@ -209,7 +220,11 @@ mod tests {
         graph.connect(c, EdgeKind::References, a).unwrap();
 
         let related = graph.related(a, Graph::MAX_DEPTH).unwrap();
-        assert_eq!(related.len(), 2, "each node reported once despite the cycle");
+        assert_eq!(
+            related.len(),
+            2,
+            "each node reported once despite the cycle"
+        );
     }
 
     #[test]

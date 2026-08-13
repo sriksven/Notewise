@@ -83,7 +83,9 @@ pub trait AudioSource: std::fmt::Debug + Send {
 pub enum Waveform {
     Silence,
     /// A sine tone, for verifying the pipeline carries a signal end to end.
-    Sine { hz: u32 },
+    Sine {
+        hz: u32,
+    },
 }
 
 /// A generated source.
@@ -223,10 +225,14 @@ impl AudioSource for FileSource {
 /// the alternative is a dependency for ~40 lines. Anything else is rejected explicitly.
 fn decode_f32_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
     fn u16_at(bytes: &[u8], offset: usize) -> Option<u16> {
-        Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+        Some(u16::from_le_bytes(
+            bytes.get(offset..offset + 2)?.try_into().ok()?,
+        ))
     }
     fn u32_at(bytes: &[u8], offset: usize) -> Option<u32> {
-        Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+        Some(u32::from_le_bytes(
+            bytes.get(offset..offset + 4)?.try_into().ok()?,
+        ))
     }
 
     if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
@@ -320,7 +326,10 @@ mod tests {
         while source.next_frame().unwrap().is_some() {}
 
         assert!(source.next_frame().unwrap().is_none());
-        assert!(source.next_frame().unwrap().is_none(), "and stays exhausted");
+        assert!(
+            source.next_frame().unwrap().is_none(),
+            "and stays exhausted"
+        );
     }
 
     #[test]

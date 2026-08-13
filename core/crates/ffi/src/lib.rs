@@ -225,7 +225,9 @@ pub unsafe extern "C" fn nw_transcript_json(
     guard(|| {
         let engine = engine.as_ref().ok_or("engine must not be null")?;
         let raw = read_str(meeting_id, "meeting_id")?;
-        let id: Id = raw.parse().map_err(|_| format!("'{raw}' is not a valid id"))?;
+        let id: Id = raw
+            .parse()
+            .map_err(|_| format!("'{raw}' is not a valid id"))?;
 
         let repo = MeetingRepository::new(&engine.db);
         repo.get(id).map_err(|e| e.to_string())?;
@@ -275,10 +277,7 @@ pub unsafe extern "C" fn nw_search_json(
 /// # Safety
 /// `engine` must be a valid pointer from `nw_engine_open*`.
 #[no_mangle]
-pub unsafe extern "C" fn nw_notes_json(
-    engine: *const NotewiseEngine,
-    limit: c_int,
-) -> *mut c_char {
+pub unsafe extern "C" fn nw_notes_json(engine: *const NotewiseEngine, limit: c_int) -> *mut c_char {
     guard(|| {
         let engine = engine.as_ref().ok_or("engine must not be null")?;
         let limit = limit.clamp(1, 1000) as u32;
@@ -304,7 +303,9 @@ pub unsafe extern "C" fn nw_related_json(
     guard(|| {
         let engine = engine.as_ref().ok_or("engine must not be null")?;
         let raw = read_str(meeting_id, "meeting_id")?;
-        let id: Id = raw.parse().map_err(|_| format!("'{raw}' is not a valid id"))?;
+        let id: Id = raw
+            .parse()
+            .map_err(|_| format!("'{raw}' is not a valid id"))?;
         let depth = depth.clamp(1, Graph::MAX_DEPTH as c_int) as u32;
 
         let related = Graph::new(&engine.db)
@@ -365,7 +366,10 @@ mod tests {
             let engine = nw_engine_open_in_memory();
             assert!(!engine.is_null());
             assert!(last_error().is_none());
-            assert_eq!(nw_schema_version(engine), notewise_storage::SUPPORTED_VERSION as c_int);
+            assert_eq!(
+                nw_schema_version(engine),
+                notewise_storage::SUPPORTED_VERSION as c_int
+            );
             nw_engine_free(engine);
         }
     }

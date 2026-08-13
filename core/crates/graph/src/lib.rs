@@ -102,9 +102,7 @@ impl<'a> Graph<'a> {
             .outgoing(from.kind.as_str(), from.id)?
             .into_iter()
             .find(|e| {
-                e.edge_kind == kind.as_str()
-                    && e.to_kind == to.kind.as_str()
-                    && e.to_id == to.id
+                e.edge_kind == kind.as_str() && e.to_kind == to.kind.as_str() && e.to_id == to.id
             });
 
         match matching {
@@ -128,7 +126,11 @@ impl<'a> Graph<'a> {
             // The far end is whichever side is not the node we started from.
             let from = NodeRef::new(parse_kind(&record.from_kind)?, record.from_id);
             let to = NodeRef::new(parse_kind(&record.to_kind)?, record.to_id);
-            let (other, outbound) = if from == node { (to, true) } else { (from, false) };
+            let (other, outbound) = if from == node {
+                (to, true)
+            } else {
+                (from, false)
+            };
 
             out.push(Connection {
                 edge_id: record.id,
@@ -265,7 +267,9 @@ mod tests {
     fn disconnecting_a_missing_edge_reports_false() {
         let db = db();
         let graph = Graph::new(&db);
-        assert!(!graph.disconnect(note(), EdgeKind::References, meeting()).unwrap());
+        assert!(!graph
+            .disconnect(note(), EdgeKind::References, meeting())
+            .unwrap());
     }
 
     #[test]
@@ -277,11 +281,17 @@ mod tests {
         graph.connect(note(), EdgeKind::References, m).unwrap();
         graph.connect(note(), EdgeKind::References, m).unwrap();
         graph
-            .connect(m, EdgeKind::Contains, NodeRef::new(NodeKind::Summary, Id::new()))
+            .connect(
+                m,
+                EdgeKind::Contains,
+                NodeRef::new(NodeKind::Summary, Id::new()),
+            )
             .unwrap();
         let unrelated_a = note();
         let unrelated_b = meeting();
-        graph.connect(unrelated_a, EdgeKind::References, unrelated_b).unwrap();
+        graph
+            .connect(unrelated_a, EdgeKind::References, unrelated_b)
+            .unwrap();
 
         assert_eq!(graph.detach(m).unwrap(), 3);
         assert_eq!(graph.edge_count().unwrap(), 1);
@@ -295,7 +305,9 @@ mod tests {
         let as_note = NodeRef::new(NodeKind::Note, shared);
         let as_ticket = NodeRef::new(NodeKind::Ticket, shared);
 
-        graph.connect(as_note, EdgeKind::References, meeting()).unwrap();
+        graph
+            .connect(as_note, EdgeKind::References, meeting())
+            .unwrap();
 
         assert_eq!(graph.connections(as_note).unwrap().len(), 1);
         assert_eq!(
@@ -340,7 +352,9 @@ mod tests {
             })
             .unwrap();
 
-        let err = graph.connections(m).expect_err("should reject unknown kind");
+        let err = graph
+            .connections(m)
+            .expect_err("should reject unknown kind");
         assert!(matches!(err, GraphError::UnknownEdgeKind(_)), "got {err:?}");
     }
 }

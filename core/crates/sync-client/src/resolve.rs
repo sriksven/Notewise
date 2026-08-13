@@ -9,13 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::version::{DeviceId, Ordering, Version};
 
 /// What to do when two devices edited the same record independently.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictPolicy {
     /// Keep both, as separate records.
     ///
     /// The default, and the only option that cannot lose work. A duplicate is visible and
     /// fixable; a silently dropped edit is neither.
+    #[default]
     KeepBoth,
 
     /// Keep the local copy and discard the remote one.
@@ -26,12 +27,6 @@ pub enum ConflictPolicy {
 
     /// Surface the conflict and change nothing until the user decides.
     AskUser,
-}
-
-impl Default for ConflictPolicy {
-    fn default() -> Self {
-        ConflictPolicy::KeepBoth
-    }
 }
 
 impl ConflictPolicy {
@@ -63,10 +58,7 @@ pub enum Resolution {
         discarded_an_edit: bool,
     },
     /// A real conflict the user must resolve.
-    NeedsUser {
-        local: Version,
-        remote: Version,
-    },
+    NeedsUser { local: Version, remote: Version },
 }
 
 impl Resolution {
@@ -306,9 +298,12 @@ mod tests {
 
         assert!(!version.conflicts_with(&local));
         assert!(!version.conflicts_with(&remote));
-        assert_eq!(engine().resolve(&version, &remote), Resolution::KeepLocal {
-            version: version.clone()
-        });
+        assert_eq!(
+            engine().resolve(&version, &remote),
+            Resolution::KeepLocal {
+                version: version.clone()
+            }
+        );
     }
 
     #[test]
@@ -360,7 +355,10 @@ mod tests {
             ConflictPolicy::AskUser,
         ] {
             let json = serde_json::to_string(&policy).unwrap();
-            assert_eq!(serde_json::from_str::<ConflictPolicy>(&json).unwrap(), policy);
+            assert_eq!(
+                serde_json::from_str::<ConflictPolicy>(&json).unwrap(),
+                policy
+            );
         }
     }
 }

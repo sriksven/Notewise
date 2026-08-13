@@ -34,9 +34,7 @@ pub struct DeviceInfo {
 /// List input devices, so a UI can offer a picker rather than guessing.
 pub fn input_devices() -> Result<Vec<DeviceInfo>> {
     let host = cpal::default_host();
-    let default_name = host
-        .default_input_device()
-        .and_then(|d| d.name().ok());
+    let default_name = host.default_input_device().and_then(|d| d.name().ok());
 
     let devices = host
         .input_devices()

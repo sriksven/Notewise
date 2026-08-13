@@ -83,7 +83,9 @@ impl<'a> TicketRepository<'a> {
              ORDER BY due_at IS NULL, due_at",
         )?;
         let rows = stmt.query_map([], map_ticket)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     pub fn list_in_project(&self, project_id: Id) -> Result<Vec<Ticket>> {
@@ -94,7 +96,9 @@ impl<'a> TicketRepository<'a> {
              FROM tickets WHERE project_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![project_id], map_ticket)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     pub fn set_status(&self, id: Id, status: WorkStatus) -> Result<Ticket> {
@@ -158,8 +162,7 @@ impl<'a> TicketRepository<'a> {
     }
 }
 
-const SELECT: &str =
-    "SELECT id, project_id, title, description, status, owner, due_at,
+const SELECT: &str = "SELECT id, project_id, title, description, status, owner, due_at,
             external_provider, external_id, external_url, created_at, updated_at
      FROM tickets WHERE id = ?1";
 
@@ -236,9 +239,15 @@ mod tests {
         let done = ticket(&db, "Done");
         let cancelled = ticket(&db, "Cancelled");
         repo.set_status(done.id, WorkStatus::Done).unwrap();
-        repo.set_status(cancelled.id, WorkStatus::Cancelled).unwrap();
+        repo.set_status(cancelled.id, WorkStatus::Cancelled)
+            .unwrap();
 
-        let ids: Vec<_> = repo.list_open().unwrap().into_iter().map(|t| t.id).collect();
+        let ids: Vec<_> = repo
+            .list_open()
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
         assert_eq!(ids, vec![open.id]);
     }
 

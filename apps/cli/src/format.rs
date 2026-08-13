@@ -7,7 +7,12 @@ pub fn duration(ms: Option<i64>) -> String {
     };
 
     let total = (ms / 1000).max(0);
-    format!("{:02}:{:02}:{:02}", total / 3600, (total % 3600) / 60, total % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        total / 3600,
+        (total % 3600) / 60,
+        total % 60
+    )
 }
 
 /// Render an action item with its owner, when one is known.
@@ -50,9 +55,6 @@ mod tests {
     #[test]
     fn unowned_action_items_are_marked_rather_than_left_blank() {
         assert_eq!(action_item("Write docs", None), "Write docs — unassigned");
-        assert_eq!(
-            action_item("Write docs", Some("alex")),
-            "Write docs — alex"
-        );
+        assert_eq!(action_item("Write docs", Some("alex")), "Write docs — alex");
     }
 }

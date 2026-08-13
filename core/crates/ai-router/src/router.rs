@@ -102,10 +102,7 @@ impl BackendKind {
     pub fn is_local(&self) -> bool {
         matches!(
             self,
-            BackendKind::Mock
-                | BackendKind::Ollama
-                | BackendKind::LmStudio
-                | BackendKind::Unsloth
+            BackendKind::Mock | BackendKind::Ollama | BackendKind::LmStudio | BackendKind::Unsloth
         )
     }
 
@@ -274,10 +271,7 @@ impl Router {
             // Every remaining kind is the same client behind a different base URL.
             _ => {
                 let preset = kind.preset(config.endpoint).ok_or_else(|| {
-                    AiError::InvalidRequest(format!(
-                        "{} requires an endpoint URL",
-                        kind.label()
-                    ))
+                    AiError::InvalidRequest(format!("{} requires an endpoint URL", kind.label()))
                 })?;
 
                 let mut backend = OpenAiCompatBackend::new(preset, config.api_key)?;
@@ -421,7 +415,10 @@ mod tests {
         ] {
             let err = Router::from_config(RouterConfig::new(kind))
                 .expect_err("{kind:?} should refuse to build without a key");
-            assert!(matches!(err, AiError::MissingApiKey { .. }), "{kind:?}: {err:?}");
+            assert!(
+                matches!(err, AiError::MissingApiKey { .. }),
+                "{kind:?}: {err:?}"
+            );
         }
     }
 
@@ -482,7 +479,11 @@ mod tests {
         let router =
             Router::from_config(RouterConfig::groq("gsk-test").with_model("mixtral-8x7b-32768"))
                 .unwrap();
-        assert!(router.model_id().contains("mixtral"), "{}", router.model_id());
+        assert!(
+            router.model_id().contains("mixtral"),
+            "{}",
+            router.model_id()
+        );
     }
 
     #[test]
@@ -497,7 +498,12 @@ mod tests {
         let router = Router::from_config(RouterConfig::mock()).unwrap();
         let input = TranscriptInput::new("Sync", "We agreed to ship Friday.");
 
-        assert!(router.summarize(&input).await.unwrap().text.contains("Sync"));
+        assert!(router
+            .summarize(&input)
+            .await
+            .unwrap()
+            .text
+            .contains("Sync"));
         assert_eq!(router.extract_decisions(&input).await.unwrap().len(), 1);
         assert_eq!(router.extract_action_items(&input).await.unwrap().len(), 1);
     }
@@ -507,7 +513,10 @@ mod tests {
         let inner = Router::from_config(RouterConfig::mock()).unwrap();
         let outer = Router::with_backend(Box::new(inner));
 
-        assert!(outer.summarize(&TranscriptInput::new("Sync", "text")).await.is_ok());
+        assert!(outer
+            .summarize(&TranscriptInput::new("Sync", "text"))
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

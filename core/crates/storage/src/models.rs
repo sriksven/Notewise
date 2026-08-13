@@ -325,7 +325,9 @@ mod tests {
     use chrono::TimeZone;
 
     fn ts(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(secs, 0).single().expect("valid timestamp")
+        Utc.timestamp_opt(secs, 0)
+            .single()
+            .expect("valid timestamp")
     }
 
     #[test]

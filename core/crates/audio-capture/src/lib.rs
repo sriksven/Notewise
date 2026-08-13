@@ -33,10 +33,10 @@ mod mixer;
 mod source;
 
 pub use convert::{resample_linear, rms, to_mono};
+pub use format::{AudioFormat, SampleRate};
 #[cfg(feature = "os-capture")]
 pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};
 pub use mixer::{soft_clip, MixedSource, Mixer};
-pub use format::{AudioFormat, SampleRate};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};
 
 use thiserror::Error;

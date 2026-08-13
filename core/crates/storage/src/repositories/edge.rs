@@ -229,7 +229,11 @@ mod tests {
         let second = repo.create(edge(a, b)).unwrap();
 
         assert_eq!(first.id, second.id, "should return the existing edge");
-        assert_eq!(repo.count().unwrap(), 1, "re-processing must not multiply edges");
+        assert_eq!(
+            repo.count().unwrap(),
+            1,
+            "re-processing must not multiply edges"
+        );
     }
 
     #[test]

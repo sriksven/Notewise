@@ -148,13 +148,10 @@ impl AnthropicBackend {
         }
 
         let parsed: MessagesResponse =
-            response
-                .json()
-                .await
-                .map_err(|source| AiError::Transport {
-                    backend: BACKEND,
-                    source,
-                })?;
+            response.json().await.map_err(|source| AiError::Transport {
+                backend: BACKEND,
+                source,
+            })?;
 
         // A refusal arrives as a successful HTTP response. Check it before reading content.
         if parsed.stop_reason.as_deref() == Some("refusal") {
@@ -459,7 +456,11 @@ mod tests {
 
     #[test]
     fn request_body_carries_the_required_fields() {
-        let body = backend().body("be concise", json!([{"role": "user", "content": "hi"}]), None);
+        let body = backend().body(
+            "be concise",
+            json!([{"role": "user", "content": "hi"}]),
+            None,
+        );
 
         assert_eq!(body["model"], "claude-opus-5");
         assert_eq!(body["max_tokens"], 16_000);
@@ -583,9 +584,8 @@ mod tests {
 
     #[test]
     fn transcript_prompt_includes_context_when_present() {
-        let with = transcript_prompt(
-            &TranscriptInput::new("Sync", "text").with_context("Project Apollo"),
-        );
+        let with =
+            transcript_prompt(&TranscriptInput::new("Sync", "text").with_context("Project Apollo"));
         let without = transcript_prompt(&TranscriptInput::new("Sync", "text"));
 
         assert!(with.contains("Project Apollo"));
@@ -597,7 +597,10 @@ mod tests {
         let backend = backend().with_endpoint("http://127.0.0.1:1/unreachable");
         let request = ChatRequest::new(vec![crate::types::ChatMessage::assistant("hello")]);
 
-        let err = backend.chat(&request).await.expect_err("should be rejected");
+        let err = backend
+            .chat(&request)
+            .await
+            .expect_err("should be rejected");
         assert!(
             matches!(err, AiError::InvalidRequest(_)),
             "expected local validation, not a transport error: {err:?}"

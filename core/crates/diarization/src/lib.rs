@@ -312,7 +312,9 @@ mod tests {
 
     #[test]
     fn an_empty_transcript_is_returned_unchanged() {
-        let output = PauseDiarizer::default().diarize(&Transcript::default()).unwrap();
+        let output = PauseDiarizer::default()
+            .diarize(&Transcript::default())
+            .unwrap();
         assert!(output.is_empty());
     }
 
@@ -388,7 +390,10 @@ mod tests {
 
     #[test]
     fn a_trivial_transcript_is_fully_confident() {
-        assert_eq!(PauseDiarizer::default().confidence(&Transcript::default()), 1.0);
+        assert_eq!(
+            PauseDiarizer::default().confidence(&Transcript::default()),
+            1.0
+        );
         assert_eq!(
             PauseDiarizer::default().confidence(&transcript(&[(0, 1000)])),
             1.0

@@ -151,11 +151,10 @@ impl ModelStore {
     pub fn verify(&self, model: &ModelInfo) -> Result<()> {
         let path = self.path_for(model);
 
-        let metadata = std::fs::metadata(&path).map_err(|_| {
-            TranscriptionError::ModelNotDownloaded {
+        let metadata =
+            std::fs::metadata(&path).map_err(|_| TranscriptionError::ModelNotDownloaded {
                 name: model.name.clone(),
-            }
-        })?;
+            })?;
 
         if metadata.len() != model.bytes {
             return Err(TranscriptionError::ModelCorrupt {
@@ -229,7 +228,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("notewise-models-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("notewise-models-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
@@ -318,7 +318,10 @@ mod tests {
 
         assert!(!store.is_available(&model), "size mismatch must not pass");
         let err = store.verify(&model).unwrap_err();
-        assert!(matches!(err, TranscriptionError::ModelCorrupt { .. }), "{err:?}");
+        assert!(
+            matches!(err, TranscriptionError::ModelCorrupt { .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -345,7 +348,10 @@ mod tests {
         let store = ModelStore::new(temp_dir("remove"));
         let model = ModelRegistry::default_model();
 
-        assert!(store.remove(&model).is_ok(), "removing what is absent is fine");
+        assert!(
+            store.remove(&model).is_ok(),
+            "removing what is absent is fine"
+        );
         assert!(store.remove(&model).is_ok());
     }
 

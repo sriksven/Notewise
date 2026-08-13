@@ -86,7 +86,9 @@ impl<'a> MeetingRepository<'a> {
              FROM meetings ORDER BY started_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit], map_meeting)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     pub fn list_in_project(&self, project_id: Id) -> Result<Vec<Meeting>> {
@@ -96,7 +98,9 @@ impl<'a> MeetingRepository<'a> {
              FROM meetings WHERE project_id = ?1 ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![project_id], map_meeting)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     /// Meetings still recording — `ended_at` is null.
@@ -107,7 +111,9 @@ impl<'a> MeetingRepository<'a> {
              FROM meetings WHERE ended_at IS NULL ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map([], map_meeting)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     /// Mark a meeting as finished. Idempotent: ending an already-ended meeting keeps the
@@ -298,7 +304,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(secs, 0).single().expect("valid timestamp")
+        Utc.timestamp_opt(secs, 0)
+            .single()
+            .expect("valid timestamp")
     }
 
     fn meeting(db: &Database) -> Meeting {

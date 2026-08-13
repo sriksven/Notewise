@@ -236,8 +236,8 @@ mod imp {
             MicrophoneSource::open(&capture).map_err(|e| RecordingError::Failed(e.to_string()))?;
         let device = source.device_name().to_string();
 
-        let engine =
-            WhisperEngine::new(model.clone(), store).map_err(|e| RecordingError::Failed(e.to_string()))?;
+        let engine = WhisperEngine::new(model.clone(), store)
+            .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
         // A dedicated connection for the recording; see the module docs.
         let db = Database::open(&db_path).map_err(|e| RecordingError::Failed(e.to_string()))?;
@@ -279,9 +279,10 @@ mod imp {
                     ..Default::default()
                 });
 
-                let result = runtime.block_on(pipeline.run(&db, meeting_id, &mut source, move || {
-                    poll_stop.load(Ordering::Relaxed)
-                }));
+                let result =
+                    runtime.block_on(pipeline.run(&db, meeting_id, &mut source, move || {
+                        poll_stop.load(Ordering::Relaxed)
+                    }));
 
                 // End the meeting from this thread. It owns the connection that has been
                 // writing, and it is the only place that knows the recording is truly over.
@@ -383,7 +384,11 @@ mod tests {
     async fn an_ephemeral_database_cannot_record() {
         let manager = RecordingManager::new();
         let result = manager
-            .start(None, PathBuf::from("/tmp/notewise-models"), StartRequest::default())
+            .start(
+                None,
+                PathBuf::from("/tmp/notewise-models"),
+                StartRequest::default(),
+            )
             .await;
 
         // Either refusal is correct; both name a real reason rather than pretending to record.

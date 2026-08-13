@@ -13,14 +13,13 @@ use notewise_ai_router::{
     suggest_questions, AiBackend, BackendKind, ChatMessage, ChatRequest, ClarifierConfig,
     ClarifierSession, Role, TranscriptInput, Utterance,
 };
-use notewise_transcription::{ModelRegistry, ModelStore};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
-    meeting_to_markdown, ExportOptions, Id, Meeting, MeetingRepository, MeetingSource,
-    NewMeeting, NewNote, NewSummary,
-    NewTranscriptSegment, Note, NoteRepository, SearchRepository, SummaryRepository, Ticket,
-    TicketRepository, TranscriptSegment,
+    meeting_to_markdown, ExportOptions, Id, Meeting, MeetingRepository, MeetingSource, NewMeeting,
+    NewNote, NewSummary, NewTranscriptSegment, Note, NoteRepository, SearchRepository,
+    SummaryRepository, Ticket, TicketRepository, TranscriptSegment,
 };
+use notewise_transcription::{ModelRegistry, ModelStore};
 
 use crate::error::{ApiError, ApiResult};
 use crate::recording::{self, RecordingError, StartRequest};
@@ -51,7 +50,9 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/search", get(search))
         .route(
             "/v1/recording",
-            get(recording_status).post(start_recording).delete(stop_recording),
+            get(recording_status)
+                .post(start_recording)
+                .delete(stop_recording),
         )
         .with_state(state)
 }
@@ -551,8 +552,9 @@ async fn chat_about_meeting(
         })
         .collect();
 
-    let request = ChatRequest::new(messages)
-        .with_context(vec![format!("Meeting: {title}\n\nTranscript:\n{transcript}")]);
+    let request = ChatRequest::new(messages).with_context(vec![format!(
+        "Meeting: {title}\n\nTranscript:\n{transcript}"
+    )]);
 
     let response = state.ai().chat(&request).await?;
 
@@ -627,8 +629,7 @@ async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::
 /// explicitly started, but it means no progress reporting — a streaming variant is the
 /// obvious next step for the larger models, which are gigabytes.
 async fn download_model(Path(name): Path<String>) -> ApiResult<Json<serde_json::Value>> {
-    let model = ModelRegistry::get(&name)
-        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let model = ModelRegistry::get(&name).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let store = model_store();
 
     if store.is_available(&model) {
@@ -761,7 +762,11 @@ async fn export_meeting(
         "{}.md",
         title
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+            .map(|c| if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            })
             .collect::<String>()
             .trim_matches('-')
             .to_lowercase()
@@ -769,7 +774,10 @@ async fn export_meeting(
 
     Ok((
         [
-            (axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8".to_string()),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/markdown; charset=utf-8".to_string(),
+            ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{filename}\""),
@@ -913,7 +921,11 @@ mod tests {
     }
 
     async fn create_test_meeting(app: &AxumRouter) -> Id {
-        let (status, json) = call(app, post("/v1/meetings", serde_json::json!({"title": "Sync"}))).await;
+        let (status, json) = call(
+            app,
+            post("/v1/meetings", serde_json::json!({"title": "Sync"})),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{json}");
         json["id"].as_str().unwrap().parse().unwrap()
     }
@@ -937,7 +949,10 @@ mod tests {
         let (status, json) = call(&app, get(&format!("/v1/meetings/{id}"))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["title"], "Sync");
-        assert!(json["ended_at"].is_null(), "a new meeting is still recording");
+        assert!(
+            json["ended_at"].is_null(),
+            "a new meeting is still recording"
+        );
 
         let (status, list) = call(&app, get("/v1/meetings")).await;
         assert_eq!(status, StatusCode::OK);
@@ -979,7 +994,11 @@ mod tests {
         let app = app();
         let id = create_test_meeting(&app).await;
 
-        let (status, json) = call(&app, post(&format!("/v1/meetings/{id}/end"), serde_json::json!({}))).await;
+        let (status, json) = call(
+            &app,
+            post(&format!("/v1/meetings/{id}/end"), serde_json::json!({})),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert!(!json["ended_at"].is_null());
     }
@@ -1033,7 +1052,10 @@ mod tests {
 
         let (status, json) = call(
             &app,
-            post(&format!("/v1/meetings/{id}/summarize"), serde_json::json!({})),
+            post(
+                &format!("/v1/meetings/{id}/summarize"),
+                serde_json::json!({}),
+            ),
         )
         .await;
 
@@ -1057,7 +1079,10 @@ mod tests {
 
         let (status, json) = call(
             &app,
-            post(&format!("/v1/meetings/{id}/summarize"), serde_json::json!({})),
+            post(
+                &format!("/v1/meetings/{id}/summarize"),
+                serde_json::json!({}),
+            ),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{json}");
@@ -1143,7 +1168,13 @@ mod tests {
     #[tokio::test]
     async fn list_limits_are_clamped() {
         // A client asking for the entire history should not get it in one response.
-        assert_eq!(ListQuery { limit: Some(10_000) }.limit(), 500);
+        assert_eq!(
+            ListQuery {
+                limit: Some(10_000)
+            }
+            .limit(),
+            500
+        );
         assert_eq!(ListQuery { limit: Some(0) }.limit(), 1);
         assert_eq!(ListQuery { limit: None }.limit(), 50);
     }
@@ -1158,7 +1189,11 @@ mod tests {
             .unwrap_or("")
             .to_string();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        (status, content_type, String::from_utf8_lossy(&bytes).into_owned())
+        (
+            status,
+            content_type,
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )
     }
 
     #[tokio::test]
@@ -1196,8 +1231,11 @@ mod tests {
         )
         .await;
 
-        let (_, _, brief) =
-            call_raw(&app, get(&format!("/v1/meetings/{id}/export?variant=brief"))).await;
+        let (_, _, brief) = call_raw(
+            &app,
+            get(&format!("/v1/meetings/{id}/export?variant=brief")),
+        )
+        .await;
         assert!(!brief.contains("## Transcript"), "{brief}");
 
         let (_, _, transcript) = call_raw(
@@ -1256,7 +1294,10 @@ mod tests {
 
         let (status, json) = call(
             &app,
-            post(&format!("/v1/meetings/{id}/questions"), serde_json::json!({})),
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({}),
+            ),
         )
         .await;
 
@@ -1283,7 +1324,10 @@ mod tests {
 
         let (status, json) = call(
             &app,
-            post(&format!("/v1/meetings/{id}/questions"), serde_json::json!({})),
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({}),
+            ),
         )
         .await;
 
@@ -1291,7 +1335,10 @@ mod tests {
         // point is that the request was gated in and completed rather than refused.
         assert_eq!(status, StatusCode::OK, "{json}");
         assert!(json["questions"].is_array());
-        assert!(json.get("reason").is_none(), "should not have been declined: {json}");
+        assert!(
+            json.get("reason").is_none(),
+            "should not have been declined: {json}"
+        );
     }
 
     #[tokio::test]
@@ -1397,7 +1444,11 @@ mod tests {
         assert!(models.len() >= 8);
 
         let recommended: Vec<_> = models.iter().filter(|m| m["recommended"] == true).collect();
-        assert_eq!(recommended.len(), 1, "exactly one model should be recommended");
+        assert_eq!(
+            recommended.len(),
+            1,
+            "exactly one model should be recommended"
+        );
         assert_eq!(recommended[0]["name"], "base.en");
 
         // Everything a picker needs to warn before a user chooses badly.
@@ -1436,10 +1487,9 @@ mod tests {
             .await
             .unwrap();
 
-        let body: serde_json::Value = serde_json::from_slice(
-            &response.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
 
         assert!(body["can_record"].is_boolean(), "{body}");
         // This state is in-memory, so recording is impossible regardless of features.
@@ -1455,10 +1505,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body: serde_json::Value = serde_json::from_slice(
-            &response.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
 
         assert_eq!(body["recording"], serde_json::Value::Bool(false));
         assert_eq!(body["meeting_id"], serde_json::Value::Null);
@@ -1489,10 +1538,9 @@ mod tests {
             response.status()
         );
 
-        let body: serde_json::Value = serde_json::from_slice(
-            &response.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
         // The message has to name the cause, since the fix differs completely between the two.
         let message = body["error"].as_str().unwrap_or_default();
         assert!(
@@ -1515,10 +1563,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
-        let body: serde_json::Value = serde_json::from_slice(
-            &response.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
         assert_eq!(body["code"], "conflict");
     }
 

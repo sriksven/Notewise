@@ -271,7 +271,7 @@ mod tests {
         let mut conn = fresh();
         let version = migrate(&mut conn).unwrap();
         assert_eq!(version, SUPPORTED_VERSION);
-        assert!(SUPPORTED_VERSION >= 3, "expected at least 3 migrations");
+        const { assert!(SUPPORTED_VERSION >= 3, "expected at least 3 migrations") };
     }
 
     #[test]
@@ -320,17 +320,24 @@ mod tests {
             .unwrap();
 
         let err = migrate(&mut conn).expect_err("should refuse a newer schema");
-        assert!(matches!(err, StorageError::SchemaTooNew { .. }), "got {err:?}");
+        assert!(
+            matches!(err, StorageError::SchemaTooNew { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn partial_migration_does_not_advance_version() {
         // Pre-create a table that migration v1 also creates, so v1 fails part-way.
         let mut conn = fresh();
-        conn.execute_batch("CREATE TABLE meetings (id TEXT);").unwrap();
+        conn.execute_batch("CREATE TABLE meetings (id TEXT);")
+            .unwrap();
 
         let err = migrate(&mut conn).expect_err("should fail on conflicting table");
-        assert!(matches!(err, StorageError::Migration { version: 1, .. }), "got {err:?}");
+        assert!(
+            matches!(err, StorageError::Migration { version: 1, .. }),
+            "got {err:?}"
+        );
         assert_eq!(
             current_version(&conn).unwrap(),
             0,

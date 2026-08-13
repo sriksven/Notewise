@@ -139,7 +139,10 @@ impl GeminiBackend {
             })?;
 
         // Safety stops also arrive as a successful response.
-        if matches!(candidate.finish_reason.as_deref(), Some("SAFETY" | "BLOCKLIST")) {
+        if matches!(
+            candidate.finish_reason.as_deref(),
+            Some("SAFETY" | "BLOCKLIST")
+        ) {
             return Err(AiError::Refused {
                 backend: BACKEND,
                 category: candidate.finish_reason,
@@ -379,7 +382,10 @@ mod tests {
     #[test]
     fn json_mode_sets_the_response_mime_type() {
         let backend = backend();
-        assert!(backend.body("s", vec![], false).get("generationConfig").is_none());
+        assert!(backend
+            .body("s", vec![], false)
+            .get("generationConfig")
+            .is_none());
         assert_eq!(
             backend.body("s", vec![], true)["generationConfig"]["responseMimeType"],
             "application/json"
@@ -432,7 +438,10 @@ mod tests {
 
         assert!(parsed.candidates.is_empty());
         assert_eq!(
-            parsed.prompt_feedback.and_then(|f| f.block_reason).as_deref(),
+            parsed
+                .prompt_feedback
+                .and_then(|f| f.block_reason)
+                .as_deref(),
             Some("SAFETY")
         );
     }
@@ -444,7 +453,10 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(parsed.candidates[0].finish_reason.as_deref(), Some("SAFETY"));
+        assert_eq!(
+            parsed.candidates[0].finish_reason.as_deref(),
+            Some("SAFETY")
+        );
         assert!(parsed.candidates[0].content.is_none());
     }
 
@@ -469,7 +481,7 @@ mod tests {
     #[test]
     fn chat_maps_the_assistant_role_to_model() {
         // "assistant" is rejected by Gemini; the role must be "model".
-        let messages = vec![
+        let messages = [
             crate::types::ChatMessage::user("hi"),
             crate::types::ChatMessage::assistant("hello"),
             crate::types::ChatMessage::user("and?"),

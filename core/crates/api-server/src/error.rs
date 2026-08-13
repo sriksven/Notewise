@@ -165,7 +165,10 @@ mod tests {
         let err = ApiError::Ai(AiError::MissingApiKey {
             backend: "anthropic",
         });
-        assert_eq!(err.parts(), (StatusCode::FAILED_DEPENDENCY, "ai_not_configured"));
+        assert_eq!(
+            err.parts(),
+            (StatusCode::FAILED_DEPENDENCY, "ai_not_configured")
+        );
     }
 
     #[test]
@@ -211,7 +214,10 @@ mod tests {
     #[test]
     fn an_uncompiled_feature_is_a_501() {
         let err = ApiError::NotImplemented("no capture in this build".into());
-        assert_eq!(err.parts(), (StatusCode::NOT_IMPLEMENTED, "not_implemented"));
+        assert_eq!(
+            err.parts(),
+            (StatusCode::NOT_IMPLEMENTED, "not_implemented")
+        );
     }
 
     #[test]

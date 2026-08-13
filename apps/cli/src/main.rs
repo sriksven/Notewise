@@ -26,11 +26,7 @@ use notewise_storage::{
 use crate::config::Config;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "notewise",
-    about = "Local-first meeting intelligence",
-    version
-)]
+#[command(name = "notewise", about = "Local-first meeting intelligence", version)]
 struct Cli {
     /// Database file. Defaults to the platform data directory.
     #[arg(long, global = true)]
@@ -56,14 +52,10 @@ enum Command {
     },
 
     /// Print a meeting's transcript.
-    Transcript {
-        id: String,
-    },
+    Transcript { id: String },
 
     /// Summarize a meeting and store the result.
-    Summarize {
-        id: String,
-    },
+    Summarize { id: String },
 
     /// Record a meeting from the microphone.
     #[cfg(all(feature = "record", feature = "whisper"))]
@@ -213,7 +205,10 @@ fn status(config: &Config) -> Result<()> {
 
     println!("database       {}", config.database);
     println!("schema version {}", db.schema_version()?);
-    println!("meetings       {}", MeetingRepository::new(&db).list_recent(u32::MAX)?.len());
+    println!(
+        "meetings       {}",
+        MeetingRepository::new(&db).list_recent(u32::MAX)?.len()
+    );
     println!("ai backend     {}", router.model_id());
     println!(
         "ai location    {}",
@@ -326,7 +321,10 @@ async fn summarize(config: &Config, id: &str) -> Result<()> {
     if !action_items.is_empty() {
         println!("## Action items");
         for item in &action_items {
-            println!("- {}", format::action_item(&item.text, item.owner.as_deref()));
+            println!(
+                "- {}",
+                format::action_item(&item.text, item.owner.as_deref())
+            );
         }
         println!();
     }
@@ -461,9 +459,7 @@ async fn record(
 
     let meeting = MeetingRepository::new(&db).create(NewMeeting {
         project_id: None,
-        title: title.unwrap_or_else(|| {
-            format!("Meeting {}", Utc::now().format("%Y-%m-%d %H:%M"))
-        }),
+        title: title.unwrap_or_else(|| format!("Meeting {}", Utc::now().format("%Y-%m-%d %H:%M"))),
         source: MeetingSource::Microphone,
         started_at: Utc::now(),
     })?;
@@ -534,8 +530,8 @@ async fn import(
     let engine = whisper_engine(model).await?;
     let db = open(config)?;
 
-    let mut source = FileSource::open_wav(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let mut source =
+        FileSource::open_wav(path).with_context(|| format!("reading {}", path.display()))?;
 
     let meeting = MeetingRepository::new(&db).create(NewMeeting {
         project_id: None,
@@ -562,7 +558,10 @@ async fn import(
         stats.speakers_detected,
         meeting.id
     );
-    print!("{}", MeetingRepository::new(&db).transcript_text(meeting.id)?);
+    print!(
+        "{}",
+        MeetingRepository::new(&db).transcript_text(meeting.id)?
+    );
     Ok(())
 }
 
@@ -681,14 +680,10 @@ mod tests {
     fn export_flags_are_mutually_exclusive() {
         // --brief and --transcript-only ask for opposite things; accepting both would
         // silently pick one.
-        assert!(Cli::try_parse_from([
-            "notewise",
-            "export",
-            "abc",
-            "--brief",
-            "--transcript-only"
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["notewise", "export", "abc", "--brief", "--transcript-only"])
+                .is_err()
+        );
 
         assert!(Cli::try_parse_from(["notewise", "export", "abc", "--brief"]).is_ok());
     }

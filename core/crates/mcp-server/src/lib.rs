@@ -131,16 +131,20 @@ impl McpServer {
             "tools/list" => Ok(json!({ "tools": tools::definitions() })),
 
             "tools/call" => {
-                let params = request.params.as_ref().ok_or_else(|| {
-                    McpError::InvalidParams("tools/call requires params".into())
-                })?;
+                let params = request
+                    .params
+                    .as_ref()
+                    .ok_or_else(|| McpError::InvalidParams("tools/call requires params".into()))?;
 
                 let name = params
                     .get("name")
                     .and_then(Value::as_str)
                     .ok_or_else(|| McpError::InvalidParams("'name' is required".into()))?;
 
-                let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                let args = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 let result = tools::call(&self.db, name, &args)?;
 
                 // MCP wraps tool output in a content array. JSON is delivered as text

@@ -104,7 +104,11 @@ impl Mixer {
         }
 
         // The earlier timestamp: the mixed frame starts when its earliest input did.
-        AudioFrame::new(mixed, self.output, mic.timestamp_ms.min(system.timestamp_ms))
+        AudioFrame::new(
+            mixed,
+            self.output,
+            mic.timestamp_ms.min(system.timestamp_ms),
+        )
     }
 
     /// Mix a single frame — gain and limiting, no second stream.
@@ -166,9 +170,7 @@ impl AudioSource for MixedSource {
         Ok(match (mic_frame, system_frame) {
             (Some(mic), Some(system)) => Some(self.mixer.mix(&mic, &system)),
             (Some(mic), None) => Some(self.mixer.passthrough(&mic, self.mixer.mic_gain)),
-            (None, Some(system)) => {
-                Some(self.mixer.passthrough(&system, self.mixer.system_gain))
-            }
+            (None, Some(system)) => Some(self.mixer.passthrough(&system, self.mixer.system_gain)),
             // Both exhausted.
             (None, None) => None,
         })
@@ -191,8 +193,8 @@ impl AudioSource for MixedSource {
 mod tests {
     use super::*;
     use crate::format::SampleRate;
-    use crate::source::{CaptureConfig, FileSource, SyntheticSource, Waveform};
     use crate::rms;
+    use crate::source::{CaptureConfig, FileSource, SyntheticSource, Waveform};
 
     fn frame(value: f32, len: usize, format: AudioFormat, ts: i64) -> AudioFrame {
         AudioFrame::new(vec![value; len], format, ts)
@@ -223,7 +225,10 @@ mod tests {
         let b = soft_clip(1.4);
         let c = soft_clip(2.0);
 
-        assert!(a < b && b < c, "compression must stay monotonic: {a} {b} {c}");
+        assert!(
+            a < b && b < c,
+            "compression must stay monotonic: {a} {b} {c}"
+        );
         assert!(a > 0.7, "should exceed the knee");
     }
 
@@ -233,7 +238,11 @@ mod tests {
         // f32 well before the input does. Full scale is a valid sample; the requirement is
         // that nothing goes past it, which is what would wrap or clip downstream.
         for level in [1.0, 1.5, 2.0, 10.0, 1000.0] {
-            assert!(soft_clip(level) <= 1.0, "{level} produced {}", soft_clip(level));
+            assert!(
+                soft_clip(level) <= 1.0,
+                "{level} produced {}",
+                soft_clip(level)
+            );
             assert!(soft_clip(-level) >= -1.0);
         }
 
@@ -403,8 +412,16 @@ mod tests {
         // The system tap can stop when a call ends while the microphone keeps running.
         let config = CaptureConfig::default();
         let mut source = MixedSource::new(
-            Some(Box::new(SyntheticSource::new(Waveform::Sine { hz: 440 }, 500, &config))),
-            Some(Box::new(SyntheticSource::new(Waveform::Sine { hz: 880 }, 200, &config))),
+            Some(Box::new(SyntheticSource::new(
+                Waveform::Sine { hz: 440 },
+                500,
+                &config,
+            ))),
+            Some(Box::new(SyntheticSource::new(
+                Waveform::Sine { hz: 880 },
+                200,
+                &config,
+            ))),
             Mixer::default(),
         );
 

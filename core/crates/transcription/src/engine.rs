@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use notewise_audio_capture::{AudioFrame, AudioFormat};
+use notewise_audio_capture::{AudioFormat, AudioFrame};
 
 use crate::models::{ModelInfo, ModelStore};
 use crate::segment::{Segment, Transcript};
@@ -454,7 +454,10 @@ mod tests {
         let err = engine.feed(&frame).await.expect_err("must not pretend");
         assert!(matches!(
             err,
-            TranscriptionError::EngineUnavailable { engine: "whisper", .. }
+            TranscriptionError::EngineUnavailable {
+                engine: "whisper",
+                ..
+            }
         ));
     }
 
@@ -500,7 +503,10 @@ mod tests {
         let mut engine = WhisperEngine::new(model, store).expect("engine");
 
         let mut source = notewise_audio_capture::FileSource::open_wav(&sample).expect("wav");
-        let transcript = engine.transcribe_all(&mut source).await.expect("transcribe");
+        let transcript = engine
+            .transcribe_all(&mut source)
+            .await
+            .expect("transcribe");
 
         let text = transcript.to_text().to_lowercase();
         println!("\n--- transcript ---\n{}\n", transcript.to_text());
@@ -512,7 +518,11 @@ mod tests {
         // Timings must land inside the recording, not at zero or past its end.
         let first = transcript.segments.first().expect("at least one segment");
         assert!(first.end_ms > first.start_ms);
-        assert!(transcript.span_ms() > 1000, "span was {}", transcript.span_ms());
+        assert!(
+            transcript.span_ms() > 1000,
+            "span was {}",
+            transcript.span_ms()
+        );
     }
 
     #[tokio::test]

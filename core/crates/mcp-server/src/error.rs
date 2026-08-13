@@ -71,9 +71,6 @@ mod tests {
 
     #[test]
     fn invalid_params_map_to_the_standard_code() {
-        assert_eq!(
-            McpError::InvalidParams("bad".into()).code(),
-            INVALID_PARAMS
-        );
+        assert_eq!(McpError::InvalidParams("bad".into()).code(), INVALID_PARAMS);
     }
 }

@@ -111,8 +111,14 @@ mod tests {
 
     #[test]
     fn confidence_is_clamped_to_a_valid_range() {
-        assert_eq!(Segment::new("x", 0, 1).with_confidence(1.5).confidence, Some(1.0));
-        assert_eq!(Segment::new("x", 0, 1).with_confidence(-0.5).confidence, Some(0.0));
+        assert_eq!(
+            Segment::new("x", 0, 1).with_confidence(1.5).confidence,
+            Some(1.0)
+        );
+        assert_eq!(
+            Segment::new("x", 0, 1).with_confidence(-0.5).confidence,
+            Some(0.0)
+        );
     }
 
     #[test]
@@ -143,7 +149,11 @@ mod tests {
         ])
         .normalized();
 
-        let texts: Vec<_> = transcript.segments.iter().map(|s| s.text.as_str()).collect();
+        let texts: Vec<_> = transcript
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["first", "second", "third"]);
     }
 
@@ -157,7 +167,8 @@ mod tests {
         let mut attributed = Segment::new("Shipping Friday.", 0, 1000);
         attributed.speaker = Some("Alex".into());
 
-        let transcript = Transcript::new(vec![attributed, Segment::new("Sounds good.", 1000, 2000)]);
+        let transcript =
+            Transcript::new(vec![attributed, Segment::new("Sounds good.", 1000, 2000)]);
 
         assert_eq!(transcript.to_text(), "Alex: Shipping Friday.\nSounds good.");
     }

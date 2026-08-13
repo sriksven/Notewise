@@ -229,7 +229,10 @@ mod tests {
 
         repo.delete(note.id).unwrap();
         assert_eq!(
-            SearchRepository::new(&db).search("ephemeral", 10).unwrap().len(),
+            SearchRepository::new(&db)
+                .search("ephemeral", 10)
+                .unwrap()
+                .len(),
             0
         );
     }
@@ -256,7 +259,10 @@ mod tests {
         let search = SearchRepository::new(&db);
 
         for query in ["", "   ", "!!!", "***"] {
-            assert!(search.search(query, 10).unwrap().is_empty(), "query {query:?}");
+            assert!(
+                search.search(query, 10).unwrap().is_empty(),
+                "query {query:?}"
+            );
         }
     }
 
@@ -298,6 +304,12 @@ mod tests {
             .unwrap();
         }
 
-        assert_eq!(SearchRepository::new(&db).search("shared", 3).unwrap().len(), 3);
+        assert_eq!(
+            SearchRepository::new(&db)
+                .search("shared", 3)
+                .unwrap()
+                .len(),
+            3
+        );
     }
 }

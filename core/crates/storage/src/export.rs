@@ -115,7 +115,9 @@ pub fn meeting_to_markdown(
                 out.push_str("## Decisions\n\n");
                 for decision in decisions {
                     out.push_str(&format!("- {}", decision.text.trim()));
-                    if let Some(reasoning) = decision.reasoning.as_ref().filter(|r| !r.trim().is_empty()) {
+                    if let Some(reasoning) =
+                        decision.reasoning.as_ref().filter(|r| !r.trim().is_empty())
+                    {
                         out.push_str(&format!("\n  - _{}_", reasoning.trim()));
                     }
                     out.push('\n');
@@ -131,7 +133,11 @@ pub fn meeting_to_markdown(
                 for item in items {
                     // GitHub-flavoured task list: a done item exports as ticked, so the
                     // export reflects state rather than flattening it.
-                    let checkbox = if item.status == WorkStatus::Done { "[x]" } else { "[ ]" };
+                    let checkbox = if item.status == WorkStatus::Done {
+                        "[x]"
+                    } else {
+                        "[ ]"
+                    };
                     out.push_str(&format!("- {checkbox} {}", item.text.trim()));
 
                     if let Some(owner) = &item.owner {
@@ -172,12 +178,12 @@ pub fn meeting_to_markdown(
                     if last_speaker.is_some() {
                         out.push('\n');
                     }
-                    let name = segment.speaker.clone().unwrap_or_else(|| "Unattributed".into());
+                    let name = segment
+                        .speaker
+                        .clone()
+                        .unwrap_or_else(|| "Unattributed".into());
                     if options.include_timestamps {
-                        out.push_str(&format!(
-                            "**{name}** ({})\n",
-                            timestamp(segment.start_ms)
-                        ));
+                        out.push_str(&format!("**{name}** ({})\n", timestamp(segment.start_ms)));
                     } else {
                         out.push_str(&format!("**{name}**\n"));
                     }
@@ -214,7 +220,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> chrono::DateTime<Utc> {
-        Utc.timestamp_opt(secs, 0).single().expect("valid timestamp")
+        Utc.timestamp_opt(secs, 0)
+            .single()
+            .expect("valid timestamp")
     }
 
     /// A meeting with a transcript, a summary, a decision, and two action items.
@@ -297,7 +305,12 @@ mod tests {
         let md = meeting_to_markdown(&db, id, ExportOptions::default()).unwrap();
 
         assert!(md.starts_with("# Infra sync"));
-        for heading in ["## Summary", "## Decisions", "## Action items", "## Transcript"] {
+        for heading in [
+            "## Summary",
+            "## Decisions",
+            "## Action items",
+            "## Transcript",
+        ] {
             assert!(md.contains(heading), "missing {heading}\n{md}");
         }
     }
@@ -326,7 +339,10 @@ mod tests {
         let md = meeting_to_markdown(&db, full_meeting(&db), ExportOptions::default()).unwrap();
 
         assert!(md.contains("- Migrate to Postgres"), "{md}");
-        assert!(md.contains("  - _SQLite will not scale past launch_"), "{md}");
+        assert!(
+            md.contains("  - _SQLite will not scale past launch_"),
+            "{md}"
+        );
     }
 
     #[test]
@@ -335,20 +351,28 @@ mod tests {
         let db = db();
         let md = meeting_to_markdown(&db, full_meeting(&db), ExportOptions::default()).unwrap();
 
-        let transcript = md.split("## Transcript").nth(1).expect("transcript section");
+        let transcript = md
+            .split("## Transcript")
+            .nth(1)
+            .expect("transcript section");
         assert_eq!(
             transcript.matches("**Alex**").count(),
             1,
             "Alex spoke twice in a row and should get one heading:\n{transcript}"
         );
-        assert!(transcript.contains("Where did we land on Postgres?\nWe should move before launch."));
+        assert!(
+            transcript.contains("Where did we land on Postgres?\nWe should move before launch.")
+        );
     }
 
     #[test]
     fn the_model_is_recorded_so_a_reader_can_weigh_the_summary() {
         let db = db();
         let md = meeting_to_markdown(&db, full_meeting(&db), ExportOptions::default()).unwrap();
-        assert!(md.contains("_Summarized by llama3.1 via Notewise._"), "{md}");
+        assert!(
+            md.contains("_Summarized by llama3.1 via Notewise._"),
+            "{md}"
+        );
     }
 
     #[test]
@@ -398,7 +422,10 @@ mod tests {
 
         let md = meeting_to_markdown(&db, meeting.id, ExportOptions::default()).unwrap();
 
-        assert!(md.contains("_This meeting has not been summarized._"), "{md}");
+        assert!(
+            md.contains("_This meeting has not been summarized._"),
+            "{md}"
+        );
         assert!(md.contains("_No transcript._"), "{md}");
     }
 

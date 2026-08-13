@@ -96,7 +96,9 @@ impl<'a> EmailDraftRepository<'a> {
              FROM email_drafts WHERE meeting_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![meeting_id], map_draft)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     /// Record explicit user approval. This is the only path to a sendable draft.
@@ -123,7 +125,10 @@ impl<'a> EmailDraftRepository<'a> {
             let current = self.get(id)?;
             return Err(StorageError::Corrupt {
                 column: "email_drafts.status",
-                reason: format!("cannot discard a draft in state '{}'", current.status.as_str()),
+                reason: format!(
+                    "cannot discard a draft in state '{}'",
+                    current.status.as_str()
+                ),
             });
         }
         self.get(id)
@@ -204,7 +209,9 @@ impl<'a> NotificationRepository<'a> {
              ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![recipient], map_notification)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     /// Undelivered notifications on a channel — what a delivery worker picks up.
@@ -218,7 +225,9 @@ impl<'a> NotificationRepository<'a> {
              ORDER BY created_at",
         )?;
         let rows = stmt.query_map(rusqlite::params![channel.as_str()], map_notification)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().collect()
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
     }
 
     pub fn mark_delivered(&self, id: Id, at: DateTime<Utc>) -> Result<()> {
@@ -366,7 +375,10 @@ mod tests {
         repo.approve(d.id).unwrap();
         repo.mark_sent(d.id).unwrap();
 
-        assert!(repo.discard(d.id).is_err(), "a sent email cannot be un-sent");
+        assert!(
+            repo.discard(d.id).is_err(),
+            "a sent email cannot be un-sent"
+        );
         assert_eq!(repo.get(d.id).unwrap().status, DraftStatus::Sent);
     }
 
@@ -378,7 +390,10 @@ mod tests {
         repo.approve(d.id).unwrap();
         repo.mark_sent(d.id).unwrap();
 
-        assert!(repo.mark_sent(d.id).is_err(), "must not send the same draft twice");
+        assert!(
+            repo.mark_sent(d.id).is_err(),
+            "must not send the same draft twice"
+        );
     }
 
     #[test]
@@ -424,11 +439,20 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(repo.pending_on(NotificationChannel::Digest).unwrap().len(), 1);
+        assert_eq!(
+            repo.pending_on(NotificationChannel::Digest).unwrap().len(),
+            1
+        );
 
         repo.mark_delivered(digest.id, Utc::now()).unwrap();
-        assert_eq!(repo.pending_on(NotificationChannel::Digest).unwrap().len(), 0);
-        assert_eq!(repo.pending_on(NotificationChannel::Slack).unwrap().len(), 1);
+        assert_eq!(
+            repo.pending_on(NotificationChannel::Digest).unwrap().len(),
+            0
+        );
+        assert_eq!(
+            repo.pending_on(NotificationChannel::Slack).unwrap().len(),
+            1
+        );
     }
 
     #[test]

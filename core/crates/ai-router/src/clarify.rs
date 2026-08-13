@@ -306,8 +306,11 @@ impl ClarifierSession {
         self.pending.retain(|q| !q.is_stale(now_ms, staleness));
 
         if self.pending.len() > self.config.max_pending {
+            // Descending by weight. The sort is stable, so questions of equal weight keep
+            // insertion order and the oldest survives truncation — a question raised earlier
+            // has had longer to matter.
             self.pending
-                .sort_by(|a, b| b.kind.weight().cmp(&a.kind.weight()));
+                .sort_by_key(|q| std::cmp::Reverse(q.kind.weight()));
             self.pending.truncate(self.config.max_pending);
         }
     }
@@ -472,7 +475,14 @@ mod tests {
         let transcript = transcript();
 
         assert!(session.should_suggest(&transcript, 20_000));
-        session.accept(vec![question("Which database?", AmbiguityKind::VagueReference, 20_000)], 20_000);
+        session.accept(
+            vec![question(
+                "Which database?",
+                AmbiguityKind::VagueReference,
+                20_000,
+            )],
+            20_000,
+        );
 
         assert!(
             !session.should_suggest(&transcript, 30_000),
@@ -540,11 +550,19 @@ mod tests {
         let mut session = ClarifierSession::new(ClarifierConfig::default());
 
         let first = session.accept(
-            vec![question("Which database are we moving?", AmbiguityKind::VagueReference, 0)],
+            vec![question(
+                "Which database are we moving?",
+                AmbiguityKind::VagueReference,
+                0,
+            )],
             0,
         );
         let second = session.accept(
-            vec![question("Which database are we moving?", AmbiguityKind::VagueReference, 90_000)],
+            vec![question(
+                "Which database are we moving?",
+                AmbiguityKind::VagueReference,
+                90_000,
+            )],
             90_000,
         );
 
@@ -556,10 +574,24 @@ mod tests {
     fn rewordings_of_one_question_collapse() {
         // The model will not phrase the same ambiguity identically twice, and a near
         // duplicate is just as irritating as an exact one.
-        let a = question("What is the timeline for the migration?", AmbiguityKind::MissingDeadline, 0);
-        let b = question("What's the migration timeline?", AmbiguityKind::MissingDeadline, 0);
+        let a = question(
+            "What is the timeline for the migration?",
+            AmbiguityKind::MissingDeadline,
+            0,
+        );
+        let b = question(
+            "What's the migration timeline?",
+            AmbiguityKind::MissingDeadline,
+            0,
+        );
 
-        assert_eq!(a.dedupe_key(), b.dedupe_key(), "{} vs {}", a.dedupe_key(), b.dedupe_key());
+        assert_eq!(
+            a.dedupe_key(),
+            b.dedupe_key(),
+            "{} vs {}",
+            a.dedupe_key(),
+            b.dedupe_key()
+        );
     }
 
     #[test]
@@ -567,8 +599,16 @@ mod tests {
         let mut session = ClarifierSession::new(ClarifierConfig::default());
         let accepted = session.accept(
             vec![
-                question("Which database are we migrating?", AmbiguityKind::VagueReference, 0),
-                question("Who owns the index rebuild?", AmbiguityKind::UnassignedAction, 0),
+                question(
+                    "Which database are we migrating?",
+                    AmbiguityKind::VagueReference,
+                    0,
+                ),
+                question(
+                    "Who owns the index rebuild?",
+                    AmbiguityKind::UnassignedAction,
+                    0,
+                ),
             ],
             0,
         );
@@ -582,7 +622,14 @@ mod tests {
     fn stale_questions_are_dropped_unasked() {
         // Asking about something from fifteen minutes ago derails the conversation.
         let mut session = ClarifierSession::new(ClarifierConfig::default());
-        session.accept(vec![question("Which database?", AmbiguityKind::VagueReference, 0)], 0);
+        session.accept(
+            vec![question(
+                "Which database?",
+                AmbiguityKind::VagueReference,
+                0,
+            )],
+            0,
+        );
         assert_eq!(session.pending().len(), 1);
 
         session.prune(400_000);
@@ -599,9 +646,17 @@ mod tests {
         session.accept(
             vec![
                 question("What does CRDT mean?", AmbiguityKind::UndefinedTerm, 0),
-                question("That contradicts the earlier plan — which holds?", AmbiguityKind::Contradiction, 0),
+                question(
+                    "That contradicts the earlier plan — which holds?",
+                    AmbiguityKind::Contradiction,
+                    0,
+                ),
                 question("How much faster, roughly?", AmbiguityKind::Unquantified, 0),
-                question("Who is doing the migration?", AmbiguityKind::UnassignedAction, 0),
+                question(
+                    "Who is doing the migration?",
+                    AmbiguityKind::UnassignedAction,
+                    0,
+                ),
             ],
             0,
         );
@@ -609,7 +664,10 @@ mod tests {
         let kinds: Vec<_> = session.pending().iter().map(|q| q.kind).collect();
         assert_eq!(kinds.len(), 2);
         assert!(kinds.contains(&AmbiguityKind::Contradiction), "{kinds:?}");
-        assert!(kinds.contains(&AmbiguityKind::UnassignedAction), "{kinds:?}");
+        assert!(
+            kinds.contains(&AmbiguityKind::UnassignedAction),
+            "{kinds:?}"
+        );
         assert!(!kinds.contains(&AmbiguityKind::UndefinedTerm), "{kinds:?}");
     }
 
@@ -728,14 +786,19 @@ mod tests {
     async fn an_empty_window_makes_no_model_call() {
         // Guarded by pointing at a failing backend: reaching it would be the bug.
         let backend = MockBackend::failing("must not be called");
-        assert!(suggest_questions(&backend, "   ", 0).await.unwrap().is_empty());
+        assert!(suggest_questions(&backend, "   ", 0)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
     async fn a_backend_error_propagates_rather_than_being_swallowed() {
         // A parse failure is silence; a broken backend is a real problem worth reporting.
         let backend = MockBackend::failing("provider down");
-        assert!(suggest_questions(&backend, "some transcript", 0).await.is_err());
+        assert!(suggest_questions(&backend, "some transcript", 0)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -753,6 +816,9 @@ mod tests {
     fn questions_round_trip_through_json() {
         let q = question("Who owns it?", AmbiguityKind::UnassignedAction, 1234);
         let json = serde_json::to_string(&q).unwrap();
-        assert_eq!(serde_json::from_str::<ClarifyingQuestion>(&json).unwrap(), q);
+        assert_eq!(
+            serde_json::from_str::<ClarifyingQuestion>(&json).unwrap(),
+            q
+        );
     }
 }

@@ -262,9 +262,7 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
     use notewise_graph::EdgeKind;
-    use notewise_storage::{
-        MeetingSource, NewMeeting, NewNote, NewSummary, NewTranscriptSegment,
-    };
+    use notewise_storage::{MeetingSource, NewMeeting, NewNote, NewSummary, NewTranscriptSegment};
 
     fn db() -> Database {
         Database::open_in_memory().expect("in-memory db")
@@ -349,7 +347,12 @@ mod tests {
         let db = db();
         let id = seeded_meeting(&db);
 
-        let result = call(&db, "get_transcript", &json!({ "meeting_id": id.to_string() })).unwrap();
+        let result = call(
+            &db,
+            "get_transcript",
+            &json!({ "meeting_id": id.to_string() }),
+        )
+        .unwrap();
         assert_eq!(
             result["transcript"].as_str().unwrap().trim(),
             "Alex: We will migrate to Postgres."
@@ -367,7 +370,11 @@ mod tests {
     #[test]
     fn a_malformed_id_is_invalid_params() {
         assert!(matches!(
-            call(&db(), "get_transcript", &json!({ "meeting_id": "not-a-uuid" })),
+            call(
+                &db(),
+                "get_transcript",
+                &json!({ "meeting_id": "not-a-uuid" })
+            ),
             Err(McpError::InvalidParams(_))
         ));
     }
@@ -379,7 +386,10 @@ mod tests {
 
         let result = call(&db, "get_summary", &json!({ "meeting_id": id.to_string() })).unwrap();
         assert!(result["summary"].is_null());
-        assert!(result["note"].as_str().unwrap().contains("not been summarized"));
+        assert!(result["note"]
+            .as_str()
+            .unwrap()
+            .contains("not been summarized"));
     }
 
     #[test]
@@ -410,8 +420,12 @@ mod tests {
         })
         .unwrap();
 
-        let result = call(&db, "get_summary", &json!({ "meeting_id": meeting_id.to_string() }))
-            .unwrap();
+        let result = call(
+            &db,
+            "get_summary",
+            &json!({ "meeting_id": meeting_id.to_string() }),
+        )
+        .unwrap();
 
         assert_eq!(result["summary"], "Agreed to migrate.");
         assert_eq!(result["decisions"][0]["reasoning"], "Better JSON support");

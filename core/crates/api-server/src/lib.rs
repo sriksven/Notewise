@@ -151,8 +151,13 @@ impl Server {
         self,
         state: AppState,
         dir: impl AsRef<std::path::Path>,
-    ) -> Result<(SocketAddr, impl std::future::Future<Output = Result<(), ServeError>>), ServeError>
-    {
+    ) -> Result<
+        (
+            SocketAddr,
+            impl std::future::Future<Output = Result<(), ServeError>>,
+        ),
+        ServeError,
+    > {
         let listener = tokio::net::TcpListener::bind(self.addr)
             .await
             .map_err(|source| ServeError::Bind {
@@ -289,11 +294,13 @@ mod tests {
         /// having been built.
         fn dist() -> tempfile::TempDir {
             let dir = tempfile::tempdir().expect("tempdir");
-            std::fs::write(dir.path().join("index.html"), "<!doctype html><title>NW</title>")
-                .expect("index");
+            std::fs::write(
+                dir.path().join("index.html"),
+                "<!doctype html><title>NW</title>",
+            )
+            .expect("index");
             std::fs::create_dir_all(dir.path().join("assets")).expect("assets");
-            std::fs::write(dir.path().join("assets/app.js"), "export const x = 1;")
-                .expect("asset");
+            std::fs::write(dir.path().join("assets/app.js"), "export const x = 1;").expect("asset");
             dir
         }
 

@@ -23,7 +23,10 @@ pub enum StorageError {
     SchemaTooNew { found: u32, supported: u32 },
 
     #[error("invalid stored value in column '{column}': {reason}")]
-    Corrupt { column: &'static str, reason: String },
+    Corrupt {
+        column: &'static str,
+        reason: String,
+    },
 
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),

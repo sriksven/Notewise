@@ -112,9 +112,7 @@ impl ChatRequest {
     /// Whether this request is well-formed. Backends check this before spending a
     /// network call on a request the provider would reject anyway.
     pub fn is_valid(&self) -> bool {
-        self.messages
-            .last()
-            .is_some_and(|m| m.role == Role::User)
+        self.messages.last().is_some_and(|m| m.role == Role::User)
     }
 }
 
