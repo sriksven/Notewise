@@ -30,7 +30,7 @@ authors = ["Notewise contributors"]
 
 [workspace.dependencies]
 # Internal crates. Path-based within the workspace; versioned so core/ can be published
-# independently of the apps that consume it (see ARCHITECTURE.md §versioning).
+# independently of the apps that consume it (see docs/architecture/overview.md §versioning).
 notewise-storage = { path = "core/crates/storage", version = "0.1.0" }
 notewise-graph = { path = "core/crates/graph", version = "0.1.0" }
 notewise-ai-router = { path = "core/crates/ai-router", version = "0.1.0" }

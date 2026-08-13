@@ -9,7 +9,7 @@
 //! The versioning and conflict-resolution logic is complete and tested — the part that is
 //! genuinely hard and where correctness matters, since a wrong merge silently destroys a
 //! user's edit. There is **no network transport**: that needs a running sync service, which
-//! is a Phase 2 concern (see ROADMAP.md).
+//! is a Phase 2 concern (see docs/roadmap.md).
 //!
 //! # The model
 //!

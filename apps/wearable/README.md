@@ -1,6 +1,6 @@
 # Wearable companions
 
-> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 3 arrives. See [ROADMAP.md](../../ROADMAP.md).
+> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 3 arrives. See `docs/roadmap.md`.
 
 **Wearables do not run the engine.** They are a remote control and a glanceable display for
 the paired phone, which itself talks to the desktop engine or the cloud.

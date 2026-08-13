@@ -8,7 +8,7 @@ land in.
 
 Many directories are scaffolds awaiting their phase. Each scaffold's `README.md` states its
 status at the top — read it before assuming something is implemented, and check
-[ROADMAP.md](ROADMAP.md) before building ahead of the current phase.
+`docs/roadmap.md` before building ahead of the current phase.
 
 ## Setup
 

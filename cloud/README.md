@@ -1,7 +1,7 @@
 # Cloud services
 
 > **Status: scaffold.** Nothing here is implemented. These services begin in Phase 2 — see
-> [ROADMAP.md](../ROADMAP.md).
+> `docs/roadmap.md`.
 
 > ⚠️ **Licensed under [BSL 1.1](../LICENSE-CLOUD.md), not MIT.** Moving code from here into
 > `core/` or `apps/` relicenses it. Do not do that incidentally.

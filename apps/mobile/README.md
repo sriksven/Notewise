@@ -1,6 +1,6 @@
 # Mobile apps
 
-> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 2 arrives. See [ROADMAP.md](../../ROADMAP.md).
+> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 2 arrives. See `docs/roadmap.md`.
 
 Both platforms link the compiled engine through the [`ffi`](../../core/crates/ffi/) crate —
 iOS via an XCFramework, Android via a `.aar` with a JNI bridge. Neither reimplements storage

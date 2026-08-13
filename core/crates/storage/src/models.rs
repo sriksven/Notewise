@@ -3,7 +3,7 @@
 //! Fields here model **ownership** — a transcript segment belongs to exactly one meeting,
 //! expressed as a foreign key. **Association** between entities (a note referencing a
 //! meeting, an action item linked to a ticket) is modelled as typed edges in the `graph`
-//! crate, not as columns here. See ARCHITECTURE.md.
+//! crate, not as columns here. See docs/architecture/overview.md.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

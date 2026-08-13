@@ -80,7 +80,7 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | `apps/desktop` | **Runs** — React UI served by the engine, in a Tauri window; records from the app |
 | `apps/mobile`, `cloud/` | Scaffolded, awaiting their phase |
 
-See [ROADMAP.md](ROADMAP.md) for what lands when, and each directory's `README.md` for
+See `docs/roadmap.md` for what lands when, and each directory's `README.md` for
 its specific state. Directories that are scaffolds say so at the top.
 
 ## Quick start
@@ -132,9 +132,8 @@ curl -X DELETE 127.0.0.1:47821/v1/recording          # stop, flush, diarize
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — how the pieces fit and why the boundaries sit where they do
-- [ROADMAP.md](ROADMAP.md) — phased build order
 - [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents working in this repo
-- `docs/` — build walkthroughs, REST reference, MCP tool list. Local only and not published; see the doc comments in `core/crates/` for anything load-bearing.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — conventions, commit format, review process
-- [SECURITY.md](SECURITY.md) — vulnerability disclosure
+- [CONTRIBUTING.md](.github/CONTRIBUTING.md) — conventions, commit format, review process
+- [SECURITY.md](.github/SECURITY.md) — vulnerability disclosure
+- `docs/` — architecture, roadmap, build walkthroughs, REST reference. Local only and
+  not published; anything load-bearing lives in doc comments beside the code.

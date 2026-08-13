@@ -1,6 +1,6 @@
 # Infrastructure
 
-> **Status: scaffold.** Phase 4 — see [ROADMAP.md](../ROADMAP.md).
+> **Status: scaffold.** Phase 4 — see `docs/roadmap.md`.
 
 Deployment tooling for `cloud/` and for the self-hosted enterprise option.
 

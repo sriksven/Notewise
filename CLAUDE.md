@@ -58,7 +58,7 @@ Moving code from `cloud/` into `core/` relicenses it. Do not do this incidentall
 
 Many directories are scaffolds awaiting their phase. **Every scaffold's `README.md` states
 its status at the top.** Read it before assuming something is implemented. Do not write
-Phase 3 features during Phase 0 — see [ROADMAP.md](ROADMAP.md).
+Phase 3 features during Phase 0 — see `docs/roadmap.md`.
 
 ## Conventions
 

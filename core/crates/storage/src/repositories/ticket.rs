@@ -115,7 +115,7 @@ impl<'a> TicketRepository<'a> {
     /// Record that this ticket now mirrors an issue in an external tracker.
     ///
     /// Phase 2 ships one-way push only — this records where a ticket was pushed to, it
-    /// does not imply the external side syncs back. See ROADMAP.md.
+    /// does not imply the external side syncs back. See docs/roadmap.md.
     pub fn link_external(&self, id: Id, external: ExternalRef) -> Result<Ticket> {
         let changed = self.db.conn().execute(
             "UPDATE tickets

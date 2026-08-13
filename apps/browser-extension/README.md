@@ -1,6 +1,6 @@
 # Browser extension
 
-> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 3 arrives. See [ROADMAP.md](../../ROADMAP.md).
+> **Status: scaffold.** No implementation yet — this directory exists so the architecture does not need reshaping when Phase 3 arrives. See `docs/roadmap.md`.
 
 Captures tab audio for browser-based meetings and streams it to the desktop app.
 

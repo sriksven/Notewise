@@ -104,7 +104,7 @@ impl Database {
     /// Borrow the underlying connection.
     ///
     /// Crate-internal on purpose: repositories use this, callers outside `storage` do not
-    /// get raw SQL access. See the dependency rules in ARCHITECTURE.md.
+    /// get raw SQL access. See the dependency rules in docs/architecture/overview.md.
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }
