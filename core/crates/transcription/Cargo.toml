@@ -1,6 +1,5 @@
 [package]
 name = "notewise-transcription"
-description = "Speech-to-text engines and model management"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +8,20 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true }
+async-trait.workspace = true
+notewise-audio-capture.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
+# whisper.cpp inference. Off by default: needs a cmake build of whisper.cpp and a
+# 150MB-1.5GB model download, neither of which belongs in a default `cargo build`.
+whisper = []

@@ -1,6 +1,5 @@
 [package]
 name = "notewise-sync-client"
-description = "Opt-in cloud sync, diffing and conflict resolution"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +8,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+notewise-storage.workspace = true

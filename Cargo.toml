@@ -39,6 +39,7 @@ notewise-diarization = { path = "core/crates/diarization", version = "0.1.0" }
 notewise-sync-client = { path = "core/crates/sync-client", version = "0.1.0" }
 notewise-api-server = { path = "core/crates/api-server", version = "0.1.0" }
 notewise-mcp-server = { path = "core/crates/mcp-server", version = "0.1.0" }
+notewise-ffi = { path = "core/crates/ffi", version = "0.1.0" }
 
 # Shared third-party versions, pinned once so crates cannot drift apart.
 thiserror = "2"

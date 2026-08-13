@@ -805,6 +805,12 @@ dependencies = [
 [[package]]
 name = "notewise-audio-capture"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "notewise-cli"
@@ -826,10 +832,23 @@ dependencies = [
 [[package]]
 name = "notewise-diarization"
 version = "0.1.0"
+dependencies = [
+ "notewise-transcription",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "notewise-ffi"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "notewise-graph",
+ "notewise-storage",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "notewise-graph"
@@ -869,10 +888,27 @@ dependencies = [
 [[package]]
 name = "notewise-sync-client"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "notewise-storage",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "notewise-transcription"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "notewise-audio-capture",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "nu-ansi-term"

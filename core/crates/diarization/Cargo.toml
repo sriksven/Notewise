@@ -1,6 +1,5 @@
 [package]
 name = "notewise-diarization"
-description = "Speaker separation over transcript segments"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notewise-transcription.workspace = true

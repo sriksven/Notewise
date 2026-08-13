@@ -1,6 +1,5 @@
 [package]
 name = "notewise-audio-capture"
-description = "Cross-platform system and microphone audio capture"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +8,13 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+# Real OS capture backends. Off by default: they pull platform audio SDKs and, on
+# macOS, require a signed bundle with a TCC grant that cannot be obtained headlessly.
+os-capture = []

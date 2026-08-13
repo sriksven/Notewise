@@ -1,6 +1,6 @@
 [package]
 name = "notewise-ffi"
-description = "C ABI export layer for iOS and Android"
+description = "C ABI export layer consumed by iOS and Android"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,4 +8,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+# rlib so the workspace can test it; cdylib/staticlib for the XCFramework and .aar.
+crate-type = ["rlib", "cdylib", "staticlib"]
+
 [dependencies]
+notewise-storage.workspace = true
+notewise-graph.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
