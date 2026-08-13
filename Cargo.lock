@@ -895,6 +895,7 @@ dependencies = [
  "notewise-ai-router",
  "notewise-graph",
  "notewise-storage",
+ "notewise-transcription",
  "serde",
  "serde_json",
  "thiserror",

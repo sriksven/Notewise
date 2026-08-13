@@ -9,7 +9,10 @@ use axum::{Json, Router as AxumRouter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use notewise_ai_router::{AiBackend, TranscriptInput};
+use notewise_ai_router::{
+    suggest_questions, AiBackend, ClarifierConfig, ClarifierSession, TranscriptInput, Utterance,
+};
+use notewise_transcription::{ModelRegistry, ModelStore};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
     meeting_to_markdown, ExportOptions, Id, Meeting, MeetingRepository, MeetingSource,
@@ -38,6 +41,9 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/meetings/:id/export", get(export_meeting))
         .route("/v1/notes", get(list_notes).post(create_note))
         .route("/v1/tickets", get(list_tickets))
+        .route("/v1/meetings/:id/questions", post(clarifying_questions))
+        .route("/v1/models", get(list_models))
+        .route("/v1/models/:name/download", post(download_model))
         .route("/v1/search", get(search))
         .with_state(state)
 }
@@ -306,6 +312,155 @@ async fn summarize_meeting(
         decisions: decisions.len(),
         action_items: action_items.len(),
     }))
+}
+
+// ---------------------------------------------------------------- clarifying questions
+
+#[derive(Debug, Deserialize)]
+struct QuestionsBody {
+    /// Meeting position to treat as "now", in milliseconds. Defaults to the last segment.
+    #[serde(default)]
+    now_ms: Option<i64>,
+}
+
+/// Suggest questions worth asking about a live meeting.
+///
+/// Stateless per request: the caller owns the cooldown and dedupe state, because a desktop
+/// app and a browser tab watching the same meeting should not silence each other. The
+/// windowing and gating logic is reused from `ClarifierSession` so both agree on policy.
+async fn clarifying_questions(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<QuestionsBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let meeting_id = parse_id(&id)?;
+
+    let (utterances, latest_ms) = {
+        let db = state.db().await;
+        let repo = MeetingRepository::new(&db);
+        repo.get(meeting_id)?;
+
+        let segments = repo.segments(meeting_id)?;
+        let latest = segments.last().map(|s| s.end_ms).unwrap_or(0);
+
+        let utterances: Vec<Utterance> = segments
+            .into_iter()
+            .map(|s| Utterance {
+                speaker: s.speaker,
+                text: s.text,
+                at_ms: s.start_ms,
+            })
+            .collect();
+
+        (utterances, latest)
+    }; // lock released before the model call
+
+    let now_ms = body.now_ms.unwrap_or(latest_ms);
+    let session = ClarifierSession::new(ClarifierConfig::default());
+
+    // Checked before spending a model call, not after.
+    if !session.should_suggest(&utterances, now_ms) {
+        return Ok(Json(serde_json::json!({
+            "questions": [],
+            "reason": "not enough recent transcript to ask about",
+        })));
+    }
+
+    let window = session.window_text(&utterances, now_ms);
+    let questions = suggest_questions(state.ai(), &window, now_ms).await?;
+
+    Ok(Json(serde_json::json!({
+        "questions": questions,
+        "window_ms": session.config().window_ms,
+    })))
+}
+
+// ---------------------------------------------------------------- models
+
+/// Transcription models, with whether each is already downloaded.
+///
+/// Backs in-app model management, so a user never has to find a URL or a terminal.
+async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
+    let store = model_store();
+    let _ = &state; // model storage is independent of the database
+
+    let models: Vec<_> = ModelRegistry::all()
+        .into_iter()
+        .map(|model| {
+            serde_json::json!({
+                "name": model.name,
+                "size": model.size,
+                "bytes": model.bytes,
+                "approx_ram_mb": model.approx_ram_mb(),
+                "multilingual": model.multilingual,
+                "installed": store.is_available(&model),
+                "recommended": model.name == ModelRegistry::default_model().name,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "models": models,
+        "directory": store.dir().display().to_string(),
+    })))
+}
+
+/// Download a model into the local store.
+///
+/// Runs to completion before responding. That is acceptable for a loopback call a user
+/// explicitly started, but it means no progress reporting — a streaming variant is the
+/// obvious next step for the larger models, which are gigabytes.
+async fn download_model(Path(name): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    let model = ModelRegistry::get(&name)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let store = model_store();
+
+    if store.is_available(&model) {
+        return Ok(Json(serde_json::json!({
+            "name": model.name,
+            "installed": true,
+            "already_present": true,
+        })));
+    }
+
+    let path = store
+        .download(&model)
+        .await
+        .map_err(|e| ApiError::BadRequest(format!("downloading {}: {e}", model.name)))?;
+
+    Ok(Json(serde_json::json!({
+        "name": model.name,
+        "installed": true,
+        "already_present": false,
+        "path": path.display().to_string(),
+    })))
+}
+
+/// Where models live.
+///
+/// Honours `NOTEWISE_MODEL_DIR`, then the platform data directory — the same resolution the
+/// CLI uses, so both see one store.
+fn model_store() -> ModelStore {
+    if let Ok(dir) = std::env::var("NOTEWISE_MODEL_DIR") {
+        return ModelStore::new(dir);
+    }
+
+    let base = std::env::var("NOTEWISE_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_else(|_| ".".into());
+            if cfg!(target_os = "macos") {
+                std::path::PathBuf::from(home).join("Library/Application Support/notewise")
+            } else if cfg!(target_os = "windows") {
+                std::path::PathBuf::from(home).join("AppData/Roaming/notewise")
+            } else {
+                std::path::PathBuf::from(home).join(".local/share/notewise")
+            }
+        });
+
+    ModelStore::new(base.join("models"))
 }
 
 // ---------------------------------------------------------------- graph
@@ -866,6 +1021,104 @@ mod tests {
 
         // "Sync" -> sync.md, not a uuid.
         assert!(disposition.contains("sync.md"), "{disposition}");
+    }
+
+    #[tokio::test]
+    async fn questions_are_declined_when_there_is_too_little_transcript() {
+        // Asking on the first sentence would make everything look ambiguous, and would
+        // spend a model call to find that out.
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "Morning.", "start_ms": 0, "end_ms": 1000}]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(&format!("/v1/meetings/{id}/questions"), serde_json::json!({})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["questions"].as_array().unwrap().is_empty());
+        assert!(json["reason"].as_str().unwrap().contains("not enough"));
+    }
+
+    #[tokio::test]
+    async fn questions_run_once_there_is_enough_transcript() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{
+                    "text": "We should move the database over before the launch because it                              will be much faster, and someone will need to handle the                              migration scripts and the index rebuild at some point soon.",
+                    "start_ms": 0, "end_ms": 20000, "speaker": "Alex"
+                }]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(&format!("/v1/meetings/{id}/questions"), serde_json::json!({})),
+        )
+        .await;
+
+        // The mock backend returns prose, which correctly parses to no questions — the
+        // point is that the request was gated in and completed rather than refused.
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert!(json["questions"].is_array());
+        assert!(json.get("reason").is_none(), "should not have been declined: {json}");
+    }
+
+    #[tokio::test]
+    async fn questions_for_an_unknown_meeting_are_404() {
+        let (status, _) = call(
+            &app(),
+            post(
+                &format!("/v1/meetings/{}/questions", Id::new()),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn models_are_listed_with_install_state() {
+        let (status, json) = call(&app(), get("/v1/models")).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let models = json["models"].as_array().unwrap();
+        assert!(models.len() >= 8);
+
+        let recommended: Vec<_> = models.iter().filter(|m| m["recommended"] == true).collect();
+        assert_eq!(recommended.len(), 1, "exactly one model should be recommended");
+        assert_eq!(recommended[0]["name"], "base.en");
+
+        // Everything a picker needs to warn before a user chooses badly.
+        for model in models {
+            assert!(model["bytes"].as_u64().unwrap() > 1_000_000);
+            assert!(model["approx_ram_mb"].as_u64().unwrap() > 0);
+            assert!(model["installed"].is_boolean());
+        }
+    }
+
+    #[tokio::test]
+    async fn downloading_an_unknown_model_is_rejected() {
+        let (status, _) = call(
+            &app(),
+            post("/v1/models/gpt-9/download", serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

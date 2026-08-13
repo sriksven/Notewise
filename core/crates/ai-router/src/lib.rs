@@ -38,12 +38,17 @@
 #![warn(missing_debug_implementations)]
 
 mod backends;
+mod clarify;
 mod error;
 mod router;
 mod types;
 
 pub use backends::{
     AnthropicBackend, GeminiBackend, MockBackend, OllamaBackend, OpenAiCompatBackend, Preset,
+};
+pub use clarify::{
+    parse_questions, suggest_questions, AmbiguityKind, ClarifierConfig, ClarifierSession,
+    ClarifyingQuestion, Utterance,
 };
 pub use error::{AiError, Result};
 pub use router::{BackendKind, Router, RouterConfig};
