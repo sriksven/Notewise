@@ -133,6 +133,13 @@ export default function App() {
     }
   };
 
+  const exportMeeting = (variant: "full" | "brief") => {
+    if (!selectedId) return;
+    // Navigating to the URL lets the browser handle the download, so the filename from
+    // Content-Disposition is preserved. Building a blob here would lose it.
+    window.location.href = api.exportUrl(selectedId, variant);
+  };
+
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar view={view} onChange={setView} isRecording={isRecording} />
@@ -180,6 +187,8 @@ export default function App() {
             onToggle={toggleRecording}
             onSummarize={summarize}
             canSummarize={selectedId !== null && !isRecording && segments.length > 0}
+            onExport={exportMeeting}
+            canExport={selectedId !== null}
           />
         </div>
       </div>

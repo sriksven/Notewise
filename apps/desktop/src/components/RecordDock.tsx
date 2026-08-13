@@ -8,6 +8,8 @@ interface Props {
   onToggle: () => void;
   onSummarize: () => void;
   canSummarize: boolean;
+  onExport: (variant: "full" | "brief") => void;
+  canExport: boolean;
 }
 
 /** Elapsed time as mm:ss, or h:mm:ss once a meeting runs past an hour. */
@@ -33,6 +35,8 @@ export function RecordDock({
   onToggle,
   onSummarize,
   canSummarize,
+  onExport,
+  canExport,
 }: Props) {
   const [, tick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -124,6 +128,36 @@ export function RecordDock({
                 ? "Runs on the configured backend."
                 : "Needs a finished meeting with a transcript."}
             </p>
+
+            <div className="my-1 border-t border-hairline" />
+
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canExport}
+              onClick={() => {
+                setMenuOpen(false);
+                onExport("full");
+              }}
+              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
+                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+            >
+              Export as Markdown
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canExport}
+              onClick={() => {
+                setMenuOpen(false);
+                onExport("brief");
+              }}
+              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
+                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+            >
+              Export summary only
+            </button>
           </div>
         )}
       </div>

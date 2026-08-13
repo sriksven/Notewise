@@ -19,8 +19,8 @@ use notewise_api_server::{AppState, Server};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_mcp_server::McpServer;
 use notewise_storage::{
-    Database, Id, MeetingRepository, NewSummary, NoteRepository, SearchRepository,
-    SummaryRepository,
+    meeting_to_markdown, Database, ExportOptions, Id, MeetingRepository, NewSummary,
+    NoteRepository, SearchRepository, SummaryRepository,
 };
 
 use crate::config::Config;
@@ -63,6 +63,20 @@ enum Command {
     /// Summarize a meeting and store the result.
     Summarize {
         id: String,
+    },
+
+    /// Export a meeting as Markdown.
+    Export {
+        id: String,
+        /// Write to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Summary, decisions, and action items only — no transcript.
+        #[arg(long)]
+        brief: bool,
+        /// Transcript only, with timestamps.
+        #[arg(long, conflicts_with = "brief")]
+        transcript_only: bool,
     },
 
     /// Show everything connected to a meeting.
@@ -113,6 +127,12 @@ async fn main() -> Result<()> {
         Command::Meetings { limit } => meetings(&config, limit),
         Command::Transcript { id } => transcript(&config, &id),
         Command::Summarize { id } => summarize(&config, &id).await,
+        Command::Export {
+            id,
+            out,
+            brief,
+            transcript_only,
+        } => export(&config, &id, out, brief, transcript_only),
         Command::Related { id, depth } => related(&config, &id, depth),
         Command::Search { query, limit } => search(&config, &query, limit),
         Command::Notes { limit } => notes(&config, limit),
@@ -269,6 +289,36 @@ async fn summarize(config: &Config, id: &str) -> Result<()> {
     Ok(())
 }
 
+fn export(
+    config: &Config,
+    id: &str,
+    out: Option<PathBuf>,
+    brief: bool,
+    transcript_only: bool,
+) -> Result<()> {
+    let db = open(config)?;
+    let options = if brief {
+        ExportOptions::brief()
+    } else if transcript_only {
+        ExportOptions::transcript_only()
+    } else {
+        ExportOptions::default()
+    };
+
+    let markdown = meeting_to_markdown(&db, parse_id(id)?, options)?;
+
+    match out {
+        Some(path) => {
+            std::fs::write(&path, &markdown)
+                .with_context(|| format!("writing {}", path.display()))?;
+            // To stderr: stdout may be piped, and a status line would corrupt the document.
+            eprintln!("wrote {}", path.display());
+        }
+        None => print!("{markdown}"),
+    }
+    Ok(())
+}
+
 fn related(config: &Config, id: &str, depth: u32) -> Result<()> {
     let db = open(config)?;
     let meeting_id = parse_id(id)?;
@@ -378,6 +428,22 @@ mod tests {
             Command::Serve { port } => assert_eq!(port, Server::DEFAULT_PORT),
             other => panic!("expected serve, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn export_flags_are_mutually_exclusive() {
+        // --brief and --transcript-only ask for opposite things; accepting both would
+        // silently pick one.
+        assert!(Cli::try_parse_from([
+            "notewise",
+            "export",
+            "abc",
+            "--brief",
+            "--transcript-only"
+        ])
+        .is_err());
+
+        assert!(Cli::try_parse_from(["notewise", "export", "abc", "--brief"]).is_ok());
     }
 
     #[test]

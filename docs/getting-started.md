@@ -34,13 +34,20 @@ ai location    local — transcripts stay on this machine
 The backend is chosen from your environment, and **defaults to local**. Configuring nothing
 means nothing leaves your machine.
 
-| Setup | Result |
-|---|---|
-| Nothing set | Local inference via Ollama at `localhost:11434` |
-| `ANTHROPIC_API_KEY` set | Your own Anthropic key (BYOK) |
-| `NOTEWISE_BACKEND=mock` | Deterministic stub — no model needed |
-| `OLLAMA_HOST` set | Ollama on another host |
-| `NOTEWISE_MODEL` set | Override the model name |
+| Backend | Runs | Needs |
+|---|---|---|
+| Ollama | Your machine | A running daemon |
+| LM Studio / Unsloth | Your machine | A running server |
+| Mock | In-process | Nothing |
+| Anthropic | Cloud | `ANTHROPIC_API_KEY` |
+| Google Gemini | Cloud | `GEMINI_API_KEY` |
+| Groq | Cloud | `GROQ_API_KEY` |
+| OpenRouter | Cloud | `OPENROUTER_API_KEY` |
+| Any OpenAI-compatible endpoint | Wherever you point it | `NOTEWISE_ENDPOINT` |
+
+Set `NOTEWISE_BACKEND` to pick explicitly (`ollama`, `lmstudio`, `groq`, `openrouter`,
+`gemini`, `anthropic`, `openai_compatible`, `mock`); otherwise the first key found wins, and
+with none set the answer is local Ollama. `NOTEWISE_MODEL` overrides the model.
 
 To try the workspace with no model installed at all:
 

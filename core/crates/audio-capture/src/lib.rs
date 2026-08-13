@@ -22,9 +22,11 @@
 
 mod convert;
 mod format;
+mod mixer;
 mod source;
 
-pub use convert::{to_mono, resample_linear, rms};
+pub use convert::{resample_linear, rms, to_mono};
+pub use mixer::{soft_clip, MixedSource, Mixer};
 pub use format::{AudioFormat, SampleRate};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};
 

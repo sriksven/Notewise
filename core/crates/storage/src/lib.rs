@@ -27,12 +27,14 @@
 
 mod db;
 mod error;
+mod export;
 mod id;
 mod migrations;
 mod models;
 mod repositories;
 
 pub use db::Database;
+pub use export::{meeting_to_markdown, ExportOptions};
 pub use error::{Result, StorageError};
 pub use id::Id;
 pub use migrations::SUPPORTED_VERSION;

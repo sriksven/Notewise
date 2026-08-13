@@ -15,6 +15,7 @@ cargo run -p notewise-cli -- status
 | `meetings [--limit]` | Recent meetings |
 | `transcript <id>` | Print a transcript |
 | `summarize <id>` | Summarize, persist, and link into the graph |
+| `export <id> [--out] [--brief\|--transcript-only]` | Export as Markdown |
 | `related <id> [--depth]` | Everything connected to a meeting |
 | `search <query> [--limit]` | Full-text search |
 | `notes [--limit]` | Recent notes |
@@ -27,8 +28,9 @@ Global: `--db <path>` to pick a database, `--ephemeral` for a throwaway in-memor
 
 | Variable | Effect |
 |---|---|
-| `ANTHROPIC_API_KEY` | Use your own key (BYOK) instead of local inference |
-| `NOTEWISE_BACKEND=mock` | Deterministic stub — no model needed |
+| `NOTEWISE_BACKEND` | Pick explicitly: `ollama`, `lmstudio`, `unsloth`, `groq`, `openrouter`, `gemini`, `anthropic`, `openai_compatible`, `mock` |
+| `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENROUTER_API_KEY` | Provider keys; the first found is used if `NOTEWISE_BACKEND` is unset |
+| `NOTEWISE_ENDPOINT` | Base URL for an OpenAI-compatible endpoint |
 | `NOTEWISE_MODEL` | Override the model name |
 | `OLLAMA_HOST` | Point at Ollama on another host |
 | `NOTEWISE_DATA_DIR` | Override the data directory |

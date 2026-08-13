@@ -29,6 +29,7 @@ in the type system rather than in documentation.
 | `POST` | `/v1/meetings/:id/transcript` | Append segments (batched) |
 | `POST` | `/v1/meetings/:id/summarize` | Summarize, persist, and link in the graph |
 | `GET` | `/v1/meetings/:id/related?depth=` | Graph traversal from the meeting |
+| `GET` | `/v1/meetings/:id/export?variant=` | Markdown export (`full`, `brief`, `transcript`) |
 | `GET` | `/v1/notes?limit=` | Recent notes |
 | `POST` | `/v1/notes` | Create a note |
 | `GET` | `/v1/tickets` | Open tickets |

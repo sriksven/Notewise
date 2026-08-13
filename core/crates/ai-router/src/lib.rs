@@ -11,6 +11,8 @@
 //! | [`MockBackend`] | In-process | Nothing — exists so the seam stays testable |
 //! | [`OllamaBackend`] | Local machine | A running Ollama daemon |
 //! | [`AnthropicBackend`] | Anthropic API | The user's own API key (BYOK) |
+//! | [`GeminiBackend`] | Google Gemini | The user's own API key |
+//! | [`OpenAiCompatBackend`] | Groq, OpenRouter, LM Studio, Unsloth, or any custom endpoint | A key, unless the endpoint is local |
 //!
 //! `MockBackend` is not a test fixture that leaked into the public API. A boundary is only
 //! protected if it is testable; without a mock, every test touching summarization would need
@@ -40,7 +42,9 @@ mod error;
 mod router;
 mod types;
 
-pub use backends::{AnthropicBackend, MockBackend, OllamaBackend};
+pub use backends::{
+    AnthropicBackend, GeminiBackend, MockBackend, OllamaBackend, OpenAiCompatBackend, Preset,
+};
 pub use error::{AiError, Result};
 pub use router::{BackendKind, Router, RouterConfig};
 pub use types::{

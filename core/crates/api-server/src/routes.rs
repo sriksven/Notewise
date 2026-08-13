@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router as AxumRouter};
 use chrono::{DateTime, Utc};
@@ -11,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use notewise_ai_router::{AiBackend, TranscriptInput};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
-    Id, Meeting, MeetingRepository, MeetingSource, NewMeeting, NewNote, NewSummary,
+    meeting_to_markdown, ExportOptions, Id, Meeting, MeetingRepository, MeetingSource,
+    NewMeeting, NewNote, NewSummary,
     NewTranscriptSegment, Note, NoteRepository, SearchRepository, SummaryRepository, Ticket,
     TicketRepository, TranscriptSegment,
 };
@@ -33,6 +35,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         )
         .route("/v1/meetings/:id/summarize", post(summarize_meeting))
         .route("/v1/meetings/:id/related", get(related_to_meeting))
+        .route("/v1/meetings/:id/export", get(export_meeting))
         .route("/v1/notes", get(list_notes).post(create_note))
         .route("/v1/tickets", get(list_tickets))
         .route("/v1/search", get(search))
@@ -345,6 +348,65 @@ async fn related_to_meeting(
             })
             .collect(),
     ))
+}
+
+// ---------------------------------------------------------------- export
+
+#[derive(Debug, Deserialize)]
+struct ExportQuery {
+    /// `full` (default), `brief`, or `transcript`.
+    #[serde(default)]
+    variant: Option<String>,
+}
+
+/// Export a meeting as Markdown.
+///
+/// Returns `text/markdown` rather than JSON: the response is a document a user saves or
+/// pastes, and wrapping it in a JSON envelope would make every client unwrap it again.
+async fn export_meeting(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
+) -> ApiResult<axum::response::Response> {
+    let meeting_id = parse_id(&id)?;
+
+    let options = match query.variant.as_deref() {
+        None | Some("full") => ExportOptions::default(),
+        Some("brief") => ExportOptions::brief(),
+        Some("transcript") => ExportOptions::transcript_only(),
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "unknown export variant '{other}'; expected full, brief, or transcript"
+            )))
+        }
+    };
+
+    let db = state.db().await;
+    let title = MeetingRepository::new(&db).get(meeting_id)?.title;
+    let markdown = meeting_to_markdown(&db, meeting_id, options)?;
+
+    // A filename the user recognizes, rather than a uuid.
+    let filename = format!(
+        "{}.md",
+        title
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_lowercase()
+    );
+
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        markdown,
+    )
+        .into_response())
 }
 
 // ---------------------------------------------------------------- notes & tickets
@@ -713,6 +775,97 @@ mod tests {
         assert_eq!(ListQuery { limit: Some(10_000) }.limit(), 500);
         assert_eq!(ListQuery { limit: Some(0) }.limit(), 1);
         assert_eq!(ListQuery { limit: None }.limit(), 50);
+    }
+
+    async fn call_raw(app: &AxumRouter, request: Request<Body>) -> (StatusCode, String, String) {
+        let response = app.clone().oneshot(request).await.expect("request");
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, content_type, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn export_returns_markdown_not_json() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "We agreed to ship.", "start_ms": 0, "end_ms": 2000}]),
+            ),
+        )
+        .await;
+
+        let (status, content_type, body) =
+            call_raw(&app, get(&format!("/v1/meetings/{id}/export"))).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(content_type.starts_with("text/markdown"), "{content_type}");
+        assert!(body.starts_with("# Sync"), "{body}");
+        assert!(body.contains("## Transcript"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn export_variants_change_the_sections() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "Something said.", "start_ms": 0, "end_ms": 2000}]),
+            ),
+        )
+        .await;
+
+        let (_, _, brief) =
+            call_raw(&app, get(&format!("/v1/meetings/{id}/export?variant=brief"))).await;
+        assert!(!brief.contains("## Transcript"), "{brief}");
+
+        let (_, _, transcript) = call_raw(
+            &app,
+            get(&format!("/v1/meetings/{id}/export?variant=transcript")),
+        )
+        .await;
+        assert!(transcript.contains("## Transcript"), "{transcript}");
+        assert!(!transcript.contains("## Summary"), "{transcript}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_export_variant_is_rejected() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, _, _) =
+            call_raw(&app, get(&format!("/v1/meetings/{id}/export?variant=pdf"))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn export_suggests_a_readable_filename() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let response = app
+            .clone()
+            .oneshot(get(&format!("/v1/meetings/{id}/export")))
+            .await
+            .unwrap();
+        let disposition = response
+            .headers()
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        // "Sync" -> sync.md, not a uuid.
+        assert!(disposition.contains("sync.md"), "{disposition}");
     }
 
     #[tokio::test]

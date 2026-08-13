@@ -34,11 +34,19 @@ This is enforced architecturally, not promised in marketing copy. Every feature 
 touches a model calls the `ai-router` trait. Nothing calls a model provider directly.
 Swapping local Ollama for your own API key for hosted inference is a config change.
 
-| | Local | BYOK | Hosted |
-|---|---|---|---|
-| Transcription | Whisper.cpp / Parakeet | — | Cloud STT |
-| Summarization | Ollama | Your API key | Notewise Cloud |
-| Storage | Encrypted SQLite | Encrypted SQLite | Opt-in sync |
+| Backend | Runs | Needs |
+|---|---|---|
+| Ollama | Your machine | A running daemon |
+| LM Studio / Unsloth | Your machine | A running server |
+| Mock | In-process | Nothing |
+| Anthropic | Cloud | `ANTHROPIC_API_KEY` |
+| Google Gemini | Cloud | `GEMINI_API_KEY` |
+| Groq | Cloud | `GROQ_API_KEY` |
+| OpenRouter | Cloud | `OPENROUTER_API_KEY` |
+| Any OpenAI-compatible endpoint | Wherever you point it | `NOTEWISE_ENDPOINT` |
+
+Selection defaults to **local**, and `notewise status` tells you which is active and whether
+transcripts leave the machine.
 
 Sync is **off** unless you turn it on. `sync-client` is a separate crate specifically so a
 local-only build never compiles it in.
@@ -64,7 +72,8 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 |---|---|
 | `storage`, `graph`, `ai-router` | Implemented, tested |
 | `api-server`, `mcp-server`, `cli` | Implemented, tested |
-| `audio-capture`, `transcription` | Interfaces + partial implementation |
+| Markdown export | Implemented |
+| `audio-capture` (mixing, conversion), `transcription` | Interfaces + partial implementation |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
 | `apps/` (except CLI), `cloud/` | Scaffolded, awaiting their phase |
 

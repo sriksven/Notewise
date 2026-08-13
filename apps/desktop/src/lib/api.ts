@@ -130,6 +130,15 @@ export const api = {
   related: (id: string, depth = 2) =>
     request<RelatedNode[]>(`/v1/meetings/${id}/related?depth=${depth}`),
 
+  /**
+   * URL for a Markdown export.
+   *
+   * Returned as a URL rather than fetched: the browser's own download handling gets the
+   * filename from Content-Disposition, which a blob built in JS would lose.
+   */
+  exportUrl: (id: string, variant: "full" | "brief" | "transcript" = "full") =>
+    `/v1/meetings/${id}/export?variant=${variant}`,
+
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(
       `/v1/search?q=${encodeURIComponent(query)}&limit=${limit}`,
