@@ -1,0 +1,17 @@
+[package]
+name = "notewise-macos-permissions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Reads macOS privacy authorization without prompting."
+
+# This crate exists to hold `unsafe`. Every other crate in the engine keeps
+# `#![forbid(unsafe_code)]`, and asking AVFoundation for an authorization status needs two
+# unsafe calls into the Objective-C runtime. Isolating them here keeps that guarantee true
+# elsewhere and keeps the audit surface to one file.
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-av-foundation = "0.3"

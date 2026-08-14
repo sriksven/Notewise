@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core/crates/audio-capture",
+    "core/crates/macos-permissions",
     "core/crates/transcription",
     "core/crates/diarization",
     "core/crates/ai-router",
@@ -38,11 +39,9 @@ notewise-ai-router = { path = "core/crates/ai-router", version = "0.1.0" }
 notewise-audio-capture = { path = "core/crates/audio-capture", version = "0.1.0" }
 notewise-transcription = { path = "core/crates/transcription", version = "0.1.0" }
 notewise-diarization = { path = "core/crates/diarization", version = "0.1.0" }
-notewise-sync-client = { path = "core/crates/sync-client", version = "0.1.0" }
 notewise-api-server = { path = "core/crates/api-server", version = "0.1.0" }
 notewise-mcp-server = { path = "core/crates/mcp-server", version = "0.1.0" }
 notewise-recorder = { path = "core/crates/recorder", version = "0.1.0" }
-notewise-ffi = { path = "core/crates/ffi", version = "0.1.0" }
 
 # Shared third-party versions, pinned once so crates cannot drift apart.
 thiserror = "2"
