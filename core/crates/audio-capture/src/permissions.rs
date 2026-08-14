@@ -103,6 +103,8 @@ fn probe(_kind: CaptureKind) -> PermissionStatus {
 /// String matching because `cpal` surfaces the platform's own message rather than a typed
 /// error. Shared with `microphone.rs` so the probe and the capture path cannot come to
 /// disagree about what a denial looks like.
+// Called only from the os-capture path; its tests are not feature-gated.
+#[cfg_attr(not(feature = "os-capture"), allow(dead_code))]
 pub(crate) fn is_permission_error(message: &str) -> bool {
     let message = message.to_lowercase();
     message.contains("permission") || message.contains("denied")

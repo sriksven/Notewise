@@ -20,7 +20,7 @@ use notewise_storage::{
     NewTranscriptSegment, Note, NoteRepository, SearchRepository, SummaryRepository, Ticket,
     TicketRepository, TranscriptSegment,
 };
-use notewise_transcription::{ModelRegistry, ModelStore};
+use notewise_transcription::ModelRegistry;
 
 use axum::response::sse::Event;
 use futures_util::StreamExt;
@@ -1059,8 +1059,10 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
 ///
 /// Backs in-app model management, so a user never has to find a URL or a terminal.
 async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
-    let store = model_store();
-    let _ = &state; // model storage is independent of the database
+    // `state.model_store()`, not the environment-derived `model_store()`: the desktop shell
+    // configures a directory the free function does not know about, and a listing that
+    // disagrees with the downloader reports installed models as missing.
+    let store = state.model_store();
 
     let models: Vec<_> = ModelRegistry::all()
         .into_iter()
@@ -1179,33 +1181,6 @@ async fn download_progress(
 /// Every download this engine has started, running or finished.
 async fn list_downloads(State(state): State<Shared>) -> Json<Vec<DownloadState>> {
     Json(state.downloads().all().await)
-}
-
-/// Where models live.
-///
-/// Honours `NOTEWISE_MODEL_DIR`, then the platform data directory — the same resolution the
-/// CLI uses, so both see one store.
-fn model_store() -> ModelStore {
-    if let Ok(dir) = std::env::var("NOTEWISE_MODEL_DIR") {
-        return ModelStore::new(dir);
-    }
-
-    let base = std::env::var("NOTEWISE_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_else(|_| ".".into());
-            if cfg!(target_os = "macos") {
-                std::path::PathBuf::from(home).join("Library/Application Support/notewise")
-            } else if cfg!(target_os = "windows") {
-                std::path::PathBuf::from(home).join("AppData/Roaming/notewise")
-            } else {
-                std::path::PathBuf::from(home).join(".local/share/notewise")
-            }
-        });
-
-    ModelStore::new(base.join("models"))
 }
 
 // ---------------------------------------------------------------- graph
@@ -2525,5 +2500,68 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["status"], "done");
         assert_eq!(body["percent"], 100);
+    }
+
+    // ------------------------------------------------------------------ setup
+
+    /// An engine whose model directory is `dir`.
+    fn app_with_model_dir(dir: &std::path::Path) -> AxumRouter {
+        let state = AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("mock router"),
+        )
+        .with_model_dir(dir);
+        router(Arc::new(state))
+    }
+
+    /// Install a model fixture the store will actually accept.
+    ///
+    /// `ModelStore::is_available` compares the file's exact byte length against the
+    /// catalogue, so a short placeholder never registers as installed. `set_len` produces the
+    /// right length without writing 77 MB of zeros.
+    fn install_model(dir: &std::path::Path, name: &str) -> notewise_transcription::ModelInfo {
+        use notewise_transcription::ModelStore;
+
+        let model = ModelRegistry::get(name).expect("a registry model");
+        std::fs::File::create(ModelStore::new(dir).path_for(&model))
+            .expect("create the fixture")
+            .set_len(model.bytes)
+            .expect("size the fixture");
+        model
+    }
+
+    /// `/v1/models` and `/v1/models/:name/download` must agree about where models live. They
+    /// did not: the listing re-derived a path from the environment while the downloader
+    /// honoured `with_model_dir`, so a model on disk could be reported missing forever — and
+    /// the setup gate that waits on it would never open.
+    #[tokio::test]
+    async fn list_models_honours_the_configured_model_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = install_model(dir.path(), "tiny.en");
+
+        let (status, body) = json(
+            &app_with_model_dir(dir.path()),
+            Request::get("/v1/models").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["directory"].as_str().unwrap(),
+            dir.path().display().to_string(),
+            "the listing must report the configured directory"
+        );
+
+        let listed = body["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == model.name.as_str())
+            .expect("tiny.en is in the registry");
+
+        assert_eq!(
+            listed["installed"], true,
+            "a model in the configured directory must list as installed"
+        );
     }
 }

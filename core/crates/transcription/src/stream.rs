@@ -542,6 +542,28 @@ mod tests {
         assert!(buffer.flush().is_some() || buffer.buffered_ms() == 0);
     }
 
+    /// A one-word answer is a real utterance and must reach the decoder.
+    ///
+    /// "Yes." is around 200 ms of voicing — below `min_speech_ms` on its own. It survives
+    /// because the gate's hangover is *counted as speech*, which pads a short word past the
+    /// threshold. That is load-bearing rather than lucky, so it is asserted here.
+    #[test]
+    fn an_isolated_one_word_answer_still_reaches_the_decoder() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let mut audio = silence(400);
+        audio.extend(speech(200));
+        audio.extend(silence(1_500));
+
+        let out = feed(&mut buffer, &audio);
+        assert_eq!(
+            out.len(),
+            1,
+            "a one-word answer was dropped: speech_ms reached {}",
+            buffer.speech_ms()
+        );
+    }
+
     #[test]
     fn an_empty_buffer_has_nothing_to_flush() {
         let mut buffer = UtteranceBuffer::new(RATE);

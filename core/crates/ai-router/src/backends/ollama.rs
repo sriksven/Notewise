@@ -356,7 +356,10 @@ mod tests {
     #[tokio::test]
     async fn probe_reports_an_unreachable_daemon() {
         let backend = OllamaBackend::new().with_endpoint("http://127.0.0.1:1/api/chat");
-        let err = backend.probe().await.expect_err("nothing listens on port 1");
+        let err = backend
+            .probe()
+            .await
+            .expect_err("nothing listens on port 1");
         assert!(matches!(err, AiError::Transport { .. }), "got {err:?}");
     }
 

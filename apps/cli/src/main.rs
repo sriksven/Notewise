@@ -146,6 +146,14 @@ enum Command {
     Serve {
         #[arg(long, default_value_t = Server::DEFAULT_PORT)]
         port: u16,
+        /// Also serve the web UI from this directory, e.g. `apps/desktop/dist`.
+        ///
+        /// Makes Notewise usable in a browser without the desktop app. Served from the same
+        /// origin as the API on purpose: a UI on its own origin would need permissive CORS on
+        /// an unauthenticated local server, and any page you visited could then read your
+        /// meetings.
+        #[arg(long, value_name = "DIR")]
+        ui: Option<PathBuf>,
     },
 
     /// Run the MCP server on stdio, for agent clients.
@@ -197,7 +205,7 @@ async fn main() -> Result<()> {
         Command::Related { id, depth } => related(&config, &id, depth),
         Command::Search { query, limit } => search(&config, &query, limit),
         Command::Notes { limit } => notes(&config, limit),
-        Command::Serve { port } => serve(&config, port).await,
+        Command::Serve { port, ui } => serve(&config, port, ui).await,
         Command::Mcp => mcp(&config).await,
     }
 }
@@ -736,14 +744,32 @@ fn notes(config: &Config, limit: u32) -> Result<()> {
     Ok(())
 }
 
-async fn serve(config: &Config, port: u16) -> Result<()> {
+async fn serve(config: &Config, port: u16, ui: Option<PathBuf>) -> Result<()> {
     let server = Server::bind(format!("127.0.0.1:{port}"))?;
     let state = AppState::new(open(config)?, config.ai_router()?);
 
-    println!("Notewise API on http://{}", server.addr());
-    println!("Loopback only — not reachable from the network.");
+    match ui {
+        Some(dir) => {
+            // Checked before binding: discovering the UI is missing after the server has
+            // started means a blank page and no explanation.
+            if !dir.join("index.html").exists() {
+                anyhow::bail!(
+                    "no index.html in {} — run `npm install && npm run build` in apps/desktop",
+                    dir.display()
+                );
+            }
 
-    server.serve(state).await?;
+            println!("Notewise on http://{}", server.addr());
+            println!("Open that in a browser. Loopback only — not reachable from the network.");
+            server.serve_with_frontend(state, dir).await?;
+        }
+        None => {
+            println!("Notewise API on http://{}", server.addr());
+            println!("Loopback only — not reachable from the network.");
+            println!("Pass --ui apps/desktop/dist to serve the web interface too.");
+            server.serve(state).await?;
+        }
+    }
     Ok(())
 }
 
@@ -784,7 +810,10 @@ mod tests {
     fn serve_defaults_to_the_engine_port() {
         let cli = Cli::try_parse_from(["notewise", "serve"]).unwrap();
         match cli.command {
-            Command::Serve { port } => assert_eq!(port, Server::DEFAULT_PORT),
+            Command::Serve { port, ui } => {
+                assert_eq!(port, Server::DEFAULT_PORT);
+                assert!(ui.is_none(), "the UI is opt-in");
+            }
             other => panic!("expected serve, got {other:?}"),
         }
     }
