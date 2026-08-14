@@ -226,14 +226,75 @@ impl AiBackend for OllamaBackend {
     /// `/api/chat`, so the base is recovered by trimming that suffix rather than by storing a
     /// second URL that could drift out of sync with the first.
     async fn probe(&self) -> Result<()> {
-        let base = self
-            .endpoint
-            .strip_suffix("/api/chat")
-            .unwrap_or(&self.endpoint);
+        self.tags().await.map(|_| ())
+    }
 
+    async fn installed_models(&self) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+
+        for entry in self.tags().await?.models {
+            // Embedding models are installed alongside chat models and cannot answer a
+            // question. Offering `nomic-embed-text` in a model picker is offering a choice
+            // that fails on the next summary, with an error about the model rather than about
+            // the choice.
+            if self.can_generate(&entry.name).await {
+                names.push(entry.name);
+            }
+        }
+
+        // Sorted so the picker does not reorder itself between launches; Ollama returns them
+        // by modification time, which changes every time a model is used.
+        names.sort();
+        Ok(names)
+    }
+}
+
+impl OllamaBackend {
+    /// The daemon's base URL, recovered from the configured chat endpoint.
+    fn base(&self) -> &str {
+        self.endpoint
+            .strip_suffix("/api/chat")
+            .unwrap_or(&self.endpoint)
+    }
+
+    /// Whether this model can hold a conversation, as opposed to producing embeddings.
+    ///
+    /// Fails open. Older daemons do not report capabilities at all, and hiding every model
+    /// from someone running an older Ollama would be a worse outcome than occasionally listing
+    /// one that turns out to be an embedder.
+    async fn can_generate(&self, model: &str) -> bool {
         let response = self
             .http
-            .get(format!("{base}/api/tags"))
+            .post(format!("{}/api/show", self.base()))
+            .json(&json!({ "model": model }))
+            // Metadata only — this loads nothing, so a second is generous.
+            .timeout(std::time::Duration::from_secs(1))
+            .send()
+            .await;
+
+        let Ok(response) = response else { return true };
+        if !response.status().is_success() {
+            return true;
+        }
+
+        match response.json::<ShowResponse>().await {
+            Ok(show) => match show.capabilities {
+                Some(caps) if !caps.is_empty() => caps.iter().any(|c| c == "completion"),
+                _ => true,
+            },
+            Err(_) => true,
+        }
+    }
+
+    /// Ask the daemon what it holds.
+    ///
+    /// `/api/tags` is a cheap GET that loads no model. The configured endpoint points at
+    /// `/api/chat`, so the base is recovered by trimming that suffix rather than by storing a
+    /// second URL that could drift out of sync with the first.
+    async fn tags(&self) -> Result<TagsResponse> {
+        let response = self
+            .http
+            .get(format!("{}/api/tags", self.base()))
             // Bounded, because this runs on the setup screen's critical path: an installed but
             // stopped daemon must answer "not reachable" in a moment rather than hang until
             // the OS connect timeout expires.
@@ -253,8 +314,32 @@ impl AiBackend for OllamaBackend {
             });
         }
 
-        Ok(())
+        response
+            .json::<TagsResponse>()
+            .await
+            .map_err(|source| AiError::Transport {
+                backend: BACKEND,
+                source,
+            })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct TagsResponse {
+    #[serde(default)]
+    models: Vec<TagEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TagEntry {
+    /// The exact tag, such as `llama3.1:8b`. This is what has to be sent back as the model.
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShowResponse {
+    /// `["completion", …]` or `["embedding"]`. Absent on older daemons.
+    capabilities: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

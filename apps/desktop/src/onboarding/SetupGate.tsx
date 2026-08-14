@@ -2,9 +2,18 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api } from "../lib/api";
-import { regressions, type SetupReadiness } from "./readiness";
+import { skipConsequences, type SetupReadiness } from "./readiness";
 import { SetupBanner } from "./SetupBanner";
 import { SetupFlow } from "./SetupFlow";
+
+/**
+ * Asks the app to show its settings screen.
+ *
+ * A window event because the banner lives outside the app's own tree — the gate wraps it — and
+ * lifting the whole navigation state into the gate to let one button work would put routing in
+ * the component whose only job is deciding between the wizard and the app.
+ */
+export const OPEN_SETTINGS_EVENT = "notewise:open-settings";
 
 interface SetupGateProps {
   children: ReactNode;
@@ -49,11 +58,15 @@ export function SetupGate({ children }: SetupGateProps) {
     return <SetupFlow readiness={readiness} refresh={refresh} onFinished={() => void refresh()} />;
   }
 
-  const regressed = readiness && !dismissed ? regressions(readiness) : [];
+  const consequences = readiness && !dismissed ? skipConsequences(readiness) : [];
 
   return (
     <div className="flex h-full flex-col">
-      <SetupBanner regressed={regressed} onDismiss={() => setDismissed(true)} />
+      <SetupBanner
+        consequences={consequences}
+        onOpenSettings={() => window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT))}
+        onDismiss={() => setDismissed(true)}
+      />
       <div className="min-h-0 flex-1">{children}</div>
     </div>
   );

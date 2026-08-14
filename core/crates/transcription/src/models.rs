@@ -30,6 +30,40 @@ impl ModelSize {
             ModelSize::Large => "large",
         }
     }
+
+    /// What picking this size buys and costs, in a sentence.
+    ///
+    /// These names come from Whisper and mean nothing to anyone who has not read its paper.
+    /// A menu of `tiny.en / base / small.en / medium` with only megabytes beside each is not a
+    /// choice a user can make — it is a quiz. Every entry has to say what it is for.
+    ///
+    /// Deliberately qualitative. Real throughput depends on the machine, the audio and whether
+    /// Metal is compiled in, and a fabricated "16x realtime" would be a number we cannot stand
+    /// behind on someone else's laptop.
+    pub fn tradeoff(&self) -> &'static str {
+        match self {
+            ModelSize::Tiny => {
+                "Quickest and least accurate. Usable for a rough record — expect names, \
+                 acronyms and technical terms to come out wrong."
+            }
+            ModelSize::Base => {
+                "The default, and the right starting point. Handles clear speech on a decent \
+                 microphone well, and keeps up with a live meeting comfortably."
+            }
+            ModelSize::Small => {
+                "Clearly better on accents, crosstalk and jargon. Several times slower than \
+                 base, and still fast enough to record live on a modern machine."
+            }
+            ModelSize::Medium => {
+                "Better again, and heavy. Best kept for importing a recording after the fact \
+                 rather than transcribing as people speak."
+            }
+            ModelSize::Large => {
+                "The most accurate available. Wants a lot of memory and is by a wide margin \
+                 the slowest — worth it for a recording that matters, not for everyday use."
+            }
+        }
+    }
 }
 
 /// One downloadable model.
@@ -55,6 +89,20 @@ impl ModelInfo {
     pub fn approx_ram_mb(&self) -> u64 {
         // Runtime footprint runs well above the file size; ~1.6x is a workable estimate.
         (self.bytes / 1_000_000) * 8 / 5
+    }
+
+    /// What the missing or present `.en` suffix means for this entry.
+    ///
+    /// The suffix is the least guessable part of the naming. `base` and `base.en` are the same
+    /// size and differ only in what they were trained on, and the English-only one is the
+    /// better choice for an English meeting — which is the opposite of what "fewer languages"
+    /// suggests.
+    pub fn language_note(&self) -> &'static str {
+        if self.multilingual {
+            "Understands languages other than English."
+        } else {
+            "English only, and more accurate on English than the same-sized model that is not."
+        }
     }
 }
 

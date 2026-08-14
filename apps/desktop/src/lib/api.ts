@@ -116,6 +116,10 @@ export interface ModelInfo {
   multilingual: boolean;
   installed: boolean;
   recommended: boolean;
+  /** What choosing this size buys and costs, in a sentence. */
+  tradeoff: string;
+  /** What the presence or absence of the `.en` suffix means. */
+  language_note: string;
 }
 
 export interface BackendInfo {
@@ -124,6 +128,8 @@ export interface BackendInfo {
   is_local: boolean;
   requires_api_key: boolean;
   requires_endpoint: boolean;
+  /** Whether this backend can be asked which models it currently holds. */
+  lists_models: boolean;
 }
 
 export type AmbiguityKind =
@@ -285,6 +291,18 @@ export const api = {
 
   models: () =>
     request<{ models: ModelInfo[]; directory: string }>("/v1/models"),
+
+  /**
+   * Which models a local backend currently holds.
+   *
+   * Never rejects for a stopped daemon — `available: false` with a reason is the normal
+   * answer, because the engine's default model id is a guess and the whole point of this call
+   * is to replace that guess with the exact tags installed on this machine.
+   */
+  backendModels: (kind: string) =>
+    request<{ models: string[]; available: boolean; reason: string | null }>(
+      `/v1/backends/${encodeURIComponent(kind)}/models`,
+    ),
 
   /**
    * Start a download. Returns as soon as it has started, not when it finishes.

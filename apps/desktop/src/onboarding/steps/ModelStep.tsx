@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, Mic } from "lucide-react";
+import { Check, ChevronDown, Download, Loader2 } from "lucide-react";
 
 import { api, type ModelInfo } from "../../lib/api";
 import { size } from "../../lib/format";
@@ -11,8 +11,22 @@ interface ModelStepProps {
   onChanged: () => Promise<void>;
 }
 
+/**
+ * Pick a speech model.
+ *
+ * This screen used to show exactly one card — whichever model the registry marked recommended —
+ * with no indication that eight others existed. That reads as a broken list rather than a
+ * decision already made for you, and it left anyone who needs another language or better
+ * accuracy with no way forward from the one screen that is about models.
+ *
+ * The recommendation stays: the list opens collapsed on the recommended model, because on a
+ * first run the right answer is "press the button" and a wall of nine options is worse than
+ * one. Everything else is one click away, and every option says what it is for.
+ */
 export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
-  const [model, setModel] = useState<ModelInfo | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
   const { downloading, progress, error, start } = useModelDownload(onChanged);
@@ -20,9 +34,17 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
   useEffect(() => {
     void api
       .models()
-      .then(({ models }) => setModel(models.find((m) => m.recommended) ?? models[0] ?? null))
+      .then(({ models }) => {
+        setModels(models);
+        const preferred =
+          models.find((m) => m.installed) ?? models.find((m) => m.recommended) ?? models[0];
+        setSelected(preferred?.name ?? null);
+      })
       .catch(() => setListError("Could not read the model catalogue."));
   }, []);
+
+  const current = models.find((m) => m.name === selected) ?? null;
+  const shown = expanded ? models : current ? [current] : [];
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -30,8 +52,9 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
         Transcription model
       </h1>
       <p className="mt-2 max-w-md text-[14px] text-neutral-500">
-        Speech recognition runs on this machine, so the model has to live here too. This is a
-        one-time download.
+        Speech recognition runs on this machine, so the model has to live here too. These are
+        OpenAI's Whisper models — the same ones most local transcription apps use. One-time
+        download.
       </p>
 
       {(listError ?? error) && (
@@ -43,56 +66,95 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
         </div>
       )}
 
-      <div className="mt-8 w-full max-w-md rounded-xl border border-hairline bg-white p-4 text-left">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-            <Mic size={16} className="text-neutral-600" aria-hidden />
-          </span>
+      <div className="mt-8 w-full max-w-md overflow-hidden rounded-xl border border-hairline bg-white text-left">
+        <ul className="divide-y divide-hairline">
+          {shown.map((model) => {
+            const active = model.name === selected;
+            return (
+              <li key={model.name}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelected(model.name);
+                    setExpanded(false);
+                  }}
+                  aria-current={active ? "true" : undefined}
+                  className={`w-full px-4 py-3 text-left transition ${
+                    active && expanded ? "bg-neutral-50" : "hover:bg-neutral-50"
+                  }`}
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[14px] font-medium text-neutral-900">{model.name}</span>
+                    {model.recommended && (
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                        recommended
+                      </span>
+                    )}
+                    <span className="ml-auto text-[11px] text-neutral-400">
+                      {size(model.bytes)} · ~{model.approx_ram_mb} MB RAM
+                    </span>
+                  </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-medium text-neutral-900">
-              {model?.name ?? "Loading…"}
-            </div>
-            {model && (
-              // RAM is shown because it decides whether the model runs at all, which the
-              // download size does not tell you.
-              <div className="text-[11px] text-neutral-400">
-                {size(model.bytes)} download · ~{model.approx_ram_mb} MB RAM
-              </div>
+                  <p className="mt-1 text-[12px] leading-snug text-neutral-500">
+                    {model.tradeoff}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-neutral-400">
+                    {model.language_note}
+                  </p>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="flex items-center gap-2 border-t border-hairline px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+            className="flex items-center gap-1 text-[12px] text-neutral-500 transition hover:text-neutral-900"
+          >
+            <ChevronDown
+              size={13}
+              className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+            {expanded ? "Show fewer" : `Show all ${models.length} models`}
+          </button>
+
+          <span className="ml-auto">
+            {current?.installed ? (
+              <span className="flex items-center gap-1 text-[12px] text-emerald-600">
+                <Check size={14} aria-hidden />
+                Installed
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={!current || downloading !== null}
+                onClick={() => current && void start(current.name)}
+                className="flex items-center gap-1.5 rounded-full border border-hairline
+                           px-3 py-1.5 text-[12px] text-neutral-700 transition
+                           hover:bg-neutral-50 disabled:opacity-50"
+              >
+                {downloading ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" aria-hidden />
+                    Downloading
+                  </>
+                ) : (
+                  <>
+                    <Download size={13} aria-hidden />
+                    Download {current?.name}
+                  </>
+                )}
+              </button>
             )}
-          </div>
-
-          {satisfied ? (
-            <span className="flex shrink-0 items-center gap-1 text-[12px] text-emerald-600">
-              <Check size={14} aria-hidden />
-              Installed
-            </span>
-          ) : (
-            <button
-              type="button"
-              disabled={!model || downloading !== null}
-              onClick={() => model && void start(model.name)}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline
-                         px-3 py-1.5 text-[12px] text-neutral-700 transition
-                         hover:bg-neutral-50 disabled:opacity-50"
-            >
-              {downloading ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" aria-hidden />
-                  Downloading
-                </>
-              ) : (
-                <>
-                  <Download size={13} aria-hidden />
-                  Download
-                </>
-              )}
-            </button>
-          )}
+          </span>
         </div>
 
         {downloading && (
-          <div className="mt-4">
+          <div className="border-t border-hairline px-4 py-3">
             <div
               role="progressbar"
               aria-valuenow={progress?.percent ?? 0}
@@ -125,6 +187,12 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
           </div>
         )}
       </div>
+
+      {satisfied && !expanded && (
+        <p className="mt-3 text-[12px] text-neutral-400">
+          You can add another model later in Settings.
+        </p>
+      )}
     </div>
   );
 }

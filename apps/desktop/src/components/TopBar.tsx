@@ -141,25 +141,57 @@ export function TopBar({
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [languages, setLanguages] = useState<LanguageOption[]>([]);
+  /** Exact model tags the active local backend holds. */
+  const [installed, setInstalled] = useState<string[]>([]);
+  /** Which backend is running. `health` carries the model name but not the kind. */
+  const [activeKind, setActiveKind] = useState<string | null>(null);
 
-  // Loaded once. None of these change while the app is open, and re-fetching on every menu
-  // open would make the first paint of the menu wait on the network.
+  // Devices and languages are loaded once — neither changes while the app is open. The backend
+  // list is re-read whenever the active model changes, so switching updates the tick.
   useEffect(() => {
-    void api.backends().then((r) => setBackends(r.backends)).catch(() => setBackends([]));
+    void api
+      .backends()
+      .then((r) => {
+        setBackends(r.backends);
+        setActiveKind(r.active.kind);
+      })
+      .catch(() => setBackends([]));
+  }, [health?.ai_model]);
+
+  useEffect(() => {
     void api.devices().then((r) => setDevices(r.devices)).catch(() => setDevices([]));
     void api.languages().then((r) => setLanguages(r.languages)).catch(() => setLanguages([]));
   }, []);
 
-  const switchTo = async (backend: BackendInfo, close: () => void) => {
+  // Which models the running backend actually has. Picking a provider was never enough: the
+  // engine's default tag is a guess, and a machine holding `llama3.1:8b` answers `llama3.1`
+  // with a 404 that nothing in this window could previously correct.
+  useEffect(() => {
+    const listable = backends.find((b) => b.kind === activeKind)?.lists_models;
+    if (!activeKind || !listable) {
+      setInstalled([]);
+      return;
+    }
+
+    let cancelled = false;
+    void api
+      .backendModels(activeKind)
+      .then((r) => !cancelled && setInstalled(r.models))
+      .catch(() => !cancelled && setInstalled([]));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeKind, backends]);
+
+  const switchTo = async (backend: BackendInfo, close: () => void, model?: string) => {
     close();
     try {
-      await api.switchBackend(backend.kind);
+      await api.switchBackend(backend.kind, model);
       onBackendChange();
     } catch (e) {
       onError(
-        e instanceof Error
-          ? e.message
-          : `Could not switch to ${backend.label}.`,
+        e instanceof Error ? e.message : `Could not switch to ${model ?? backend.label}.`,
       );
     }
   };
@@ -191,24 +223,49 @@ export function TopBar({
                 // A cloud backend with no key on the engine cannot be selected. Showing it
                 // greyed with the reason beats hiding it and leaving the user wondering why
                 // their provider is missing.
-                const blocked = backend.requires_api_key;
+                const blocked = backend.requires_api_key || backend.requires_endpoint;
                 return (
                   <Item
                     key={backend.kind}
-                    selected={health?.ai_model === backend.kind || false}
+                    selected={backend.kind === activeKind}
                     disabled={blocked}
                     onClick={() => void switchTo(backend, close)}
                     title={backend.label}
                     subtitle={
-                      blocked
+                      backend.requires_api_key
                         ? "needs an API key in the engine's environment"
-                        : backend.is_local
-                          ? "runs on this machine"
-                          : "sends transcripts to the provider"
+                        : backend.requires_endpoint
+                          ? "needs an endpoint URL — set it in Settings"
+                          : backend.is_local
+                            ? "runs on this machine"
+                            : "sends transcripts to the provider"
                     }
                   />
                 );
               })}
+
+              {/* The exact tags this machine holds. Without these the pill picks a provider
+                  and leaves the model as whatever the engine guessed, which is how a working
+                  Ollama ends up returning "model not found" for everything. */}
+              {installed.length > 0 && (
+                <>
+                  <div className="my-1 border-t border-hairline" />
+                  <p className="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                    Installed models
+                  </p>
+                  {installed.map((model) => {
+                    const backend = backends.find((b) => b.kind === activeKind);
+                    return (
+                      <Item
+                        key={model}
+                        selected={model === health?.ai_model}
+                        onClick={() => backend && void switchTo(backend, close, model)}
+                        title={model}
+                      />
+                    );
+                  })}
+                </>
+              )}
             </>
           )}
         </Pill>

@@ -8,6 +8,7 @@ import { Sidebar, type View } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { TranscriptView } from "./components/TranscriptView";
 import { WorkspaceHeader, type Tab } from "./components/WorkspaceHeader";
+import { OPEN_SETTINGS_EVENT } from "./onboarding/SetupGate";
 import { AboutView } from "./views/AboutView";
 import { ChatView } from "./views/ChatView";
 import { SettingsView } from "./views/SettingsView";
@@ -111,6 +112,13 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The setup banner lives above this tree and cannot navigate on its own.
+  useEffect(() => {
+    const open = () => setView("settings");
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
+  }, []);
 
   // Load the selected transcript, polling while that meeting records.
   useEffect(() => {

@@ -121,6 +121,27 @@ impl BackendKind {
         matches!(self, BackendKind::OpenAiCompatible)
     }
 
+    /// Whether a user should ever be offered this backend.
+    ///
+    /// [`BackendKind::Mock`] is not. It exists so the seam stays testable, and it answers every
+    /// request with fixed text — a user who picks it out of a menu gets summaries and answers
+    /// that were never derived from their meeting, presented exactly like real ones. That is
+    /// the worst failure this product can have, and it should not be one menu click away.
+    ///
+    /// It stays in [`BackendKind::ALL`] so `NOTEWISE_BACKEND=mock` still works for development.
+    pub fn is_selectable(&self) -> bool {
+        !matches!(self, BackendKind::Mock)
+    }
+
+    /// Whether the models this backend can run are discoverable by asking it.
+    ///
+    /// True for local daemons, which hold whatever the user has pulled and can be listed. The
+    /// hosted providers have catalogues that change without us, and asking them costs a
+    /// round trip against a metered key.
+    pub fn lists_models(&self) -> bool {
+        matches!(self, BackendKind::Ollama | BackendKind::LmStudio)
+    }
+
     /// The OpenAI-compatible preset for this kind, if it is one.
     fn preset(&self, endpoint: Option<String>) -> Option<Preset> {
         Some(match self {
@@ -313,6 +334,11 @@ impl Router {
     /// Whether the active backend is usable right now. See [`AiBackend::probe`].
     pub async fn probe(&self) -> Result<()> {
         self.backend.probe().await
+    }
+
+    /// What the active backend can run. See [`AiBackend::installed_models`].
+    pub async fn installed_models(&self) -> Result<Vec<String>> {
+        self.backend.installed_models().await
     }
 }
 

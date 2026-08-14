@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use notewise_ai_router::{
     generate_email_variants, suggest_questions, AiBackend, BackendKind, ChatMessage, ChatRequest,
-    ClarifierConfig, ClarifierSession, EmailContext, EmailTone, Role, TranscriptInput, Utterance,
+    ClarifierConfig, ClarifierSession, EmailContext, EmailTone, Role, Router as AiRouter,
+    RouterConfig, TranscriptInput, Utterance,
 };
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
@@ -51,6 +52,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/meetings/:id/questions", post(clarifying_questions))
         .route("/v1/meetings/:id/chat", post(chat_about_meeting))
         .route("/v1/backends", get(list_backends))
+        .route("/v1/backends/:kind/models", get(list_backend_models))
         .route("/v1/models", get(list_models))
         .route(
             "/v1/models/:name/download",
@@ -271,6 +273,17 @@ async fn switch_backend(
     let kind = BackendKind::parse(body.kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{}'", body.kind)))?;
 
+    // The mock backend is reachable by starting the engine with `NOTEWISE_BACKEND=mock`, which
+    // is a deliberate act. It is not reachable from a running app, where the result would be
+    // fabricated summaries of a real meeting that look exactly like real ones.
+    if !kind.is_selectable() {
+        return Err(ApiError::BadRequest(format!(
+            "'{}' cannot be selected at runtime — it does not run a model and would return \
+             invented answers",
+            kind.as_str()
+        )));
+    }
+
     state
         .switch_backend(kind, body.model.clone(), body.endpoint.clone())
         .await?;
@@ -281,6 +294,55 @@ async fn switch_backend(
         "model": ai.model_id(),
         "is_local": ai.is_local(),
     })))
+}
+
+/// What a local backend can actually run.
+///
+/// Exists because a default model id is a guess. The engine ships pointing at `llama3.1`; a
+/// machine with `llama3.1:8b` pulled answers every request with a 404, and until now there was
+/// no way to correct that from inside the app — the backend picker chose a *provider*, never a
+/// model. Asking the daemon is the only way to know the exact tags.
+///
+/// Never fails the request. A stopped daemon is a normal state, not an error, and the picker
+/// that calls this should say "not running" rather than raise a banner over the app.
+async fn list_backend_models(Path(kind): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    let kind = BackendKind::parse(kind.trim())
+        .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
+
+    if !kind.lists_models() {
+        return Ok(Json(serde_json::json!({
+            "models": [],
+            "available": false,
+            "reason": format!("{} does not publish an installed-model list", kind.label()),
+        })));
+    }
+
+    // Built for the question and dropped. Listing what Ollama holds must not require switching
+    // the running backend to it first — that would mean breaking summarization to find out
+    // whether a model exists.
+    let probe = match AiRouter::from_config(RouterConfig::new(kind)) {
+        Ok(router) => router,
+        Err(e) => {
+            return Ok(Json(serde_json::json!({
+                "models": [],
+                "available": false,
+                "reason": e.to_string(),
+            })))
+        }
+    };
+
+    match probe.installed_models().await {
+        Ok(models) => Ok(Json(serde_json::json!({
+            "models": models,
+            "available": true,
+            "reason": serde_json::Value::Null,
+        }))),
+        Err(e) => Ok(Json(serde_json::json!({
+            "models": [],
+            "available": false,
+            "reason": e.to_string(),
+        }))),
+    }
 }
 
 // ---------------------------------------------------------------- import
@@ -1046,6 +1108,10 @@ async fn chat_about_meeting(
 async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
     let backends: Vec<_> = BackendKind::ALL
         .iter()
+        // Mock is excluded. It answers every request with fixed text, so a user who picked it
+        // from a menu would get summaries and answers that were never derived from their
+        // meeting, presented exactly like real ones.
+        .filter(|kind| kind.is_selectable())
         .map(|kind| {
             serde_json::json!({
                 "kind": kind.as_str(),
@@ -1053,6 +1119,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 "is_local": kind.is_local(),
                 "requires_api_key": kind.requires_api_key(),
                 "requires_endpoint": kind.requires_endpoint(),
+                "lists_models": kind.lists_models(),
             })
         })
         .collect();
@@ -1092,6 +1159,10 @@ async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::
                 "multilingual": model.multilingual,
                 "installed": store.is_available(&model),
                 "recommended": model.name == ModelRegistry::default_model().name,
+                // What the name means. `tiny.en` versus `medium` is not a choice anyone can
+                // make from a size in megabytes.
+                "tradeoff": model.size.tradeoff(),
+                "language_note": model.language_note(),
             })
         })
         .collect();
@@ -2268,6 +2339,81 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// The mock backend answers every request with fixed text. Offering it in a menu means a
+    /// user can end up reading a fabricated summary of a real meeting, formatted exactly like a
+    /// real one, with nothing on screen saying so.
+    #[tokio::test]
+    async fn the_mock_backend_is_not_offered_and_cannot_be_selected() {
+        let app = app();
+
+        let (_, listed) = call(&app, get("/v1/backends")).await;
+        let kinds: Vec<&str> = listed["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["kind"].as_str().unwrap())
+            .collect();
+        assert!(
+            !kinds.contains(&"mock"),
+            "mock must not be listed: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"ollama"),
+            "real backends must still be listed"
+        );
+
+        // Not merely hidden. A client that knows the name must still be refused.
+        let (status, body) = call(
+            &app,
+            post("/v1/backend", serde_json::json!({"kind": "mock"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    /// A stopped Ollama is an ordinary state, not a failure. The picker has to be able to say
+    /// "not running" — if this returned an error the whole settings screen would show a banner
+    /// instead of a list.
+    #[tokio::test]
+    async fn listing_models_for_an_unreachable_daemon_is_not_an_error() {
+        let (status, body) = call(&app(), get("/v1/backends/ollama/models")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["models"].as_array().unwrap().is_empty() || body["available"] == true);
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_cannot_list_models_says_so_rather_than_failing() {
+        let (status, body) = call(&app(), get("/v1/backends/anthropic/models")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["available"], false);
+        assert!(
+            body["reason"].as_str().unwrap().contains("Anthropic"),
+            "{body}"
+        );
+    }
+
+    /// Whisper's names mean nothing to a user. Every entry has to explain what choosing it
+    /// costs, or the model list is a quiz rather than a choice.
+    #[tokio::test]
+    async fn every_model_explains_what_it_is_for() {
+        let (status, body) = call(&app(), get("/v1/models")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        for model in body["models"].as_array().unwrap() {
+            let name = model["name"].as_str().unwrap();
+            assert!(
+                model["tradeoff"].as_str().is_some_and(|t| t.len() > 40),
+                "{name} has no usable description"
+            );
+            assert!(
+                model["language_note"]
+                    .as_str()
+                    .is_some_and(|t| !t.is_empty()),
+                "{name} does not say what its .en suffix means"
+            );
+        }
     }
 
     #[tokio::test]

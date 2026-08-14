@@ -1,22 +1,32 @@
 import { AlertCircle, X } from "lucide-react";
 
-import type { Step } from "./readiness";
-
 interface SetupBannerProps {
-  regressed: Step[];
+  /**
+   * What is not working, in the user's terms — not the names of wizard steps.
+   *
+   * "permissions needs attention" describes the setup screen's state and tells someone with a
+   * meeting starting in a minute nothing. "Notewise will not be able to hear a meeting" tells
+   * them what will happen.
+   */
+  consequences: string[];
+  onOpenSettings: () => void;
   onDismiss: () => void;
 }
 
 /**
- * Something setup established has since broken.
+ * Something setup established has since broken, or was skipped.
  *
- * A banner rather than the wizard: a stopped Ollama or a revoked grant is a small problem,
- * and demoting an established user to a welcome screen over it would be absurd.
+ * A banner rather than the wizard: a stopped Ollama, a revoked grant or a permission the user
+ * deliberately passed on is a small problem, and demoting an established user to a welcome
+ * screen over it would be absurd.
  */
-export function SetupBanner({ regressed, onDismiss }: SetupBannerProps) {
-  if (regressed.length === 0) return null;
+export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBannerProps) {
+  if (consequences.length === 0) return null;
 
-  const names = regressed.map((step) => step.title.toLowerCase()).join(" and ");
+  // Capitalised here rather than in the source strings, which are also used mid-sentence in
+  // the setup wizard.
+  const [first, ...rest] = consequences;
+  const sentence = [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(", and ");
 
   return (
     <div
@@ -24,10 +34,19 @@ export function SetupBanner({ regressed, onDismiss }: SetupBannerProps) {
       className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900"
     >
       <AlertCircle size={15} className="shrink-0" aria-hidden />
-      <span className="flex-1">
-        Recording may not work: {names} {regressed.length === 1 ? "needs" : "need"} attention.
-        Open Settings to fix it.
-      </span>
+      <span className="flex-1">{sentence}.</span>
+
+      {/* A real button. The old banner ended in "Open Settings to fix it" as advice, pointing
+          at a screen that had no permissions on it at all. */}
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="shrink-0 rounded-full border border-amber-300 px-2.5 py-0.5 text-[12px]
+                   font-medium transition hover:bg-amber-100"
+      >
+        Fix in Settings
+      </button>
+
       <button
         type="button"
         onClick={onDismiss}

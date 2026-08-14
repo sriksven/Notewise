@@ -98,6 +98,17 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
     async fn probe(&self) -> Result<()> {
         Ok(())
     }
+
+    /// The model names this backend can actually run, if it can be asked.
+    ///
+    /// Empty by default. A local daemon holds whatever the user has pulled, and the names are
+    /// exact tags — `llama3.1:8b` is not `llama3.1`, and a UI that offers the second when only
+    /// the first is installed sends the user into a 404 with no way to correct it. Hosted
+    /// providers return empty: their catalogues change without us, and listing them costs a
+    /// round trip against a metered key.
+    async fn installed_models(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]
