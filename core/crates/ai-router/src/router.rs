@@ -10,8 +10,9 @@ use crate::backends::{
     AnthropicBackend, GeminiBackend, MockBackend, OllamaBackend, OpenAiCompatBackend, Preset,
 };
 use crate::error::{AiError, Result};
+use crate::redact::{RedactionPolicy, RedactionReport};
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
+    ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
     TranscriptInput,
 };
 use crate::AiBackend;
@@ -168,6 +169,10 @@ pub struct RouterConfig {
     pub model: Option<String>,
     /// Overrides the backend's default endpoint. Required for `OpenAiCompatible`.
     pub endpoint: Option<String>,
+    /// How much to mask before text leaves the machine.
+    ///
+    /// Ignored for local backends — nothing leaves, so there is nothing to mask.
+    pub redaction: RedactionPolicy,
 }
 
 impl Default for RouterConfig {
@@ -181,6 +186,7 @@ impl Default for RouterConfig {
             api_key: None,
             model: None,
             endpoint: None,
+            redaction: RedactionPolicy::Secrets,
         }
     }
 }
@@ -192,6 +198,7 @@ impl RouterConfig {
             api_key: None,
             model: None,
             endpoint: None,
+            redaction: RedactionPolicy::Secrets,
         }
     }
 
@@ -249,12 +256,14 @@ impl RouterConfig {
 pub struct Router {
     backend: Box<dyn AiBackend>,
     kind: BackendKind,
+    redaction: RedactionPolicy,
 }
 
 impl Router {
     /// Build a router from configuration.
     pub fn from_config(config: RouterConfig) -> Result<Self> {
         let kind = config.backend;
+        let redaction = config.redaction;
 
         let backend: Box<dyn AiBackend> = match kind {
             BackendKind::Mock => Box::new(MockBackend::new()),
@@ -303,7 +312,11 @@ impl Router {
             }
         };
 
-        Ok(Self { backend, kind })
+        Ok(Self {
+            backend,
+            kind,
+            redaction,
+        })
     }
 
     /// Wrap an already-constructed backend. Mainly useful in tests.
@@ -311,7 +324,14 @@ impl Router {
         Self {
             backend,
             kind: BackendKind::Mock,
+            redaction: RedactionPolicy::Secrets,
         }
+    }
+
+    /// Override how much is masked before text leaves the machine.
+    pub fn with_redaction(mut self, redaction: RedactionPolicy) -> Self {
+        self.redaction = redaction;
+        self
     }
 
     /// Which backend kind this router was built from.
@@ -342,6 +362,97 @@ impl Router {
     }
 }
 
+impl Router {
+    /// The policy actually in force for this router.
+    ///
+    /// A local backend is always `Off`: nothing leaves the machine, so masking would only
+    /// degrade the model's input for no benefit. This is why redaction lives on the router
+    /// rather than in each caller — the decision depends on which backend is active, which
+    /// callers should not have to know.
+    pub fn effective_redaction(&self) -> RedactionPolicy {
+        if self.backend.is_local() {
+            RedactionPolicy::Off
+        } else {
+            self.redaction
+        }
+    }
+
+    /// Mask a transcript on its way out, logging what was masked but never what it was.
+    fn guard_transcript(&self, input: &TranscriptInput) -> TranscriptInput {
+        let policy = self.effective_redaction();
+        if policy == RedactionPolicy::Off {
+            return input.clone();
+        }
+
+        let (text, report) = crate::redact::redact(&input.text, policy);
+        let (context, context_report) = match input.context.as_deref() {
+            Some(c) => {
+                let (masked, r) = crate::redact::redact(c, policy);
+                (Some(masked.into_owned()), r)
+            }
+            None => (None, RedactionReport::default()),
+        };
+
+        if !report.is_empty() || !context_report.is_empty() {
+            tracing::info!(
+                backend = self.kind.label(),
+                redacted = %report,
+                context_redacted = %context_report,
+                "masked secrets before sending to a non-local backend"
+            );
+        }
+
+        TranscriptInput {
+            title: input.title.clone(),
+            text: text.into_owned(),
+            context,
+        }
+    }
+
+    fn guard_chat(&self, request: &ChatRequest) -> ChatRequest {
+        let policy = self.effective_redaction();
+        if policy == RedactionPolicy::Off {
+            return request.clone();
+        }
+
+        let mut report = RedactionReport::default();
+        let context = request
+            .context
+            .iter()
+            .map(|c| {
+                let (masked, r) = crate::redact::redact(c, policy);
+                report.merge(&r);
+                masked.into_owned()
+            })
+            .collect();
+
+        // User messages too. A user pasting a key into the chat box is at least as likely as
+        // one being spoken in the meeting.
+        let messages = request
+            .messages
+            .iter()
+            .map(|m| {
+                let (masked, r) = crate::redact::redact(&m.content, policy);
+                report.merge(&r);
+                ChatMessage {
+                    role: m.role,
+                    content: masked.into_owned(),
+                }
+            })
+            .collect();
+
+        if !report.is_empty() {
+            tracing::info!(
+                backend = self.kind.label(),
+                redacted = %report,
+                "masked secrets before sending to a non-local backend"
+            );
+        }
+
+        ChatRequest { context, messages }
+    }
+}
+
 #[async_trait]
 impl AiBackend for Router {
     fn model_id(&self) -> &str {
@@ -353,28 +464,198 @@ impl AiBackend for Router {
     }
 
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
-        self.backend.summarize(input).await
+        self.backend.summarize(&self.guard_transcript(input)).await
     }
 
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
-        self.backend.extract_decisions(input).await
+        self.backend
+            .extract_decisions(&self.guard_transcript(input))
+            .await
     }
 
     async fn extract_action_items(
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
-        self.backend.extract_action_items(input).await
+        self.backend
+            .extract_action_items(&self.guard_transcript(input))
+            .await
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        self.backend.chat(request).await
+        self.backend.chat(&self.guard_chat(request)).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Records exactly what the backend was handed, so a test can assert on what would have
+    /// gone over the wire rather than on what the router intended to send.
+    #[derive(Debug, Default)]
+    struct SpyBackend {
+        local: bool,
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl SpyBackend {
+        fn cloud() -> Self {
+            Self {
+                local: false,
+                seen: Default::default(),
+            }
+        }
+
+        fn local() -> Self {
+            Self {
+                local: true,
+                seen: Default::default(),
+            }
+        }
+
+        fn transmitted(&self) -> String {
+            self.seen.lock().expect("spy lock").join("\n")
+        }
+    }
+
+    #[async_trait]
+    impl AiBackend for std::sync::Arc<SpyBackend> {
+        fn model_id(&self) -> &str {
+            "spy"
+        }
+
+        fn is_local(&self) -> bool {
+            self.local
+        }
+
+        async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
+            self.seen.lock().expect("spy lock").push(input.text.clone());
+            Ok(SummaryOutput {
+                text: String::new(),
+                model: "spy".into(),
+            })
+        }
+
+        async fn extract_decisions(
+            &self,
+            input: &TranscriptInput,
+        ) -> Result<Vec<ExtractedDecision>> {
+            self.seen.lock().expect("spy lock").push(input.text.clone());
+            Ok(Vec::new())
+        }
+
+        async fn extract_action_items(
+            &self,
+            input: &TranscriptInput,
+        ) -> Result<Vec<ExtractedActionItem>> {
+            self.seen.lock().expect("spy lock").push(input.text.clone());
+            Ok(Vec::new())
+        }
+
+        async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
+            let mut seen = self.seen.lock().expect("spy lock");
+            seen.extend(request.context.iter().cloned());
+            seen.extend(request.messages.iter().map(|m| m.content.clone()));
+            Ok(ChatResponse {
+                text: String::new(),
+                model: "spy".into(),
+            })
+        }
+    }
+
+    const SECRET: &str = "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF";
+
+    /// The claim the whole module exists to support: a key spoken in a meeting does not
+    /// reach a cloud provider.
+    #[tokio::test]
+    async fn a_secret_never_reaches_a_cloud_backend() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()));
+        let input = TranscriptInput::new("Standup", format!("Sam read out {SECRET} on the call"));
+
+        router.summarize(&input).await.unwrap();
+        router.extract_decisions(&input).await.unwrap();
+        router.extract_action_items(&input).await.unwrap();
+
+        let transmitted = spy.transmitted();
+        assert!(
+            !transmitted.contains(SECRET),
+            "the key was sent to a cloud backend: {transmitted}"
+        );
+        assert!(transmitted.contains("[redacted:api_key]"), "{transmitted}");
+        assert!(
+            transmitted.contains("Sam read out"),
+            "surrounding transcript must survive: {transmitted}"
+        );
+    }
+
+    /// A local backend must get the real text. Masking there would degrade the summary for
+    /// no privacy benefit, since nothing leaves the machine.
+    #[tokio::test]
+    async fn a_local_backend_receives_the_text_unchanged() {
+        let spy = std::sync::Arc::new(SpyBackend::local());
+        let router = Router::with_backend(Box::new(spy.clone()));
+
+        router
+            .summarize(&TranscriptInput::new("Standup", format!("key {SECRET}")))
+            .await
+            .unwrap();
+
+        assert!(spy.transmitted().contains(SECRET), "local was redacted");
+        assert_eq!(router.effective_redaction(), RedactionPolicy::Off);
+    }
+
+    /// A user pasting a key into the chat box is at least as likely as one being spoken.
+    #[tokio::test]
+    async fn chat_messages_and_context_are_masked_too() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()));
+
+        let request = ChatRequest::new(vec![ChatMessage {
+            role: crate::types::Role::User,
+            content: format!("is {SECRET} still valid?"),
+        }])
+        .with_context(vec![format!("earlier we used {SECRET}")]);
+
+        router.chat(&request).await.unwrap();
+
+        let transmitted = spy.transmitted();
+        assert!(!transmitted.contains(SECRET), "{transmitted}");
+        assert_eq!(
+            transmitted.matches("[redacted:api_key]").count(),
+            2,
+            "both the message and the context should be masked: {transmitted}"
+        );
+    }
+
+    /// Turning redaction off is possible but must be deliberate.
+    #[tokio::test]
+    async fn redaction_can_be_disabled_explicitly() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router =
+            Router::with_backend(Box::new(spy.clone())).with_redaction(RedactionPolicy::Off);
+
+        router
+            .summarize(&TranscriptInput::new("Standup", format!("key {SECRET}")))
+            .await
+            .unwrap();
+
+        assert!(spy.transmitted().contains(SECRET));
+    }
+
+    #[test]
+    fn redaction_defaults_to_masking_secrets() {
+        assert_eq!(
+            RouterConfig::default().redaction,
+            RedactionPolicy::Secrets,
+            "a config that forgets to set a policy must still mask"
+        );
+        assert_eq!(
+            RouterConfig::anthropic("k").redaction,
+            RedactionPolicy::Secrets
+        );
+    }
 
     #[test]
     fn default_config_is_local() {

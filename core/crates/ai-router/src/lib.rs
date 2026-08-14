@@ -41,6 +41,7 @@ mod backends;
 mod clarify;
 mod email;
 mod error;
+mod redact;
 mod router;
 mod types;
 
@@ -55,6 +56,7 @@ pub use email::{
     generate_email_draft, generate_email_variants, EmailContext, EmailTone, GeneratedEmail,
 };
 pub use error::{AiError, Result};
+pub use redact::{redact, Category, RedactionPolicy, RedactionReport};
 pub use router::{BackendKind, Router, RouterConfig};
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role,
