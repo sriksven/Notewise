@@ -19,20 +19,22 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
-// mod connector;   // Task 8: Connector, SourceConnector, SinkConnector traits, MockConnector
+mod connector;
 // mod credentials; // Task 9: Secret, CredentialStore, MemoryStore
 // mod dispatcher;  // Task 11: Dispatcher, DispatchReport, RetryPolicy
 mod error;
 // mod keychain;    // Task 10: KeychainStore
 // mod registry;    // Task 11: ConnectorRegistry
-// mod sinks;       // Tasks 8, 12, 13: MockConnector, VaultSink, WebhookSink
+mod sinks;
 mod types;
 
-// pub use connector::{Connector, SinkConnector, SourceConnector}; // Task 8
+pub use connector::{Connector, SinkConnector, SourceConnector};
 // pub use credentials::{CredentialStore, MemoryStore, Secret}; // Task 9
 // pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy}; // Task 11
 pub use error::{ConnectorError, Result};
 // pub use keychain::KeychainStore; // Task 10
 // pub use registry::ConnectorRegistry; // Task 11
-// pub use sinks::{MockConnector, VaultSink, WebhookSink}; // Tasks 8, 12, 13
+// `sinks` also grows VaultSink (Task 12) and WebhookSink (Task 13); only MockConnector exists
+// so far, so it is the only one re-exported here.
+pub use sinks::MockConnector;
 pub use types::{Cursor, ExternalRef, Health, Inbound, Operation, Outbound, PullBatch};
