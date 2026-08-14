@@ -124,7 +124,11 @@ pub struct Summary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Decision {
     pub id: Id,
-    pub summary_id: Id,
+    /// The meeting where this was decided. Ownership lives here, not on the summary.
+    pub meeting_id: Id,
+    /// Which summary first surfaced this, if any — provenance, not ownership. Becomes
+    /// `None` when that summary is regenerated; the decision itself survives.
+    pub summary_id: Option<Id>,
     pub text: String,
     pub reasoning: Option<String>,
     pub decided_at: Option<DateTime<Utc>>,
@@ -167,9 +171,16 @@ impl WorkStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionItem {
     pub id: Id,
-    pub summary_id: Id,
+    /// The meeting this came out of. Ownership lives here, not on the summary, so that
+    /// regenerating a summary cannot take a user's owner, due date and status with it.
+    pub meeting_id: Id,
+    /// Which summary first surfaced this, if any — provenance, not ownership.
+    pub summary_id: Option<Id>,
     pub text: String,
+    /// Free-text owner as spoken or typed. Kept alongside `owner_person_id` rather than
+    /// replaced by it: an owner named in a transcript often matches no known person.
     pub owner: Option<String>,
+    pub owner_person_id: Option<Id>,
     pub due_at: Option<DateTime<Utc>>,
     pub status: WorkStatus,
     pub created_at: DateTime<Utc>,

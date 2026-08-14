@@ -317,7 +317,8 @@ async fn summarize(config: &Config, id: &str) -> Result<()> {
 
     for decision in &decisions {
         summaries.add_decision(notewise_storage::NewDecision {
-            summary_id: stored.id,
+            meeting_id,
+            summary_id: Some(stored.id),
             text: decision.text.clone(),
             reasoning: decision.reasoning.clone(),
             decided_at: Some(Utc::now()),
@@ -325,9 +326,11 @@ async fn summarize(config: &Config, id: &str) -> Result<()> {
     }
     for item in &action_items {
         summaries.add_action_item(notewise_storage::NewActionItem {
-            summary_id: stored.id,
+            meeting_id,
+            summary_id: Some(stored.id),
             text: item.text.clone(),
             owner: item.owner.clone(),
+            owner_person_id: None,
             due_at: None,
         })?;
     }

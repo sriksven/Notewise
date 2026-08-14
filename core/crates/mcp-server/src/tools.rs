@@ -406,16 +406,19 @@ mod tests {
             })
             .unwrap();
         repo.add_decision(notewise_storage::NewDecision {
-            summary_id: summary.id,
+            meeting_id,
+            summary_id: Some(summary.id),
             text: "Migrate to Postgres".into(),
             reasoning: Some("Better JSON support".into()),
             decided_at: None,
         })
         .unwrap();
         repo.add_action_item(notewise_storage::NewActionItem {
-            summary_id: summary.id,
+            meeting_id,
+            summary_id: Some(summary.id),
             text: "Draft the migration plan".into(),
             owner: Some("alex".into()),
+            owner_person_id: None,
             due_at: None,
         })
         .unwrap();

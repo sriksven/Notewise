@@ -943,7 +943,8 @@ async fn summarize_meeting(
 
     for decision in &decisions {
         repo.add_decision(notewise_storage::NewDecision {
-            summary_id: stored.id,
+            meeting_id,
+            summary_id: Some(stored.id),
             text: decision.text.clone(),
             reasoning: decision.reasoning.clone(),
             decided_at: None,
@@ -951,9 +952,11 @@ async fn summarize_meeting(
     }
     for item in &action_items {
         repo.add_action_item(notewise_storage::NewActionItem {
-            summary_id: stored.id,
+            meeting_id,
+            summary_id: Some(stored.id),
             text: item.text.clone(),
             owner: item.owner.clone(),
+            owner_person_id: None,
             due_at: None,
         })?;
     }

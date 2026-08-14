@@ -267,7 +267,8 @@ mod tests {
 
         summaries
             .add_decision(NewDecision {
-                summary_id: summary.id,
+                meeting_id: meeting.id,
+                summary_id: Some(summary.id),
                 text: "Migrate to Postgres".into(),
                 reasoning: Some("SQLite will not scale past launch".into()),
                 decided_at: None,
@@ -276,9 +277,11 @@ mod tests {
 
         let done = summaries
             .add_action_item(NewActionItem {
-                summary_id: summary.id,
+                meeting_id: meeting.id,
+                summary_id: Some(summary.id),
                 text: "Benchmark the FTS index".into(),
                 owner: Some("Alex".into()),
+                owner_person_id: None,
                 due_at: None,
             })
             .unwrap();
@@ -288,9 +291,11 @@ mod tests {
 
         summaries
             .add_action_item(NewActionItem {
-                summary_id: summary.id,
+                meeting_id: meeting.id,
+                summary_id: Some(summary.id),
                 text: "Draft the migration plan".into(),
                 owner: Some("Sam".into()),
+                owner_person_id: None,
                 due_at: Some(ts(1_700_400_000)),
             })
             .unwrap();

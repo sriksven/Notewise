@@ -28,6 +28,11 @@ pub enum StorageError {
         reason: String,
     },
 
+    /// A caller supplied fields that contradict each other. Distinct from [`Self::Corrupt`],
+    /// which is about what is already stored: this one is rejected before it is written.
+    #[error("invalid {what}: {reason}")]
+    Invalid { what: &'static str, reason: String },
+
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 

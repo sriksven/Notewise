@@ -220,6 +220,15 @@ const MIGRATIONS: &[&str] = &[
     "#,
     // v5 — the connector seam: external artifact records, per-connector account state, and
     // the outbound delivery queue. No tokens live here; credentials go to the OS keychain.
+    //
+    // Timestamps are TEXT in the format rusqlite's chrono impl emits for `DateTime<Utc>`:
+    // `%F %T%.f%:z`, e.g. `2026-01-01 00:00:00+00:00`. That matters more here than elsewhere
+    // in this schema, because `next_attempt_at` is compared and ordered rather than merely
+    // displayed, and TEXT comparison is lexicographic. An RFC3339 `Z` literal sorts before
+    // every space-separated value at byte 10, so a row written in that form would be due
+    // forever and never claimed. Do not hand-write timestamp literals in another format, and
+    // do not reach for DEFAULT CURRENT_TIMESTAMP — SQLite emits a third, also-incompatible
+    // form with no offset.
     r#"
     CREATE TABLE external_items (
         id              TEXT PRIMARY KEY NOT NULL,
@@ -259,7 +268,134 @@ const MIGRATIONS: &[&str] = &[
         created_at       TEXT NOT NULL
     );
     CREATE UNIQUE INDEX idx_outbox_idempotency ON connector_outbox(idempotency_key);
-    CREATE INDEX idx_outbox_ready ON connector_outbox(status, next_attempt_at);
+
+    -- Partial, and keyed on next_attempt_at alone. A composite (status, next_attempt_at)
+    -- index cannot serve the drain query's ORDER BY, because `status IN (...)` splits the
+    -- scan into two disjoint ranges and SQLite falls back to a temp b-tree — which also
+    -- defeats the LIMIT, sorting every due row before returning a handful. Partial also
+    -- keeps completed rows out of the index entirely; they are retained forever but never
+    -- looked up by status.
+    CREATE INDEX idx_outbox_ready ON connector_outbox(next_attempt_at)
+        WHERE status IN ('pending', 'in_flight');
+    CREATE INDEX idx_outbox_failed ON connector_outbox(created_at DESC)
+        WHERE status = 'failed';
+    "#,
+    // v6 — people, meeting series, and work items that outlive their summary.
+    //
+    // Three changes in one migration because they interlock:
+    //
+    //   1. `people` gives a person a row, so speaker attribution and action-item ownership
+    //      can point at an identity instead of repeating a display name as free text.
+    //   2. `meeting_series` threads recurring meetings, which is what turns "still open
+    //      three standups later" into a traversal rather than a string match on titles.
+    //   3. `action_items` and `decisions` move from `summary_id` to `meeting_id`.
+    //
+    // (3) defuses a landmine rather than fixing an active bug, and the distinction matters
+    // to anyone auditing this later. Both tables were ON DELETE CASCADE from `summaries`.
+    // Nothing deletes a summary today — `summarize_meeting` appends a new row and leaves
+    // the old one — so no data has actually been lost. But that is the only thing standing
+    // between the old schema and silent loss: the obvious next change to summarisation
+    // (replace on regenerate, or prune old summaries so they stop accumulating) would have
+    // deleted every action item derived from that summary, taking with it the owner, due
+    // date and status a user had set by hand. Ownership belonged on the meeting either way;
+    // work outlives the summary that first described it. `summary_id` is kept as nullable
+    // provenance and degrades to NULL rather than taking the row with it.
+    //
+    // The rewrite runs with foreign keys still enabled. `migrate` wraps each migration in a
+    // transaction and `PRAGMA foreign_keys` is a no-op inside one, so the usual
+    // disable-around-a-table-rewrite recipe is not available here. It is safe in this case
+    // only because no other table references `action_items` or `decisions`: the reason that
+    // recipe exists is to stop other tables' REFERENCES clauses from following the
+    // temporary name through the rename. Verify that premise still holds before reusing
+    // this pattern on a table that something else points at.
+    r#"
+    CREATE TABLE people (
+        id           TEXT PRIMARY KEY NOT NULL,
+        display_name TEXT NOT NULL,
+        email        TEXT,
+        -- Voiceprint columns exist so speaker enrollment has somewhere to land without a
+        -- second migration. NOTHING WRITES THEM YET, deliberately: a speaker embedding is a
+        -- biometric identifier for someone who is usually not the user of this machine and
+        -- who never consented to being enrolled. Populating these is gated on an explicit
+        -- consent and encryption-at-rest decision.
+        voice_print  BLOB,
+        voice_dims   INTEGER,
+        -- Which embedding model produced `voice_print`. Cosine distance between vectors
+        -- from different models is meaningless and the bytes do not say which model made
+        -- them, so without this a model swap silently produces confident wrong matches on
+        -- named people. `voice_dims` does not cover it — two models can share a width.
+        voice_model  TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    -- Partial, so any number of people may have no email while a known address stays unique.
+    CREATE UNIQUE INDEX idx_people_email ON people(email) WHERE email IS NOT NULL;
+
+    CREATE TABLE meeting_participants (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        person_id  TEXT NOT NULL REFERENCES people(id)   ON DELETE CASCADE,
+        role       TEXT,
+        PRIMARY KEY (meeting_id, person_id)
+    );
+    CREATE INDEX idx_participants_person ON meeting_participants(person_id);
+
+    CREATE TABLE meeting_series (
+        id         TEXT PRIMARY KEY NOT NULL,
+        title      TEXT NOT NULL,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    ALTER TABLE meetings ADD COLUMN series_id TEXT REFERENCES meeting_series(id);
+    CREATE INDEX idx_meetings_series ON meetings(series_id, started_at DESC);
+
+    -- Paired with the existing free-text `speaker`, never derived from it. Free text
+    -- survives when attribution is anonymous or a platform tap gives no identity; the
+    -- foreign key is set only when there is a real person to point at. Both stay nullable.
+    ALTER TABLE transcript_segments ADD COLUMN speaker_id TEXT REFERENCES people(id);
+    CREATE INDEX idx_segments_speaker ON transcript_segments(speaker_id);
+
+    CREATE TABLE action_items_v6 (
+        id              TEXT PRIMARY KEY NOT NULL,
+        meeting_id      TEXT NOT NULL REFERENCES meetings(id)  ON DELETE CASCADE,
+        summary_id      TEXT          REFERENCES summaries(id) ON DELETE SET NULL,
+        text            TEXT NOT NULL,
+        owner           TEXT,
+        owner_person_id TEXT REFERENCES people(id) ON DELETE SET NULL,
+        due_at          TEXT,
+        status          TEXT NOT NULL,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+    );
+    INSERT INTO action_items_v6
+        (id, meeting_id, summary_id, text, owner, due_at, status, created_at, updated_at)
+    SELECT a.id, s.meeting_id, a.summary_id, a.text, a.owner, a.due_at, a.status,
+           a.created_at, a.updated_at
+      FROM action_items a
+      JOIN summaries s ON s.id = a.summary_id;
+    DROP TABLE action_items;
+    ALTER TABLE action_items_v6 RENAME TO action_items;
+    CREATE INDEX idx_action_items_meeting ON action_items(meeting_id);
+    CREATE INDEX idx_action_items_summary ON action_items(summary_id);
+    CREATE INDEX idx_action_items_status  ON action_items(status, due_at);
+    CREATE INDEX idx_action_items_owner   ON action_items(owner_person_id);
+
+    CREATE TABLE decisions_v6 (
+        id         TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL REFERENCES meetings(id)  ON DELETE CASCADE,
+        summary_id TEXT          REFERENCES summaries(id) ON DELETE SET NULL,
+        text       TEXT NOT NULL,
+        reasoning  TEXT,
+        decided_at TEXT
+    );
+    INSERT INTO decisions_v6 (id, meeting_id, summary_id, text, reasoning, decided_at)
+    SELECT d.id, s.meeting_id, d.summary_id, d.text, d.reasoning, d.decided_at
+      FROM decisions d
+      JOIN summaries s ON s.id = d.summary_id;
+    DROP TABLE decisions;
+    ALTER TABLE decisions_v6 RENAME TO decisions;
+    CREATE INDEX idx_decisions_meeting ON decisions(meeting_id);
+    CREATE INDEX idx_decisions_summary ON decisions(summary_id);
     "#,
 ];
 
@@ -354,6 +490,12 @@ mod tests {
             "email_drafts",
             "notifications",
             "search_index",
+            "external_items",
+            "connector_accounts",
+            "connector_outbox",
+            "people",
+            "meeting_participants",
+            "meeting_series",
         ] {
             let count: u32 = conn
                 .query_row(
@@ -363,6 +505,134 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(count, 1, "table '{table}' missing after migration");
+        }
+    }
+
+    /// Each migration's `// vN` comment must match the array position it actually occupies.
+    ///
+    /// The version a migration produces comes from its index, never from its comment, and
+    /// until this test existed nothing checked that the two agreed. They disagreed once
+    /// already: an untagged entry made a hand count come up short and a migration shipped
+    /// labelled v4 from slot 5 (fixed in 857e965). The tag lives in a `//` comment outside
+    /// the `r#"..."#` literal, so this has to read the source rather than the array.
+    #[test]
+    fn migration_version_tags_match_their_array_positions() {
+        let source = include_str!("migrations.rs");
+        let body = source
+            .split_once("const MIGRATIONS: &[&str] = &[")
+            .expect("MIGRATIONS array should exist")
+            .1;
+
+        let tags: Vec<u32> = body
+            .lines()
+            // Stop at the end of the array literal, so the doc comment above and this
+            // test's own prose cannot be mistaken for entries.
+            .take_while(|line| !line.starts_with("];"))
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("// v")?;
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse().ok()
+            })
+            .collect();
+
+        assert_eq!(
+            tags.len(),
+            MIGRATIONS.len(),
+            "every migration needs a `// vN` tag: found {} tag(s) for {} migration(s). \
+             An untagged entry is what caused the v4/v5 mislabelling.",
+            tags.len(),
+            MIGRATIONS.len()
+        );
+
+        for (index, tag) in tags.iter().enumerate() {
+            let expected = index as u32 + 1;
+            assert_eq!(
+                *tag, expected,
+                "entry {index} is tagged v{tag} but its array position makes it v{expected}"
+            );
+        }
+    }
+
+    /// Regenerating a summary must not delete the action items derived from it.
+    ///
+    /// Before v6 both tables cascaded from `summaries`, so re-summarising a meeting silently
+    /// destroyed every action item along with the owner, due date and status a user had set
+    /// by hand. This is the regression test for that.
+    #[test]
+    fn action_items_and_decisions_survive_their_summary() {
+        let mut conn = fresh();
+        migrate(&mut conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO meetings (id, title, source, started_at, created_at, updated_at)
+             VALUES ('m1', 'Standup', 'live', '2026-01-01T09:00:00Z',
+                     '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+             INSERT INTO summaries (id, meeting_id, text, model, created_at)
+             VALUES ('s1', 'm1', 'first pass', 'mock', '2026-01-01T09:30:00Z');
+             INSERT INTO action_items
+                 (id, meeting_id, summary_id, text, owner, status, created_at, updated_at)
+             VALUES ('a1', 'm1', 's1', 'ship the thing', 'priya', 'in_progress',
+                     '2026-01-01T09:30:00Z', '2026-01-01T09:30:00Z');
+             INSERT INTO decisions (id, meeting_id, summary_id, text)
+             VALUES ('d1', 'm1', 's1', 'we ship on friday');",
+        )
+        .unwrap();
+
+        // Re-summarising deletes the old summary row.
+        conn.execute("DELETE FROM summaries WHERE id = 's1'", [])
+            .unwrap();
+
+        let (owner, status, summary_id): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT owner, status, summary_id FROM action_items WHERE id = 'a1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("action item must outlive the summary that proposed it");
+        assert_eq!(owner, "priya", "hand-set owner must survive");
+        assert_eq!(status, "in_progress", "hand-set status must survive");
+        assert_eq!(
+            summary_id, None,
+            "provenance degrades to NULL, not deletion"
+        );
+
+        let decisions: u32 = conn
+            .query_row("SELECT COUNT(*) FROM decisions WHERE id = 'd1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(decisions, 1, "decision must outlive its summary");
+    }
+
+    /// Deleting the *meeting* should still take its work items with it — the v6 rewrite
+    /// moved ownership, it did not remove it.
+    #[test]
+    fn deleting_a_meeting_still_cascades_to_its_work_items() {
+        let mut conn = fresh();
+        migrate(&mut conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO meetings (id, title, source, started_at, created_at, updated_at)
+             VALUES ('m1', 'Standup', 'live', '2026-01-01T09:00:00Z',
+                     '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+             INSERT INTO action_items
+                 (id, meeting_id, text, status, created_at, updated_at)
+             VALUES ('a1', 'm1', 'ship the thing', 'todo',
+                     '2026-01-01T09:30:00Z', '2026-01-01T09:30:00Z');
+             INSERT INTO decisions (id, meeting_id, text)
+             VALUES ('d1', 'm1', 'we ship on friday');",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute("DELETE FROM meetings WHERE id = 'm1'", [])
+            .unwrap();
+
+        for table in ["action_items", "decisions"] {
+            let count: u32 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "{table} should cascade from its meeting");
         }
     }
 
@@ -424,7 +694,7 @@ mod tests {
             (id, connector_id, node_kind, node_id, operation, payload, idempotency_key,
              status, attempts, next_attempt_at, created_at)
             VALUES (?1, 'vault', 'meeting', 'n1', 'create', '{}', 'dupe',
-                    'pending', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')";
+                    'pending', 0, '2026-01-01 00:00:00+00:00', '2026-01-01 00:00:00+00:00')";
 
         conn.execute(insert, ["a"]).unwrap();
         assert!(

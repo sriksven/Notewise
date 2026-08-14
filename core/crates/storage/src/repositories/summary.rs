@@ -18,18 +18,65 @@ pub struct NewSummary {
 
 #[derive(Debug, Clone)]
 pub struct NewDecision {
-    pub summary_id: Id,
+    pub meeting_id: Id,
+    /// The summary that surfaced this, if one did. `None` for a decision a user recorded
+    /// directly.
+    pub summary_id: Option<Id>,
     pub text: String,
     pub reasoning: Option<String>,
     pub decided_at: Option<DateTime<Utc>>,
 }
 
+impl NewDecision {
+    /// A decision extracted from a summary, taking its meeting from the summary itself so
+    /// the two cannot disagree.
+    pub fn from_summary(summary: &Summary, text: impl Into<String>) -> Self {
+        Self {
+            meeting_id: summary.meeting_id,
+            summary_id: Some(summary.id),
+            text: text.into(),
+            reasoning: None,
+            decided_at: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NewActionItem {
-    pub summary_id: Id,
+    pub meeting_id: Id,
+    /// The summary that surfaced this, if one did. `None` for an item a user added by hand.
+    pub summary_id: Option<Id>,
     pub text: String,
     pub owner: Option<String>,
+    pub owner_person_id: Option<Id>,
     pub due_at: Option<DateTime<Utc>>,
+}
+
+impl NewActionItem {
+    /// An action item extracted from a summary, taking its meeting from the summary itself
+    /// so the two cannot disagree.
+    pub fn from_summary(summary: &Summary, text: impl Into<String>) -> Self {
+        Self {
+            meeting_id: summary.meeting_id,
+            summary_id: Some(summary.id),
+            text: text.into(),
+            owner: None,
+            owner_person_id: None,
+            due_at: None,
+        }
+    }
+
+    /// An action item a user added straight onto a meeting, with no summary behind it.
+    pub fn on_meeting(meeting_id: Id, text: impl Into<String>) -> Self {
+        Self {
+            meeting_id,
+            summary_id: None,
+            text: text.into(),
+            owner: None,
+            owner_person_id: None,
+            due_at: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -97,9 +144,29 @@ impl<'a> SummaryRepository<'a> {
         Ok(self.list_for_meeting(meeting_id)?.into_iter().next())
     }
 
+    /// Delete a summary, leaving the decisions and action items it proposed in place.
+    ///
+    /// Since v6 those carry their own `meeting_id` and only reference this row as
+    /// provenance, so they survive with `summary_id` set to NULL. Before v6 this call would
+    /// have destroyed them — which is why summarisation appends rather than replaces, and
+    /// why that workaround is no longer needed.
+    pub fn delete(&self, id: Id) -> Result<()> {
+        let changed = self
+            .db
+            .conn()
+            .execute("DELETE FROM summaries WHERE id = ?1", rusqlite::params![id])?;
+        if changed == 0 {
+            return Err(StorageError::not_found("Summary", id));
+        }
+        Ok(())
+    }
+
     pub fn add_decision(&self, new: NewDecision) -> Result<Decision> {
+        self.reject_mismatched_summary(new.meeting_id, new.summary_id)?;
+
         let decision = Decision {
             id: Id::new(),
+            meeting_id: new.meeting_id,
             summary_id: new.summary_id,
             text: new.text,
             reasoning: new.reasoning,
@@ -107,10 +174,11 @@ impl<'a> SummaryRepository<'a> {
         };
 
         self.db.conn().execute(
-            "INSERT INTO decisions (id, summary_id, text, reasoning, decided_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO decisions (id, meeting_id, summary_id, text, reasoning, decided_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 decision.id,
+                decision.meeting_id,
                 decision.summary_id,
                 decision.text,
                 decision.reasoning,
@@ -121,23 +189,43 @@ impl<'a> SummaryRepository<'a> {
         Ok(decision)
     }
 
+    /// Decisions a given summary surfaced.
+    ///
+    /// Note this is narrower than [`Self::decisions_for_meeting`]: a decision whose summary
+    /// has since been regenerated has no `summary_id` and appears only in the meeting-scoped
+    /// query. Callers rendering "this meeting's decisions" want that one.
     pub fn decisions(&self, summary_id: Id) -> Result<Vec<Decision>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, summary_id, text, reasoning, decided_at
+            "SELECT id, meeting_id, summary_id, text, reasoning, decided_at
              FROM decisions WHERE summary_id = ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![summary_id], map_decision)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Every decision made in a meeting, whichever summary first surfaced it.
+    pub fn decisions_for_meeting(&self, meeting_id: Id) -> Result<Vec<Decision>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, meeting_id, summary_id, text, reasoning, decided_at
+             FROM decisions WHERE meeting_id = ?1 ORDER BY decided_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![meeting_id], map_decision)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn add_action_item(&self, new: NewActionItem) -> Result<ActionItem> {
+        self.reject_mismatched_summary(new.meeting_id, new.summary_id)?;
+
         let now = Utc::now();
         let item = ActionItem {
             id: Id::new(),
+            meeting_id: new.meeting_id,
             summary_id: new.summary_id,
             text: new.text,
             owner: new.owner,
+            owner_person_id: new.owner_person_id,
             due_at: new.due_at,
             status: WorkStatus::Todo,
             created_at: now,
@@ -146,13 +234,16 @@ impl<'a> SummaryRepository<'a> {
 
         self.db.conn().execute(
             "INSERT INTO action_items
-                (id, summary_id, text, owner, due_at, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                 created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 item.id,
+                item.meeting_id,
                 item.summary_id,
                 item.text,
                 item.owner,
+                item.owner_person_id,
                 item.due_at,
                 item.status.as_str(),
                 item.created_at,
@@ -163,13 +254,48 @@ impl<'a> SummaryRepository<'a> {
         Ok(item)
     }
 
+    /// Action items a given summary surfaced. See the note on [`Self::decisions`] — for
+    /// "this meeting's action items", use [`Self::action_items_for_meeting`].
     pub fn action_items(&self, summary_id: Id) -> Result<Vec<ActionItem>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, summary_id, text, owner, due_at, status, created_at, updated_at
+            "SELECT id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                    created_at, updated_at
              FROM action_items WHERE summary_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(rusqlite::params![summary_id], map_action_item)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
+    /// Every action item from a meeting, whichever summary first surfaced it and including
+    /// ones a user added by hand.
+    pub fn action_items_for_meeting(&self, meeting_id: Id) -> Result<Vec<ActionItem>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                    created_at, updated_at
+             FROM action_items WHERE meeting_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![meeting_id], map_action_item)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
+    /// Still-open action items from a meeting. The unit of follow-through: what a later
+    /// meeting in the same series needs to ask about.
+    pub fn open_action_items_for_meeting(&self, meeting_id: Id) -> Result<Vec<ActionItem>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                    created_at, updated_at
+             FROM action_items
+             WHERE meeting_id = ?1 AND status IN ('todo', 'in_progress')
+             ORDER BY due_at IS NULL, due_at, created_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![meeting_id], map_action_item)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .collect()
@@ -179,7 +305,8 @@ impl<'a> SummaryRepository<'a> {
     pub fn overdue(&self, now: DateTime<Utc>) -> Result<Vec<ActionItem>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, summary_id, text, owner, due_at, status, created_at, updated_at
+            "SELECT id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                    created_at, updated_at
              FROM action_items
              WHERE due_at IS NOT NULL AND due_at < ?1 AND status IN ('todo', 'in_progress')
              ORDER BY due_at",
@@ -188,6 +315,27 @@ impl<'a> SummaryRepository<'a> {
         rows.collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .collect()
+    }
+
+    /// Refuse a work item whose summary belongs to a different meeting.
+    ///
+    /// `meeting_id` and `summary_id` are both caller-supplied, so they can disagree. Left
+    /// unchecked that writes a decision into the wrong meeting's history — a silent
+    /// corruption that only surfaces much later, when someone reads the wrong meeting.
+    fn reject_mismatched_summary(&self, meeting_id: Id, summary_id: Option<Id>) -> Result<()> {
+        let Some(summary_id) = summary_id else {
+            return Ok(());
+        };
+        let actual = self.get(summary_id)?.meeting_id;
+        if actual != meeting_id {
+            return Err(StorageError::Invalid {
+                what: "action item or decision",
+                reason: format!(
+                    "summary {summary_id} belongs to meeting {actual}, not {meeting_id}"
+                ),
+            });
+        }
+        Ok(())
     }
 
     pub fn set_action_item_status(&self, id: Id, status: WorkStatus) -> Result<()> {
@@ -226,25 +374,28 @@ fn map_summary(row: &Row<'_>) -> rusqlite::Result<Summary> {
 fn map_decision(row: &Row<'_>) -> rusqlite::Result<Decision> {
     Ok(Decision {
         id: row.get(0)?,
-        summary_id: row.get(1)?,
-        text: row.get(2)?,
-        reasoning: row.get(3)?,
-        decided_at: row.get(4)?,
+        meeting_id: row.get(1)?,
+        summary_id: row.get(2)?,
+        text: row.get(3)?,
+        reasoning: row.get(4)?,
+        decided_at: row.get(5)?,
     })
 }
 
 fn map_action_item(row: &Row<'_>) -> rusqlite::Result<Result<ActionItem>> {
-    let status_raw: String = row.get(5)?;
+    let status_raw: String = row.get(7)?;
     Ok((|| {
         Ok(ActionItem {
             id: row.get(0)?,
-            summary_id: row.get(1)?,
-            text: row.get(2)?,
-            owner: row.get(3)?,
-            due_at: row.get(4)?,
+            meeting_id: row.get(1)?,
+            summary_id: row.get(2)?,
+            text: row.get(3)?,
+            owner: row.get(4)?,
+            owner_person_id: row.get(5)?,
+            due_at: row.get(6)?,
             status: decode_enum("action_items.status", &status_raw, WorkStatus::parse)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })())
 }
@@ -332,16 +483,16 @@ mod tests {
         let repo = SummaryRepository::new(&db);
 
         repo.add_decision(NewDecision {
-            summary_id: summary.id,
-            text: "Ship Friday".into(),
             reasoning: Some("QA signed off".into()),
             decided_at: Some(ts(1_700_000_500)),
+            ..NewDecision::from_summary(&summary, "Ship Friday")
         })
         .unwrap();
 
         let decisions = repo.decisions(summary.id).unwrap();
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].reasoning.as_deref(), Some("QA signed off"));
+        assert_eq!(decisions[0].meeting_id, summary.meeting_id);
     }
 
     #[test]
@@ -350,12 +501,10 @@ mod tests {
         let repo = SummaryRepository::new(&db);
 
         let item = repo
-            .add_action_item(NewActionItem {
-                summary_id: summary.id,
-                text: "Write the release notes".into(),
-                owner: None,
-                due_at: None,
-            })
+            .add_action_item(NewActionItem::from_summary(
+                &summary,
+                "Write the release notes",
+            ))
             .unwrap();
 
         assert_eq!(item.status, WorkStatus::Todo);
@@ -367,12 +516,10 @@ mod tests {
         let (db, summary) = setup();
         let repo = SummaryRepository::new(&db);
         let item = repo
-            .add_action_item(NewActionItem {
-                summary_id: summary.id,
-                text: "Write the release notes".into(),
-                owner: None,
-                due_at: None,
-            })
+            .add_action_item(NewActionItem::from_summary(
+                &summary,
+                "Write the release notes",
+            ))
             .unwrap();
 
         repo.set_action_item_status(item.id, WorkStatus::Done)
@@ -391,32 +538,22 @@ mod tests {
 
         let past_due = repo
             .add_action_item(NewActionItem {
-                summary_id: summary.id,
-                text: "Overdue".into(),
                 owner: Some("alex".into()),
                 due_at: Some(ts(1_699_000_000)),
+                ..NewActionItem::from_summary(&summary, "Overdue")
             })
             .unwrap();
         repo.add_action_item(NewActionItem {
-            summary_id: summary.id,
-            text: "Not yet due".into(),
-            owner: None,
             due_at: Some(ts(1_800_000_000)),
+            ..NewActionItem::from_summary(&summary, "Not yet due")
         })
         .unwrap();
-        repo.add_action_item(NewActionItem {
-            summary_id: summary.id,
-            text: "No due date".into(),
-            owner: None,
-            due_at: None,
-        })
-        .unwrap();
+        repo.add_action_item(NewActionItem::from_summary(&summary, "No due date"))
+            .unwrap();
         let finished = repo
             .add_action_item(NewActionItem {
-                summary_id: summary.id,
-                text: "Overdue but done".into(),
-                owner: None,
                 due_at: Some(ts(1_699_000_000)),
+                ..NewActionItem::from_summary(&summary, "Overdue but done")
             })
             .unwrap();
         repo.set_action_item_status(finished.id, WorkStatus::Done)
@@ -432,12 +569,7 @@ mod tests {
         let (db, summary) = setup();
         let repo = SummaryRepository::new(&db);
         let item = repo
-            .add_action_item(NewActionItem {
-                summary_id: summary.id,
-                text: "Unowned".into(),
-                owner: None,
-                due_at: None,
-            })
+            .add_action_item(NewActionItem::from_summary(&summary, "Unowned"))
             .unwrap();
 
         repo.assign_action_item(item.id, Some("jordan")).unwrap();
@@ -447,24 +579,90 @@ mod tests {
         );
     }
 
+    /// Renamed from `..._cascades_through_summary_to_decisions`: since v6 a decision
+    /// cascades from its *meeting* directly. Deleting the meeting still removes it, but for
+    /// a different reason, and the old name described a path that no longer exists.
     #[test]
-    fn deleting_a_meeting_cascades_through_summary_to_decisions() {
+    fn deleting_a_meeting_removes_its_decisions() {
         let (db, summary) = setup();
         let repo = SummaryRepository::new(&db);
-        repo.add_decision(NewDecision {
-            summary_id: summary.id,
-            text: "Doomed".into(),
-            reasoning: None,
-            decided_at: None,
-        })
-        .unwrap();
+        repo.add_decision(NewDecision::from_summary(&summary, "Doomed"))
+            .unwrap();
 
         MeetingRepository::new(&db)
             .delete(summary.meeting_id)
             .unwrap();
 
         assert!(repo.get(summary.id).is_err());
-        assert_eq!(repo.decisions(summary.id).unwrap().len(), 0);
+        assert_eq!(
+            repo.decisions_for_meeting(summary.meeting_id)
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// The inverse of the migration's regression test, at the repository level: a summary
+    /// can be replaced without taking the work it proposed with it.
+    #[test]
+    fn regenerating_a_summary_keeps_its_action_items() {
+        let (db, first) = setup();
+        let repo = SummaryRepository::new(&db);
+
+        let item = repo
+            .add_action_item(NewActionItem {
+                owner: Some("priya".into()),
+                ..NewActionItem::from_summary(&first, "Ship the thing")
+            })
+            .unwrap();
+        repo.set_action_item_status(item.id, WorkStatus::InProgress)
+            .unwrap();
+
+        repo.delete(first.id).unwrap();
+
+        let survivors = repo.action_items_for_meeting(first.meeting_id).unwrap();
+        assert_eq!(
+            survivors.len(),
+            1,
+            "the action item must outlive the summary"
+        );
+        assert_eq!(survivors[0].owner.as_deref(), Some("priya"));
+        assert_eq!(survivors[0].status, WorkStatus::InProgress);
+        assert_eq!(
+            survivors[0].summary_id, None,
+            "provenance degrades to None rather than deleting the row"
+        );
+    }
+
+    /// A work item whose summary belongs to a different meeting is a silent corruption:
+    /// it would file a decision into the wrong meeting's history.
+    #[test]
+    fn a_summary_from_another_meeting_is_rejected() {
+        let (db, summary) = setup();
+        let other = MeetingRepository::new(&db)
+            .create(NewMeeting {
+                project_id: None,
+                title: "Somewhere else".into(),
+                source: MeetingSource::Import,
+                started_at: ts(1_700_000_000),
+            })
+            .unwrap();
+
+        let err = SummaryRepository::new(&db)
+            .add_action_item(NewActionItem {
+                meeting_id: other.id,
+                summary_id: Some(summary.id),
+                text: "Filed against the wrong meeting".into(),
+                owner: None,
+                owner_person_id: None,
+                due_at: None,
+            })
+            .expect_err("mismatched meeting and summary must be refused");
+
+        assert!(
+            matches!(err, StorageError::Invalid { .. }),
+            "expected Invalid, got {err:?}"
+        );
     }
 
     #[test]
