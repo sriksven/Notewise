@@ -218,6 +218,49 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     "#,
+    // v4 — the connector seam: external artifact records, per-connector account state, and
+    // the outbound delivery queue. No tokens live here; credentials go to the OS keychain.
+    r#"
+    CREATE TABLE external_items (
+        id              TEXT PRIMARY KEY NOT NULL,
+        connector_id    TEXT NOT NULL,
+        external_id     TEXT NOT NULL,
+        url             TEXT,
+        title           TEXT,
+        remote_version  TEXT,
+        last_synced_at  TEXT NOT NULL,
+        created_at      TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_external_items_identity
+        ON external_items(connector_id, external_id);
+
+    CREATE TABLE connector_accounts (
+        connector_id   TEXT PRIMARY KEY NOT NULL,
+        account_label  TEXT,
+        scopes         TEXT NOT NULL,
+        status         TEXT NOT NULL,
+        connected_at   TEXT NOT NULL,
+        cursor         TEXT
+    );
+
+    CREATE TABLE connector_outbox (
+        id               TEXT PRIMARY KEY NOT NULL,
+        connector_id     TEXT NOT NULL,
+        node_kind        TEXT NOT NULL,
+        node_id          TEXT NOT NULL,
+        operation        TEXT NOT NULL,
+        payload          TEXT NOT NULL,
+        idempotency_key  TEXT NOT NULL,
+        status           TEXT NOT NULL,
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        last_error       TEXT,
+        next_attempt_at  TEXT NOT NULL,
+        leased_until     TEXT,
+        created_at       TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_outbox_idempotency ON connector_outbox(idempotency_key);
+    CREATE INDEX idx_outbox_ready ON connector_outbox(status, next_attempt_at);
+    "#,
 ];
 
 /// Schema version this build understands.
@@ -352,6 +395,41 @@ mod tests {
             current_version(&conn).unwrap(),
             0,
             "version must not advance when a migration fails"
+        );
+    }
+
+    #[test]
+    fn v4_creates_connector_tables() {
+        let mut conn = fresh();
+        migrate(&mut conn).unwrap();
+
+        for table in ["external_items", "connector_accounts", "connector_outbox"] {
+            let count: u32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing table {table}");
+        }
+    }
+
+    #[test]
+    fn outbox_idempotency_key_is_unique() {
+        let mut conn = fresh();
+        migrate(&mut conn).unwrap();
+
+        let insert = "INSERT INTO connector_outbox
+            (id, connector_id, node_kind, node_id, operation, payload, idempotency_key,
+             status, attempts, next_attempt_at, created_at)
+            VALUES (?1, 'vault', 'meeting', 'n1', 'create', '{}', 'dupe',
+                    'pending', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')";
+
+        conn.execute(insert, ["a"]).unwrap();
+        assert!(
+            conn.execute(insert, ["b"]).is_err(),
+            "a second row with the same idempotency_key must be rejected"
         );
     }
 }

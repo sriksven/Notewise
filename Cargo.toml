@@ -63,6 +63,12 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 clap = { version = "4", features = ["derive"] }
+notewise-connectors = { path = "core/crates/connectors", version = "0.1.0" }
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+keyring = "3"
+tempfile = "3"
 
 [profile.release]
 lto = true
