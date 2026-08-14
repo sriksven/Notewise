@@ -33,6 +33,7 @@ mod tools;
 
 pub use error::{McpError, Result};
 pub use protocol::PROTOCOL_VERSION;
+pub use tools::WriteAccess;
 
 use serde_json::{json, Value};
 
@@ -44,11 +45,25 @@ use crate::protocol::{Request, Response, INVALID_REQUEST, JSONRPC_VERSION, PARSE
 #[derive(Debug)]
 pub struct McpServer {
     db: Database,
+    writes: WriteAccess,
 }
 
 impl McpServer {
+    /// A read-only server. Writes must be opted into with [`Self::with_write_access`].
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            writes: WriteAccess::Denied,
+        }
+    }
+
+    /// Permit the mutating tools.
+    ///
+    /// Separate from [`Self::new`] so granting write access to an unattended agent is
+    /// something a caller does on purpose and a reader can grep for.
+    pub fn with_write_access(mut self, writes: WriteAccess) -> Self {
+        self.writes = writes;
+        self
     }
 
     /// Handle one line of JSON-RPC input.
@@ -128,7 +143,7 @@ impl McpServer {
                 },
             })),
 
-            "tools/list" => Ok(json!({ "tools": tools::definitions() })),
+            "tools/list" => Ok(json!({ "tools": tools::definitions(self.writes) })),
 
             "tools/call" => {
                 let params = request
@@ -145,7 +160,7 @@ impl McpServer {
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                let result = tools::call(&self.db, name, &args)?;
+                let result = tools::call(&self.db, name, &args, self.writes)?;
 
                 // MCP wraps tool output in a content array. JSON is delivered as text
                 // because that is what the content schema carries.

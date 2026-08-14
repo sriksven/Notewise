@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 use notewise_ai_router::{AiBackend, TranscriptInput};
 use notewise_api_server::{AppState, Server};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
-use notewise_mcp_server::McpServer;
+use notewise_mcp_server::{McpServer, WriteAccess};
 use notewise_storage::{
     meeting_to_markdown, Database, ExportOptions, Id, MeetingRepository, NewSummary,
     NoteRepository, SearchRepository, SummaryRepository,
@@ -157,7 +157,16 @@ enum Command {
     },
 
     /// Run the MCP server on stdio, for agent clients.
-    Mcp,
+    Mcp {
+        /// Let connected agents create tickets, notes, and action items.
+        ///
+        /// Off by default. Read access and write access are different trust decisions, and
+        /// an agent that can change your workspace unattended should be something you
+        /// switched on rather than something you inherited by adding a server to a config
+        /// file. Even with this set, no tool deletes anything.
+        #[arg(long)]
+        allow_writes: bool,
+    },
 }
 
 #[tokio::main]
@@ -206,7 +215,7 @@ async fn main() -> Result<()> {
         Command::Search { query, limit } => search(&config, &query, limit),
         Command::Notes { limit } => notes(&config, limit),
         Command::Serve { port, ui } => serve(&config, port, ui).await,
-        Command::Mcp => mcp(&config).await,
+        Command::Mcp { allow_writes } => mcp(&config, allow_writes).await,
     }
 }
 
@@ -776,9 +785,26 @@ async fn serve(config: &Config, port: u16, ui: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-async fn mcp(config: &Config) -> Result<()> {
-    // stdout carries the JSON-RPC stream; anything else printed there corrupts it.
-    McpServer::new(open(config)?).serve_stdio().await?;
+async fn mcp(config: &Config, allow_writes: bool) -> Result<()> {
+    let writes = if allow_writes {
+        WriteAccess::Allowed
+    } else {
+        WriteAccess::Denied
+    };
+
+    // stdout carries the JSON-RPC stream; anything else printed there corrupts it. The
+    // warning goes to stderr for the same reason.
+    if allow_writes {
+        eprintln!(
+            "notewise mcp: write access enabled — connected agents can create tickets, \
+             notes, and action items in this workspace"
+        );
+    }
+
+    McpServer::new(open(config)?)
+        .with_write_access(writes)
+        .serve_stdio()
+        .await?;
     Ok(())
 }
 

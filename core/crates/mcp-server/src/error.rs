@@ -18,6 +18,10 @@ pub enum McpError {
 
     #[error("unsupported method '{0}'")]
     UnsupportedMethod(String),
+
+    /// A mutating tool was called on a read-only session.
+    #[error("'{0}' changes stored data, and this session is read-only;              restart the server with --allow-writes to permit it")]
+    WriteDenied(String),
 }
 
 pub type Result<T> = std::result::Result<T, McpError>;
@@ -27,6 +31,9 @@ impl McpError {
     pub fn code(&self) -> i32 {
         match self {
             McpError::UnknownTool(_) | McpError::UnsupportedMethod(_) => METHOD_NOT_FOUND,
+            // Not INVALID_PARAMS: the arguments were fine and retrying with different ones
+            // will not help. The capability is absent, so the agent should stop asking.
+            McpError::WriteDenied(_) => METHOD_NOT_FOUND,
             McpError::InvalidParams(_) => INVALID_PARAMS,
             // A missing record is the agent's mistake, not a server fault — reporting it as
             // invalid params lets the agent correct itself instead of retrying blindly.
