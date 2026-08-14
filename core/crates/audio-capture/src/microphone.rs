@@ -289,11 +289,10 @@ fn build_stream(
         }
     }
     .map_err(|e| {
-        // A denied microphone permission surfaces here on macOS.
+        // A denied microphone permission surfaces here on macOS. What counts as a denial is
+        // defined in `permissions` so this path and the setup probe cannot drift apart.
         let message = e.to_string();
-        if message.to_lowercase().contains("permission")
-            || message.to_lowercase().contains("denied")
-        {
+        if crate::permissions::is_permission_error(&message) {
             CaptureError::PermissionDenied { what: "microphone" }
         } else {
             CaptureError::BadFormat(format!("building input stream: {message}"))

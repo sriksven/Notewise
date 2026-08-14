@@ -31,6 +31,7 @@ mod format;
 #[cfg(feature = "os-capture")]
 mod microphone;
 mod mixer;
+mod permissions;
 mod source;
 mod vad;
 
@@ -40,6 +41,7 @@ pub use format::{AudioFormat, SampleRate};
 #[cfg(feature = "os-capture")]
 pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};
 pub use mixer::{soft_clip, MixedSource, Mixer};
+pub use permissions::{permission_status, request_permission, PermissionStatus};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};
 pub use vad::{Vad, VadConfig, VadReport};
 
