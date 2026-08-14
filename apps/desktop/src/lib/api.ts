@@ -272,7 +272,8 @@ export const api = {
   backends: () =>
     request<{
       backends: BackendInfo[];
-      active: { model: string; is_local: boolean };
+      /** `kind` matches an entry in `backends`, so the active one can be named. */
+      active: { kind: string; model: string; is_local: boolean };
     }>("/v1/backends"),
 
   models: () =>

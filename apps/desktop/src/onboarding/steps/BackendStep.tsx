@@ -17,7 +17,11 @@ const KEY_VARIABLES = [
 ];
 
 export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
-  const [active, setActive] = useState<{ model: string; is_local: boolean } | null>(null);
+  const [active, setActive] = useState<{
+    kind: string;
+    model: string;
+    is_local: boolean;
+  } | null>(null);
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +51,11 @@ export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
     }
   };
 
-  const local = backends.find((b) => b.is_local);
+  // The backend actually running, matched by kind. Matching on `is_local` instead would find
+  // whichever local backend happens to come first in the list — labelling a live Ollama as
+  // "Mock (no model)".
+  const running = backends.find((b) => b.kind === active?.kind);
+  const isLocal = active?.is_local ?? true;
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -74,11 +82,15 @@ export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
           }`}
         >
           <div className="flex items-start gap-3">
-            <HardDrive size={16} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden />
+            {isLocal ? (
+              <HardDrive size={16} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden />
+            ) : (
+              <Cloud size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
+            )}
 
             <div className="min-w-0 flex-1">
               <div className="text-[14px] font-medium text-neutral-900">
-                {local?.label ?? "On this machine"}
+                {running?.label ?? "Current backend"}
               </div>
 
               <div className="mt-0.5 flex items-center gap-1.5 text-[12px]">
@@ -91,13 +103,17 @@ export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
                 <span className={satisfied ? "text-emerald-800" : "text-amber-800"}>
                   {satisfied
                     ? `Reachable — ${active?.model ?? "ready"}`
-                    : "Not reachable. Is Ollama running?"}
+                    : "Not reachable. Is it running?"}
                 </span>
               </div>
 
+              {/* The privacy claim follows the backend actually in use. Printing "nothing
+                  leaves this machine" under a hosted provider would be the one lie this
+                  product cannot afford. */}
               <p className="mt-2 text-[12px] text-neutral-500">
-                Nothing leaves this machine. Notewise does not install or update Ollama — start
-                it, then re-check.
+                {isLocal
+                  ? "Nothing leaves this machine. Notewise does not install or update this — start it, then re-check."
+                  : "Transcripts are sent to this provider. Switch in Settings if you would rather keep them local."}
               </p>
             </div>
 
