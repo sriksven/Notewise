@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod config;
 mod connector;
 mod credentials;
 mod dispatcher;
@@ -28,6 +29,7 @@ mod registry;
 mod sinks;
 mod types;
 
+pub use config::{build_registry, generate_signing_secret, SIGNING_KEY};
 pub use connector::{Connector, SinkConnector, SourceConnector};
 pub use credentials::{CredentialStore, MemoryStore, Secret};
 pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy};

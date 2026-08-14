@@ -1,18 +1,25 @@
-//! Connector status and outbox inspection.
+//! Connector configuration, status, and outbox inspection.
 //!
-//! Read-only. Connecting an account is a separate, deliberate flow — this surface exists so a
-//! user can see what is configured and what failed to deliver, because a queue whose failures
-//! are invisible is worse than no queue.
+//! The listing side exists so a user can see what is configured and what failed to deliver,
+//! because a queue whose failures are invisible is worse than no queue. The connect and
+//! disconnect side is what lets them turn a sink on at all: without a folder for the vault or
+//! a URL for the webhook there is nothing to deliver to.
+//!
+//! Configuration is written to `connector_accounts` and the keychain, and the in-memory
+//! registry is rebuilt from both afterwards — the registry is derived state, never the record.
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
-use notewise_connectors::ConnectorRegistry;
-use notewise_storage::{Database, OutboxRepository};
-use serde::Serialize;
+use notewise_connectors::{
+    build_registry, generate_signing_secret, ConnectorRegistry, CredentialStore, KeychainStore,
+    SIGNING_KEY,
+};
+use notewise_storage::{ConnectorAccountRepository, Database, OutboxRepository};
+use serde::{Deserialize, Serialize};
 
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -78,6 +85,97 @@ pub async fn list_failed_deliveries(
     Ok(Json(describe_failures(&db, 50)?))
 }
 
+/// Where this connector should send things: a folder for the vault, a URL for the webhook.
+#[derive(Debug, Deserialize)]
+pub struct ConnectRequest {
+    pub target: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConnectResponse {
+    pub id: String,
+    /// Returned exactly once, at connect time. Notewise cannot show it again — it lives in
+    /// the OS keychain, and a receiver that loses it must reconnect to get a new one.
+    pub signing_secret: Option<String>,
+}
+
+pub(crate) fn apply_connect(
+    db: &Database,
+    credentials: &dyn CredentialStore,
+    id: &str,
+    request: &ConnectRequest,
+) -> ApiResult<ConnectResponse> {
+    if request.target.trim().is_empty() {
+        return Err(ApiError::BadRequest("target must not be empty".into()));
+    }
+
+    let signing_secret = if id == "webhook" {
+        let secret = generate_signing_secret();
+        credentials
+            .set("webhook", SIGNING_KEY, &secret)
+            .map_err(|e| ApiError::Internal(format!("cannot store the signing secret: {e}")))?;
+        Some(secret.expose().to_string())
+    } else {
+        None
+    };
+
+    ConnectorAccountRepository::new(db).connect(id, Some(&request.target), &[])?;
+
+    Ok(ConnectResponse {
+        id: id.to_string(),
+        signing_secret,
+    })
+}
+
+pub(crate) fn apply_disconnect(
+    db: &Database,
+    credentials: &dyn CredentialStore,
+    id: &str,
+) -> ApiResult<()> {
+    // Credential first: an account row without a credential is inert, but a credential
+    // without an account row is an orphan nothing will ever clean up.
+    credentials
+        .delete(id, SIGNING_KEY)
+        .map_err(|e| ApiError::Internal(format!("cannot remove the credential: {e}")))?;
+    ConnectorAccountRepository::new(db).disconnect(id)?;
+    Ok(())
+}
+
+pub async fn connect_connector(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<ConnectRequest>,
+) -> ApiResult<Json<ConnectResponse>> {
+    let credentials = KeychainStore::new();
+    // Held across synchronous calls only. `Database` is `Send` but not `Sync`, so an `.await`
+    // inside this scope would make the future non-`Send` and axum would reject the route.
+    let db = state.db().await;
+
+    let response = apply_connect(&db, &credentials, &id, &request)?;
+    state.set_connectors(
+        build_registry(&db, &credentials)
+            .map_err(|e| ApiError::Internal(format!("cannot rebuild connectors: {e}")))?,
+    );
+
+    Ok(Json(response))
+}
+
+pub async fn disconnect_connector(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<axum::http::StatusCode> {
+    let credentials = KeychainStore::new();
+    let db = state.db().await;
+
+    apply_disconnect(&db, &credentials, &id)?;
+    state.set_connectors(
+        build_registry(&db, &credentials)
+            .map_err(|e| ApiError::Internal(format!("cannot rebuild connectors: {e}")))?,
+    );
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +218,77 @@ mod tests {
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].connector_id, "webhook");
         assert_eq!(failures[0].last_error.as_deref(), Some("401 unauthorized"));
+    }
+
+    #[test]
+    fn connecting_a_webhook_stores_a_generated_secret() {
+        let db = Database::open_in_memory().unwrap();
+        let store = notewise_connectors::MemoryStore::new();
+
+        let response = apply_connect(
+            &db,
+            &store,
+            "webhook",
+            &ConnectRequest {
+                target: "https://example.com/hook".into(),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            response.signing_secret.is_some(),
+            "the user must be shown it once"
+        );
+        assert!(
+            store
+                .get("webhook", notewise_connectors::SIGNING_KEY)
+                .unwrap()
+                .is_some(),
+            "the secret must be persisted or deliveries cannot be signed"
+        );
+    }
+
+    #[test]
+    fn connecting_a_vault_stores_no_secret() {
+        let db = Database::open_in_memory().unwrap();
+        let store = notewise_connectors::MemoryStore::new();
+
+        let response = apply_connect(
+            &db,
+            &store,
+            "vault",
+            &ConnectRequest {
+                target: "/tmp/notes".into(),
+            },
+        )
+        .unwrap();
+
+        assert!(response.signing_secret.is_none());
+    }
+
+    #[test]
+    fn disconnecting_removes_the_account_and_its_credential() {
+        let db = Database::open_in_memory().unwrap();
+        let store = notewise_connectors::MemoryStore::new();
+        apply_connect(
+            &db,
+            &store,
+            "webhook",
+            &ConnectRequest {
+                target: "https://x/y".into(),
+            },
+        )
+        .unwrap();
+
+        apply_disconnect(&db, &store, "webhook").unwrap();
+
+        assert!(
+            store
+                .get("webhook", notewise_connectors::SIGNING_KEY)
+                .unwrap()
+                .is_none(),
+            "a disconnected connector must not leave a live credential behind"
+        );
     }
 }
 
