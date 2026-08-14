@@ -1,5 +1,6 @@
 import {
   CircleCheck,
+  Repeat,
   Gavel,
   HelpCircle,
   Loader2,
@@ -10,6 +11,7 @@ import {
 
 import type { AmbiguityKind, ClarifyingQuestion, Summary } from "../lib/api";
 import { ActionItems } from "./ActionItems";
+import { MeetingBrief } from "./MeetingBrief";
 
 interface Props {
   /** Null when no meeting is selected — the panel says so rather than showing an empty shell. */
@@ -23,6 +25,8 @@ interface Props {
   summarizing: boolean;
   /** Bumped after a summary run, so newly extracted action items appear without a reload. */
   actionItemsToken: number;
+  /** Jump to another meeting — the previous instance of a recurring series. */
+  onOpenMeeting: (id: string) => void;
   onSummarize: () => void;
   onDismissQuestion: (question: ClarifyingQuestion) => void;
   onClose: () => void;
@@ -106,6 +110,7 @@ export function IntelPanel({
   hasTranscript,
   summarizing,
   actionItemsToken,
+  onOpenMeeting,
   onSummarize,
   onDismissQuestion,
   onClose,
@@ -225,6 +230,12 @@ export function IntelPanel({
           {/* Not driven by `summary`. Action items outlive the summary that proposed them —
               a user can add one by hand before summarizing, and regenerating a summary no
               longer takes the old ones with it — so this reads the meeting, not the summary. */}
+          {/* Above the meeting's own output on purpose: what was already owed is context for
+              what is being decided now, and a brief read after the fact is just a report. */}
+          <Section icon={<Repeat size={13} aria-hidden />} title="Carried over">
+            <MeetingBrief meetingId={meetingId} onOpenMeeting={onOpenMeeting} />
+          </Section>
+
           <Section icon={<CircleCheck size={13} aria-hidden />} title="Action items">
             <ActionItems meetingId={meetingId} refreshToken={actionItemsToken} />
           </Section>

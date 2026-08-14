@@ -429,6 +429,7 @@ export default function App() {
               summary={summaryState.summary}
               summaryLoading={summaryState.loading}
               actionItemsToken={actionItemsToken}
+              onOpenMeeting={setSelectedId}
               questions={selectedId === recordingId ? questions : []}
               isRecording={isRecording && selectedId === recordingId}
               hasTranscript={segments.length > 0}
