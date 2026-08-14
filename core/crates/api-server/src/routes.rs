@@ -43,6 +43,12 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             "/v1/meetings/:id/transcript",
             get(get_transcript).post(append_segments),
         )
+        // Identity only, never audio. The engine already has the audio; what it cannot know is
+        // which of four remote voices is which. See `crate::speakers`.
+        .route(
+            "/v1/meetings/:id/speaker-events",
+            post(crate::speakers::post_speaker_events),
+        )
         .route("/v1/meetings/:id/summarize", post(summarize_meeting))
         .route("/v1/meetings/:id/summary", get(get_summary))
         .route("/v1/meetings/:id/related", get(related_to_meeting))
@@ -651,6 +657,11 @@ struct StoppedBody {
     segments: usize,
     speakers: usize,
     audio_ms: i64,
+    /// Segments given a real name from platform speaker events, or `null` when none were posted.
+    ///
+    /// Distinguishes "the extension was connected and named 40 segments" from "no identity source
+    /// was present", which a UI needs in order to explain anonymous labels rather than look broken.
+    named_from_platform: Option<usize>,
 }
 
 async fn recording_status(State(state): State<Shared>) -> Json<RecordingStatusBody> {
@@ -710,12 +721,35 @@ async fn start_recording(
 /// not, which also makes a duplicate stop a clean 409 instead of an ambiguous success.
 async fn stop_recording(State(state): State<Shared>) -> ApiResult<Json<StoppedBody>> {
     let (meeting_id, outcome) = state.recording().stop().await?;
+
+    // After the pipeline has flushed, so the segments to be named all exist.
+    let named = name_speakers(&state, meeting_id).await;
+
     Ok(Json(StoppedBody {
         meeting_id,
         segments: outcome.segments,
-        speakers: outcome.speakers,
+        // Naming splits one channel into several people, so the count the pipeline reported is
+        // stale as soon as any segment gains a name.
+        speakers: match named {
+            Some(_) => distinct_speakers(&state, meeting_id)
+                .await
+                .unwrap_or(outcome.speakers),
+            None => outcome.speakers,
+        },
         audio_ms: outcome.audio_ms,
+        named_from_platform: named,
     }))
+}
+
+/// How many distinct speakers a meeting's stored segments name.
+async fn distinct_speakers(state: &Shared, meeting_id: Id) -> ApiResult<usize> {
+    let db = state.db().await;
+    let speakers: std::collections::HashSet<String> = MeetingRepository::new(&db)
+        .segments(meeting_id)?
+        .into_iter()
+        .filter_map(|s| s.speaker)
+        .collect();
+    Ok(speakers.len())
 }
 
 impl From<RecordingError> for ApiError {
@@ -815,8 +849,30 @@ async fn end_meeting(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Meeting>> {
     let id = parse_id(&id)?;
+
+    let ended = {
+        let db = state.db().await;
+        MeetingRepository::new(&db).end(id, Utc::now())?
+    };
+
+    // The meeting is over, so no further speaker events are coming and the timeline is as
+    // complete as it will get. Done after the lock is released: naming takes the lock itself.
+    name_speakers(&state, id).await;
+
+    Ok(Json(ended))
+}
+
+/// Apply any accumulated speaker events to a meeting that has just ended.
+///
+/// Both end paths call this — a recording stopping and a meeting being closed directly — because
+/// events can be posted for either, including for a meeting this engine never recorded.
+async fn name_speakers(state: &Shared, meeting_id: Id) -> Option<usize> {
+    // Drained before the database lock is taken, never while holding it: the guard is not `Sync`,
+    // so awaiting with it alive would make this handler's future non-`Send`.
+    let pending = crate::speakers::take_pending(state.speaker_timelines(), meeting_id).await?;
+
     let db = state.db().await;
-    Ok(Json(MeetingRepository::new(&db).end(id, Utc::now())?))
+    crate::speakers::apply_timeline(&db, meeting_id, pending)
 }
 
 // ---------------------------------------------------------------- transcript
@@ -1781,6 +1837,236 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{json}");
         json["id"].as_str().unwrap().parse().unwrap()
+    }
+
+    // ------------------------------------------------------------ speaker events
+
+    /// Store transcript segments already labelled with a channel, as channel recording does.
+    async fn add_remote_segments(app: &AxumRouter, id: Id, spans: &[(&str, i64, i64)]) {
+        let body: Vec<serde_json::Value> = spans
+            .iter()
+            .map(|(text, start, end)| {
+                serde_json::json!({
+                    "text": text, "start_ms": start, "end_ms": end, "speaker": "Others",
+                })
+            })
+            .collect();
+
+        let (status, json) = call(
+            app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::Value::Array(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+
+    async fn speakers_of(app: &AxumRouter, id: Id) -> Vec<Option<String>> {
+        let (status, json) = call(app, get(&format!("/v1/meetings/{id}/transcript"))).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        json.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["speaker"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// The whole feature, end to end over HTTP: four remote people become four names.
+    #[tokio::test]
+    async fn posted_speaker_events_name_the_remote_channel_when_the_meeting_ends() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        add_remote_segments(
+            &app,
+            id,
+            &[
+                ("first", 0, 4_000),
+                ("second", 5_000, 9_000),
+                ("third", 10_000, 14_000),
+                ("fourth", 15_000, 19_000),
+            ],
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speaker-events"),
+                serde_json::json!({
+                    "participants": [
+                        {"id": "p1", "display_name": "Priya"},
+                        {"id": "p2", "display_name": "Marcus"},
+                        {"id": "p3", "display_name": "Ana"},
+                        {"id": "p4", "display_name": "Jun"},
+                    ],
+                    "turns": [
+                        {"participant": "p1", "start_ms": 0,      "end_ms": 5_000},
+                        {"participant": "p2", "start_ms": 5_000,  "end_ms": 10_000},
+                        {"participant": "p3", "start_ms": 10_000, "end_ms": 15_000},
+                        {"participant": "p4", "start_ms": 15_000, "end_ms": 20_000},
+                    ],
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert_eq!(json["participants_known"], 4);
+
+        // Nothing is renamed until the meeting ends.
+        assert_eq!(
+            speakers_of(&app, id).await,
+            vec![Some("Others".into()); 4],
+            "posting events must not relabel mid-meeting"
+        );
+
+        let (status, _) = call(
+            &app,
+            post(&format!("/v1/meetings/{id}/end"), serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert_eq!(
+            speakers_of(&app, id).await,
+            vec![
+                Some("Priya".into()),
+                Some("Marcus".into()),
+                Some("Ana".into()),
+                Some("Jun".into()),
+            ]
+        );
+    }
+
+    /// The local user's turns must not name a segment from the tap that only carries other people.
+    #[tokio::test]
+    async fn the_local_participants_turns_do_not_name_remote_segments() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        add_remote_segments(&app, id, &[("theirs", 0, 4_000)]).await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speaker-events"),
+                serde_json::json!({
+                    "participants": [{"id": "me", "display_name": "Krishna"}],
+                    "turns": [{"participant": "me", "start_ms": 0, "end_ms": 5_000}],
+                    "local_participant_id": "me",
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        call(
+            &app,
+            post(&format!("/v1/meetings/{id}/end"), serde_json::json!({})),
+        )
+        .await;
+
+        assert_eq!(
+            speakers_of(&app, id).await,
+            vec![Some("Others".into())],
+            "the system tap does not carry the local user, so their turns must not label it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_naming_an_unknown_participant_is_rejected() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speaker-events"),
+                serde_json::json!({
+                    "participants": [{"id": "p1", "display_name": "Priya"}],
+                    "turns": [{"participant": "ghost", "start_ms": 0, "end_ms": 1_000}],
+                }),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// A negative timestamp means the producer converted its clock wrongly.
+    #[tokio::test]
+    async fn a_turn_before_the_recording_started_is_rejected() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speaker-events"),
+                serde_json::json!({
+                    "participants": [{"id": "p1", "display_name": "Priya"}],
+                    "turns": [{"participant": "p1", "start_ms": -5_000, "end_ms": 1_000}],
+                }),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn speaker_events_for_an_unknown_meeting_are_a_404() {
+        let (status, _) = call(
+            &app(),
+            post(
+                "/v1/meetings/01890000000000000000000000/speaker-events",
+                serde_json::json!({
+                    "participants": [{"id": "p1", "display_name": "Priya"}],
+                }),
+            ),
+        )
+        .await;
+
+        assert!(
+            status == StatusCode::NOT_FOUND || status == StatusCode::BAD_REQUEST,
+            "got {status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_batch_of_speaker_events_is_rejected() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speaker-events"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// A meeting recorded without the extension must end exactly as it did before.
+    #[tokio::test]
+    async fn ending_a_meeting_with_no_speaker_events_changes_nothing() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_remote_segments(&app, id, &[("theirs", 0, 4_000)]).await;
+
+        let (status, _) = call(
+            &app,
+            post(&format!("/v1/meetings/{id}/end"), serde_json::json!({})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(speakers_of(&app, id).await, vec![Some("Others".into())]);
     }
 
     #[tokio::test]

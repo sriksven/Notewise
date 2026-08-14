@@ -687,6 +687,32 @@ impl ChannelPipeline {
     }
 }
 
+/// Re-label one channel's stored segments, after the recording has already finished.
+///
+/// # Why this exists separately from [`ChannelInput::with_diarizer`]
+///
+/// That takes its diarizer when the pipeline is *built*, which is the right shape when the
+/// evidence is already in hand — an import, or a timeline captured earlier. It cannot serve a
+/// browser extension reporting who is speaking *during* the meeting: at pipeline-construction time
+/// that timeline is empty, and the recorder is deliberately not given shared mutable state to read
+/// later.
+///
+/// So the live path accumulates events elsewhere and calls this when the meeting ends. It is the
+/// same pass [`ChannelPipeline`] runs at stop, with the same guarantee: a segment the diarizer
+/// declines to label keeps its channel label.
+///
+/// Returns how many segments were given a more specific speaker.
+pub fn refine_channel_speakers(
+    db: &Database,
+    meeting_id: Id,
+    channel: Channel,
+    diarizer: &dyn Diarizer,
+) -> Result<usize> {
+    refine_channel(db, meeting_id, channel, |transcript| {
+        Ok(diarizer.diarize(transcript)?)
+    })
+}
+
 /// Re-label one channel's stored segments using a per-channel diarizer.
 ///
 /// # Identifying a channel's segments

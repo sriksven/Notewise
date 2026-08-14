@@ -1290,6 +1290,7 @@ dependencies = [
  "http-body-util",
  "notewise-ai-router",
  "notewise-audio-capture",
+ "notewise-diarization",
  "notewise-graph",
  "notewise-recorder",
  "notewise-storage",

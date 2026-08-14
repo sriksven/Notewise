@@ -228,6 +228,37 @@ impl SpeakerTimeline {
             .map(|p| p.display_name.as_str())
     }
 
+    /// A copy of this timeline with one participant's turns removed.
+    ///
+    /// # Why the local user has to come out
+    ///
+    /// The system audio tap records what the machine *plays*, which is everyone except the person
+    /// at it — their own voice goes to the microphone on a separate channel. A platform roster does
+    /// not make that distinction: it reports the local user's turns alongside everyone else's.
+    ///
+    /// Applied unfiltered to the system channel, those turns are a hazard. When the user speaks and
+    /// something bleeds into the tap, or a remote segment merely straddles their turn, the segment
+    /// is named after the one person who provably did not say it.
+    ///
+    /// Whoever produces the events knows which participant is local — a meeting UI marks the user's
+    /// own tile — so the caller removes them before refining the remote channel.
+    pub fn excluding(&self, id: &ParticipantId) -> Self {
+        Self {
+            participants: self
+                .participants
+                .iter()
+                .filter(|p| &p.id != id)
+                .cloned()
+                .collect(),
+            turns: self
+                .turns
+                .iter()
+                .filter(|t| &t.participant != id)
+                .cloned()
+                .collect(),
+        }
+    }
+
     /// The participant who did the most talking during `[start_ms, end_ms)`.
     ///
     /// # Why the longest overlap, and what that costs

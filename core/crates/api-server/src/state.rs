@@ -33,6 +33,13 @@ pub struct AppState {
     ai: std::sync::RwLock<Arc<AiRouter>>,
     recording: RecordingManager,
     downloads: DownloadManager,
+    /// Speaker events posted for meetings that have not ended yet.
+    ///
+    /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
+    /// the extension reports who was speaking whether or not this engine recorded the audio. An
+    /// entry is drained when its meeting ends — see
+    /// [`crate::speakers::apply_pending_timeline`].
+    speaker_timelines: crate::speakers::PendingTimelines,
 }
 
 impl AppState {
@@ -45,6 +52,7 @@ impl AppState {
             ai: std::sync::RwLock::new(Arc::new(ai)),
             recording: RecordingManager::new(),
             downloads: DownloadManager::new(),
+            speaker_timelines: Default::default(),
         }
     }
 
@@ -74,6 +82,11 @@ impl AppState {
     /// Model downloads, running and finished.
     pub fn downloads(&self) -> &DownloadManager {
         &self.downloads
+    }
+
+    /// Speaker events accumulated for meetings still in progress.
+    pub fn speaker_timelines(&self) -> &crate::speakers::PendingTimelines {
+        &self.speaker_timelines
     }
 
     /// The model store this engine reads and writes.
