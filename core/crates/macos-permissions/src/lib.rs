@@ -172,9 +172,104 @@ pub fn request_screen_recording() -> bool {
     false
 }
 
+#[cfg(target_os = "macos")]
+mod signature {
+    use std::ffi::c_void;
+
+    type OSStatus = i32;
+
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        /// A handle on the running process's own code signature.
+        fn SecCodeCopySelf(flags: u32, out: *mut *const c_void) -> OSStatus;
+
+        /// Signing details as a dictionary. `kSecCSSigningInformation` is required for the
+        /// team identifier to be included.
+        fn SecCodeCopySigningInformation(
+            code: *const c_void,
+            flags: u32,
+            information: *mut *const c_void,
+        ) -> OSStatus;
+
+        static kSecCodeInfoTeamIdentifier: *const c_void;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    /// `kSecCSSigningInformation`. Without it the dictionary omits the team identifier.
+    const SIGNING_INFORMATION: u32 = 2;
+
+    /// Whether this build carries a team identifier — the mark of a Developer ID or App Store
+    /// signature, as opposed to ad-hoc or unsigned.
+    ///
+    /// Conservative on failure: an error reading our own signature answers `true`, so a build
+    /// this cannot inspect is never told it lacks a capability it may well have.
+    pub fn has_team_identifier() -> bool {
+        // SAFETY: `SecCodeCopySelf` writes one owned reference on success, which is released
+        // below. The dictionary lookup borrows — `CFDictionaryGetValue` returns an unowned
+        // pointer — so only the two copies obtained here are released, and neither is used
+        // afterwards. All pointers are checked before use.
+        unsafe {
+            let mut code: *const c_void = std::ptr::null();
+            if SecCodeCopySelf(0, &mut code) != 0 || code.is_null() {
+                return true;
+            }
+
+            let mut info: *const c_void = std::ptr::null();
+            let status = SecCodeCopySigningInformation(code, SIGNING_INFORMATION, &mut info);
+            CFRelease(code);
+
+            if status != 0 || info.is_null() {
+                return true;
+            }
+
+            let team = CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier);
+            CFRelease(info);
+
+            !team.is_null()
+        }
+    }
+}
+
+/// Whether macOS will let this build hold a screen-recording grant at all.
+///
+/// It will not for an ad-hoc or unsigned build. The permission is attached to a verifiable app
+/// identity, and without one `CGRequestScreenCaptureAccess` returns false immediately, raises no
+/// dialog, and writes nothing to TCC — so the app never appears in the Privacy pane, and there
+/// is no setting anywhere that adds it.
+///
+/// This exists so the product can say that, instead of asking forever for something the build
+/// cannot obtain. The microphone is a lower bar and is unaffected: an ad-hoc build holds that
+/// grant perfectly well, which is why one of the two permissions works and the other never does.
+#[cfg(target_os = "macos")]
+pub fn can_hold_screen_recording() -> bool {
+    signature::has_team_identifier()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn can_hold_screen_recording() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test binary is ad-hoc signed, so this is the case the product hits on every
+    /// development build: no team identifier, therefore no screen recording, therefore the
+    /// capability must be reported unavailable rather than demanded forever.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn an_ad_hoc_build_cannot_hold_screen_recording() {
+        assert!(
+            !can_hold_screen_recording(),
+            "cargo's test binary is not Developer ID signed, so this must be false"
+        );
+    }
 
     /// Calling it must not prompt, panic, or block — this runs on every readiness check, on a
     /// machine whose actual grant we cannot control from a test.

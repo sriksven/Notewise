@@ -151,11 +151,39 @@ fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
         .map(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
         .unwrap_or(false);
 
-    (!in_bundle).then(|| {
-        "system audio needs macOS to recognise this as an application — it is running as a \
-         loose binary, which cannot be granted screen recording"
-            .to_string()
-    })
+    if !in_bundle {
+        return Some(
+            "system audio needs macOS to recognise this as an application — it is running as a \
+             loose binary, which cannot be granted screen recording"
+                .to_string(),
+        );
+    }
+
+    // A bundle is necessary and not sufficient. Screen recording attaches to a verifiable app
+    // identity, so an ad-hoc or unsigned build cannot hold it however it is packaged — the
+    // request returns false with no dialog and writes nothing, and the app never appears in the
+    // Privacy pane to be switched on.
+    //
+    // Reported as unavailable rather than denied because `required` follows from this, and a
+    // capability nobody can grant must not gate anyone. Left as "denied" it would leave the
+    // setup step permanently unsatisfied and the banner permanently complaining about a build
+    // property the user cannot change.
+    //
+    // Feature-gated because the crate that reads the signature is an optional dependency of
+    // `os-capture`. Without that feature `unavailable_reason` has already returned, so this is
+    // unreachable rather than merely unused — but it still has to compile.
+    #[cfg(feature = "os-capture")]
+    {
+        return (!notewise_macos_permissions::can_hold_screen_recording()).then(|| {
+            "system audio needs a signed release build — macOS attaches screen recording to a \
+             verifiable app identity, and this build is ad-hoc signed, so it cannot be added in \
+             System Settings"
+                .to_string()
+        });
+    }
+
+    #[cfg(not(feature = "os-capture"))]
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
