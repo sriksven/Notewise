@@ -20,6 +20,9 @@ pub enum NodeKind {
     Ticket,
     EmailDraft,
     Notification,
+    /// An artifact that lives in another system — a Linear issue, a calendar event, a file
+    /// in a user's vault. Notewise records it but does not own it.
+    ExternalItem,
 }
 
 impl NodeKind {
@@ -35,6 +38,7 @@ impl NodeKind {
         NodeKind::Ticket,
         NodeKind::EmailDraft,
         NodeKind::Notification,
+        NodeKind::ExternalItem,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -50,6 +54,7 @@ impl NodeKind {
             NodeKind::Ticket => "ticket",
             NodeKind::EmailDraft => "email_draft",
             NodeKind::Notification => "notification",
+            NodeKind::ExternalItem => "external_item",
         }
     }
 
@@ -88,6 +93,8 @@ pub enum EdgeKind {
     GeneratedFrom,
     /// A notification's trigger.
     NotifiesAbout,
+    /// This node is mirrored in an external system, e.g. action item → Linear issue.
+    SyncedTo,
 }
 
 impl EdgeKind {
@@ -100,6 +107,7 @@ impl EdgeKind {
         EdgeKind::Supersedes,
         EdgeKind::GeneratedFrom,
         EdgeKind::NotifiesAbout,
+        EdgeKind::SyncedTo,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -112,6 +120,7 @@ impl EdgeKind {
             EdgeKind::Supersedes => "supersedes",
             EdgeKind::GeneratedFrom => "generated_from",
             EdgeKind::NotifiesAbout => "notifies_about",
+            EdgeKind::SyncedTo => "synced_to",
         }
     }
 
@@ -165,7 +174,16 @@ mod tests {
     #[test]
     fn all_lists_are_exhaustive() {
         // A missing entry in ALL silently breaks `parse`, so guard the count.
-        assert_eq!(NodeKind::ALL.len(), 11);
-        assert_eq!(EdgeKind::ALL.len(), 8);
+        assert_eq!(NodeKind::ALL.len(), 12);
+        assert_eq!(EdgeKind::ALL.len(), 9);
+    }
+
+    #[test]
+    fn external_items_are_reachable_kinds() {
+        assert_eq!(
+            NodeKind::parse("external_item"),
+            Some(NodeKind::ExternalItem)
+        );
+        assert_eq!(EdgeKind::parse("synced_to"), Some(EdgeKind::SyncedTo));
     }
 }
