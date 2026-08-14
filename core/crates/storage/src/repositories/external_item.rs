@@ -46,10 +46,10 @@ impl<'a> ExternalItemRepository<'a> {
     /// Insert, or update the existing row for this `(connector_id, external_id)`.
     pub fn upsert(&self, new: NewExternalItem) -> Result<ExternalItem> {
         let now = Utc::now();
-        let id = self
-            .find(&new.connector_id, &new.external_id)?
-            .map(|existing| existing.id)
-            .unwrap_or_else(Id::new);
+        // A fresh id unconditionally: `DO UPDATE SET` below never assigns `id`, so on
+        // conflict SQLite keeps the existing row's own id and discards this one. Looking the
+        // row up first to reuse its id would cost a third round trip and change nothing.
+        let id = Id::new();
 
         self.db.conn().execute(
             "INSERT INTO external_items
