@@ -5,6 +5,7 @@
 
 mod comms;
 mod edge;
+mod external_item;
 mod meeting;
 mod note;
 mod search;
@@ -15,6 +16,7 @@ mod workspace;
 
 pub use comms::{EmailDraftRepository, NewEmailDraft, NewNotification, NotificationRepository};
 pub use edge::{EdgeRecord, EdgeRepository, NewEdge};
+pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};
 pub use meeting::{MeetingRepository, NewMeeting, NewTranscriptSegment};
 pub use note::{NewNote, NoteRepository};
 pub use search::{SearchHit, SearchRepository};
