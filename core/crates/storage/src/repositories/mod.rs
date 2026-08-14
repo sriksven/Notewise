@@ -4,6 +4,7 @@
 //! caller can hold several at once without cloning connections.
 
 mod comms;
+mod connector_account;
 mod edge;
 mod external_item;
 mod meeting;
@@ -15,6 +16,7 @@ mod ticket;
 mod workspace;
 
 pub use comms::{EmailDraftRepository, NewEmailDraft, NewNotification, NotificationRepository};
+pub use connector_account::{AccountStatus, ConnectorAccount, ConnectorAccountRepository};
 pub use edge::{EdgeRecord, EdgeRepository, NewEdge};
 pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};
 pub use meeting::{MeetingRepository, NewMeeting, NewTranscriptSegment};
