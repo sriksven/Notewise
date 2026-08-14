@@ -139,34 +139,40 @@ impl<'a> OutboxRepository<'a> {
         let leased_until = now + lease;
 
         let conn = self.db.conn();
+
+        // Selecting due rows and leasing them in a second statement would leave a window in
+        // which another dispatcher reads the same row before either lease lands, and both
+        // would deliver it — the duplicate push this table exists to prevent. Nothing below
+        // guards against that: `Database::conn` hands out a bare connection with no lock, and
+        // `Database::path` exists precisely so a second process can open its own. So the
+        // claim is one statement, which SQLite runs in its own implicit transaction.
+        //
+        // `RETURNING` does not promise output order. That is fine — the `ORDER BY` inside the
+        // subquery is what picks the oldest-due rows; the order they come back in afterwards
+        // does not matter to a caller that delivers each independently.
         let sql = format!(
-            "SELECT {COLUMNS} FROM connector_outbox
-             WHERE status IN ('pending', 'in_flight')
-               AND next_attempt_at <= ?1
-               AND (leased_until IS NULL OR leased_until <= ?1)
-             ORDER BY next_attempt_at
-             LIMIT ?2"
+            "UPDATE connector_outbox
+                SET status = ?1, leased_until = ?2
+              WHERE id IN (
+                    SELECT id FROM connector_outbox
+                     WHERE status IN ('pending', 'in_flight')
+                       AND next_attempt_at <= ?3
+                       AND (leased_until IS NULL OR leased_until <= ?3)
+                     ORDER BY next_attempt_at
+                     LIMIT ?4
+              )
+          RETURNING {COLUMNS}"
         );
+
         let mut stmt = conn.prepare(&sql)?;
-        let due: Vec<OutboxRecord> = stmt
-            .query_map(rusqlite::params![now, limit], |row| Ok(read_row(row)))?
+        let claimed: Vec<OutboxRecord> = stmt
+            .query_map(
+                rusqlite::params![OutboxStatus::InFlight.as_str(), leased_until, now, limit],
+                |row| Ok(read_row(row)),
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
-        drop(stmt);
-
-        let mut claimed = Vec::with_capacity(due.len());
-        for row in due {
-            self.db.conn().execute(
-                "UPDATE connector_outbox SET status = ?2, leased_until = ?3 WHERE id = ?1",
-                rusqlite::params![row.id, OutboxStatus::InFlight.as_str(), leased_until],
-            )?;
-            claimed.push(OutboxRecord {
-                status: OutboxStatus::InFlight,
-                leased_until: Some(leased_until),
-                ..row
-            });
-        }
 
         Ok(claimed)
     }
