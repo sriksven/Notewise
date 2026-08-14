@@ -90,11 +90,21 @@ impl SinkConnector for WebhookSink {
 
         let status = response.status();
         if status.is_success() {
+            // Identity is the node, not the payload. `external_items` is keyed on
+            // `(connector_id, external_id)` and the dispatcher upserts on it, so a
+            // content-derived id — the signature, say — would mint a fresh row and a fresh
+            // `SyncedTo` edge on every edit, growing without bound and leaving
+            // `existing_ref` to pick arbitrarily among them. A webhook receiver issues no id
+            // of its own, so a synthetic one derived from the node is what gives the
+            // intended "one record per synced node".
+            //
+            // The signature goes in `remote_version`, which is exactly what that field is
+            // for: which version of the content the remote side last received.
             return Ok(ExternalRef {
-                external_id: signature,
+                external_id: format!("{}:{}", outbound.node_kind, outbound.node_id),
                 url: Some(self.url.clone()),
                 title: None,
-                remote_version: None,
+                remote_version: Some(signature),
             });
         }
 
@@ -194,6 +204,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(signature, sign(&Secret::new("shh"), body));
+    }
+
+    #[tokio::test]
+    async fn identity_is_the_node_not_the_payload() {
+        let (url, _) = receiver(200).await;
+        let sink = WebhookSink::new(url, Secret::new("shh"));
+
+        let first = outbound();
+        let mut second = first.clone();
+        second.payload = serde_json::json!({"text": "Ship Monday instead"});
+
+        let a = sink.push(&first).await.unwrap();
+        let b = sink.push(&second).await.unwrap();
+
+        assert_eq!(
+            a.external_id, b.external_id,
+            "editing content must not mint a second external item for the same node"
+        );
+        assert_ne!(
+            a.remote_version, b.remote_version,
+            "but which version was delivered must still be distinguishable"
+        );
     }
 
     #[tokio::test]
