@@ -34,6 +34,5 @@ pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy};
 pub use error::{ConnectorError, Result};
 pub use keychain::KeychainStore;
 pub use registry::ConnectorRegistry;
-// `sinks` also grows WebhookSink (Task 13), which stays pending until that task lands.
-pub use sinks::{MockConnector, VaultSink};
+pub use sinks::{MockConnector, VaultSink, WebhookSink, SIGNATURE_HEADER};
 pub use types::{Cursor, ExternalRef, Health, Inbound, Operation, Outbound, PullBatch};
