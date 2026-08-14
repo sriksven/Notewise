@@ -23,7 +23,7 @@ mod connector;
 mod credentials;
 // mod dispatcher;  // Task 11: Dispatcher, DispatchReport, RetryPolicy
 mod error;
-// mod keychain;    // Task 10: KeychainStore
+mod keychain;
 // mod registry;    // Task 11: ConnectorRegistry
 mod sinks;
 mod types;
@@ -32,7 +32,7 @@ pub use connector::{Connector, SinkConnector, SourceConnector};
 pub use credentials::{CredentialStore, MemoryStore, Secret};
 // pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy}; // Task 11
 pub use error::{ConnectorError, Result};
-// pub use keychain::KeychainStore; // Task 10
+pub use keychain::KeychainStore;
 // pub use registry::ConnectorRegistry; // Task 11
 // `sinks` also grows VaultSink (Task 12) and WebhookSink (Task 13); only MockConnector exists
 // so far, so it is the only one re-exported here.
