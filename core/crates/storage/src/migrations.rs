@@ -208,9 +208,9 @@ const MIGRATIONS: &[&str] = &[
         DELETE FROM search_index WHERE entity_kind = 'transcript_segment' AND entity_id = old.id;
     END;
     "#,
-    // Application-level configuration. A generic key/value table rather than an `onboarding`
-    // table: this is not a domain object, it has no edges, and the next setting to need
-    // persisting should not cost another migration.
+    // v4 — application-level configuration. A generic key/value table rather than an
+    // `onboarding` table: this is not a domain object, it has no edges, and the next setting
+    // to need persisting should not cost another migration.
     r#"
     CREATE TABLE app_settings (
         key        TEXT PRIMARY KEY,
@@ -218,7 +218,7 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     "#,
-    // v4 — the connector seam: external artifact records, per-connector account state, and
+    // v5 — the connector seam: external artifact records, per-connector account state, and
     // the outbound delivery queue. No tokens live here; credentials go to the OS keychain.
     r#"
     CREATE TABLE external_items (
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn v4_creates_connector_tables() {
+    fn v5_creates_connector_tables() {
         let mut conn = fresh();
         migrate(&mut conn).unwrap();
 
