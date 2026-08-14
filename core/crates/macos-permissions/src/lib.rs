@@ -58,6 +58,60 @@ pub fn microphone() -> Authorization {
     Authorization::Unknown
 }
 
+/// Ask for the microphone, raising the system dialog if it has never been asked.
+///
+/// This is the call that puts the app in the Privacy pane's Microphone list. Opening an audio
+/// stream is *not* — on macOS an input stream opens happily without a grant and delivers
+/// silence, so treating a successful open as permission reports a grant that does not exist and
+/// records nothing.
+///
+/// Blocks until the user answers. The dialog is modal to them, not to the app, so a caller must
+/// be on a thread that can afford to wait.
+#[cfg(target_os = "macos")]
+pub fn request_microphone() -> Authorization {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use block2::StackBlock;
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
+
+    // Already answered: `requestAccess` would return the standing answer without a dialog, but
+    // asking outright is clearer and avoids waiting on a callback that fires immediately.
+    match microphone() {
+        Authorization::NotDetermined => {}
+        settled => return settled,
+    }
+
+    let Some(media_type) = (unsafe { AVMediaTypeAudio }) else {
+        return Authorization::Unknown;
+    };
+
+    let (tx, rx) = mpsc::channel();
+    let handler = StackBlock::new(move |granted: Bool| {
+        // The receiver may already be gone if the wait below timed out. Nothing to do about a
+        // late answer except drop it.
+        let _ = tx.send(granted.as_bool());
+    });
+
+    unsafe {
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+    }
+
+    // Generous, because the bound is a person noticing a dialog. A timeout here is not a denial
+    // — it means we still do not know, and the next status read will say so.
+    match rx.recv_timeout(Duration::from_secs(120)) {
+        Ok(true) => Authorization::Granted,
+        Ok(false) => Authorization::Denied,
+        Err(_) => microphone(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_microphone() -> Authorization {
+    Authorization::Unknown
+}
+
 #[cfg(target_os = "macos")]
 mod screen {
     // CoreGraphics, not AVFoundation: screen recording is not an `AVCaptureDevice` media type,
@@ -66,12 +120,20 @@ mod screen {
     extern "C" {
         /// Whether this process currently holds the screen-recording grant. Does not prompt.
         fn CGPreflightScreenCaptureAccess() -> bool;
+
+        /// Prompt for the screen-recording grant, registering this app with TCC.
+        fn CGRequestScreenCaptureAccess() -> bool;
     }
 
     pub fn granted() -> bool {
         // The function takes no arguments, returns a plain bool, and only reads TCC state for
         // the calling process.
         unsafe { CGPreflightScreenCaptureAccess() }
+    }
+
+    pub fn request() -> bool {
+        // Same shape: no arguments, plain bool. The side effect is TCC's, not memory's.
+        unsafe { CGRequestScreenCaptureAccess() }
     }
 }
 
@@ -87,6 +149,26 @@ pub fn screen_recording_granted() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub fn screen_recording_granted() -> bool {
+    false
+}
+
+/// Ask for screen recording, which is what gates system audio.
+///
+/// This is the call that makes the app appear under Privacy & Security → Screen & System Audio
+/// Recording. Attempting a ScreenCaptureKit stream is not: it fails immediately when the grant
+/// is missing, without registering anything, so the app never shows up in the list the error
+/// message tells the user to go to.
+///
+/// Returns the grant as it stands after asking. macOS commonly answers `false` even when the
+/// user says yes, because the grant applies from the next launch — so a caller must treat
+/// `false` as "not yet", not as a refusal to be recorded forever.
+#[cfg(target_os = "macos")]
+pub fn request_screen_recording() -> bool {
+    screen::request()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_screen_recording() -> bool {
     false
 }
 

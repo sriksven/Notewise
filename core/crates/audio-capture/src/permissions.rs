@@ -163,33 +163,33 @@ fn outside_app_bundle_reason(_kind: CaptureKind) -> Option<String> {
     None
 }
 
-/// Open the device briefly and map the outcome.
+/// Ask the operating system, by whichever route it will actually answer.
 #[cfg(feature = "os-capture")]
 fn probe(kind: CaptureKind) -> PermissionStatus {
-    use crate::{CaptureConfig, CaptureError, MicrophoneSource};
+    #[cfg(target_os = "macos")]
+    use crate::{CaptureConfig, CaptureError};
 
     match kind {
+        // macOS answers this properly, and opening a stream does not. An input stream opens
+        // without a grant and delivers silence, so a successful open proved nothing — it
+        // reported `Granted` on a machine that had never been asked, no dialog appeared, and
+        // the readiness read straight afterwards disagreed with itself.
+        #[cfg(target_os = "macos")]
         CaptureKind::Microphone => {
-            // Opening and immediately dropping is the whole probe: on macOS this is what
-            // raises the TCC dialog on first call, and what returns a permission error once
-            // the user has declined.
-            let config = CaptureConfig {
-                kind: CaptureKind::Microphone,
-                ..CaptureConfig::default()
-            };
+            use notewise_macos_permissions::Authorization;
 
-            match MicrophoneSource::open(&config) {
-                Ok(source) => {
-                    drop(source);
-                    PermissionStatus::Granted
-                }
-                Err(CaptureError::PermissionDenied { .. }) => PermissionStatus::Denied,
-                Err(e) if is_permission_error(&e.to_string()) => PermissionStatus::Denied,
-                // A missing device is not a denied permission, and sending a user to System
-                // Settings over an unplugged microphone would send them nowhere useful.
-                Err(e) => PermissionStatus::Unavailable(e.to_string()),
+            match notewise_macos_permissions::request_microphone() {
+                Authorization::Granted => PermissionStatus::Granted,
+                Authorization::Denied => PermissionStatus::Denied,
+                Authorization::NotDetermined => PermissionStatus::NotRequested,
+                // AVFoundation could not answer. Fall back to opening the device, which at
+                // least distinguishes a missing microphone from a permission problem.
+                Authorization::Unknown => open_microphone(),
             }
         }
+
+        #[cfg(not(target_os = "macos"))]
+        CaptureKind::Microphone => open_microphone(),
         // Opening the tap is the probe, for the same reason as the microphone: on macOS the
         // first attempt is what raises the Screen Recording dialog, and a refused grant is
         // what comes back once the user has declined.
@@ -198,6 +198,17 @@ fn probe(kind: CaptureKind) -> PermissionStatus {
         // the TCC record without proving a stream can actually start.
         #[cfg(target_os = "macos")]
         CaptureKind::SystemAudio => {
+            // Ask CoreGraphics first. This is what registers the app with TCC and puts it in
+            // Privacy & Security → Screen & System Audio Recording. Reaching for a
+            // ScreenCaptureKit stream instead fails immediately without registering anything,
+            // so the app never appeared in the very list the error told the user to open.
+            if notewise_macos_permissions::request_screen_recording() {
+                return PermissionStatus::Granted;
+            }
+
+            // Now that the app is registered, try the stream. It is the stronger check — a TCC
+            // record does not prove a stream can start — and it is what tells apart "declined"
+            // from "no display to capture".
             use crate::system_audio::SystemAudioSource;
 
             let config = CaptureConfig {
@@ -216,6 +227,32 @@ fn probe(kind: CaptureKind) -> PermissionStatus {
             }
         }
         other => PermissionStatus::Unavailable(format!("no probe for {other:?}")),
+    }
+}
+
+/// Open the microphone briefly and map the outcome.
+///
+/// The fallback, not the answer. It distinguishes a missing device from a permission error, but
+/// it cannot prove a grant: on macOS a stream opens without one and delivers silence.
+#[cfg(feature = "os-capture")]
+fn open_microphone() -> PermissionStatus {
+    use crate::{CaptureConfig, CaptureError, MicrophoneSource};
+
+    let config = CaptureConfig {
+        kind: CaptureKind::Microphone,
+        ..CaptureConfig::default()
+    };
+
+    match MicrophoneSource::open(&config) {
+        Ok(source) => {
+            drop(source);
+            PermissionStatus::Granted
+        }
+        Err(CaptureError::PermissionDenied { .. }) => PermissionStatus::Denied,
+        Err(e) if is_permission_error(&e.to_string()) => PermissionStatus::Denied,
+        // A missing device is not a denied permission, and sending a user to System Settings
+        // over an unplugged microphone would send them nowhere useful.
+        Err(e) => PermissionStatus::Unavailable(e.to_string()),
     }
 }
 

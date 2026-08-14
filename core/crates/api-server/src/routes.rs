@@ -1367,6 +1367,31 @@ async fn request_permission(
     Ok(Json(readiness))
 }
 
+/// What a refusal means, when "you declined this" is not the whole story.
+///
+/// Screen recording has a failure that looks identical to a decline and is not one: macOS will
+/// not add an app to the Screen & System Audio Recording list unless it carries a distributable
+/// signature. `CGRequestScreenCaptureAccess` then returns false immediately, no dialog appears,
+/// and nothing is written to TCC — so "grant it in System Settings" points at a list the app is
+/// missing from, with no way to put it there.
+///
+/// Both outcomes are covered rather than guessed between, because the two are indistinguishable
+/// from inside the process. Telling the user what to look for lets them tell the difference in
+/// one glance, which is more use than a confident wrong diagnosis.
+#[cfg(feature = "record")]
+fn denial_detail(kind: CaptureKindArg) -> Option<String> {
+    if !matches!(kind, CaptureKindArg::SystemAudio) || !cfg!(target_os = "macos") {
+        return None;
+    }
+
+    Some(
+        "Look under Privacy & Security → Screen & System Audio Recording. If Notewise is \
+         listed, switch it on and press Re-check. If it is not listed, macOS refused to \
+         register this build — that needs a signed release build, and no setting will add it."
+            .into(),
+    )
+}
+
 /// Assemble the readiness snapshot both setup routes work from.
 async fn readiness(state: &AppState) -> ApiResult<crate::setup::SetupReadiness> {
     use crate::setup::{PermissionsReadiness, SetupReadiness, StepReadiness, Steps};
@@ -1424,6 +1449,7 @@ fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::Per
     {
         use notewise_audio_capture::{CaptureKind, PermissionStatus};
 
+        let requested = kind;
         let kind = match kind {
             CaptureKindArg::Microphone => CaptureKind::Microphone,
             CaptureKindArg::SystemAudio => CaptureKind::SystemAudio,
@@ -1438,7 +1464,7 @@ fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::Per
         let (status, detail) = match probed {
             PermissionStatus::NotRequested => ("not_requested", None),
             PermissionStatus::Granted => ("granted", None),
-            PermissionStatus::Denied => ("denied", None),
+            PermissionStatus::Denied => ("denied", denial_detail(requested)),
             PermissionStatus::Unavailable(reason) => ("unavailable", Some(reason)),
         };
 
