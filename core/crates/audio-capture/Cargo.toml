@@ -18,8 +18,13 @@ cpal = { version = "0.15", optional = true }
 
 rustfft.workspace = true
 
+# System-audio capture on macOS. Safe bindings, so this crate keeps `forbid(unsafe_code)`.
+# macOS-only by target, because ScreenCaptureKit does not exist elsewhere.
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "8", optional = true }
+
 [features]
 default = []
 # Real OS capture backends. Off by default: they pull platform audio SDKs and, on
 # macOS, require a signed bundle with a TCC grant that cannot be obtained headlessly.
-os-capture = ["dep:cpal"]
+os-capture = ["dep:cpal", "dep:screencapturekit"]

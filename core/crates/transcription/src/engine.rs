@@ -96,8 +96,13 @@ pub struct WhisperEngine {
     #[allow(dead_code)]
     language: Option<String>,
 
+    /// The loaded weights, shared.
+    ///
+    /// Behind an `Arc` so [`WhisperEngine::sibling`] can hand a second channel the same model
+    /// rather than a second copy of it. Decoding creates a fresh state per utterance, so the
+    /// context itself carries no per-stream state to collide over.
     #[cfg(feature = "whisper")]
-    context: whisper_rs::WhisperContext,
+    context: std::sync::Arc<whisper_rs::WhisperContext>,
 }
 
 // `whisper_rs::WhisperContext` is not `Debug`, so this is written by hand. It reports the
@@ -138,8 +143,28 @@ impl WhisperEngine {
             stream: UtteranceBuffer::new(AudioFormat::transcription().sample_rate.hz()),
             language: None,
             #[cfg(feature = "whisper")]
-            context,
+            context: std::sync::Arc::new(context),
         })
+    }
+
+    /// A second engine sharing this one's loaded model.
+    ///
+    /// Recording a call means transcribing the microphone and the system tap as two separate
+    /// streams. Building a second engine with [`WhisperEngine::new`] would load the weights
+    /// twice — 148 MB for `base.en`, over a gigabyte for `large` — to no purpose: decoding
+    /// allocates a fresh state per utterance, so one set of weights serves both channels.
+    ///
+    /// The audio buffering is *not* shared. That is the point: each channel needs its own
+    /// speech gate and its own clock, or the two streams would cut each other's phrases.
+    pub fn sibling(&self) -> Self {
+        Self {
+            model: self.model.clone(),
+            store: self.store.clone(),
+            stream: UtteranceBuffer::new(AudioFormat::transcription().sample_rate.hz()),
+            language: self.language.clone(),
+            #[cfg(feature = "whisper")]
+            context: std::sync::Arc::clone(&self.context),
+        }
     }
 
     pub fn model(&self) -> &ModelInfo {

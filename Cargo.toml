@@ -11,6 +11,7 @@ members = [
     "core/crates/api-server",
     "core/crates/mcp-server",
     "core/crates/recorder",
+    "core/crates/eval",
     "core/crates/ffi",
     "apps/cli",
 ]

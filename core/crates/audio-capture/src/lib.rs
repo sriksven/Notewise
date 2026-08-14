@@ -15,9 +15,14 @@
 //! producing nothing.
 //!
 //! **Microphone capture is implemented** ([`MicrophoneSource`], `os-capture` feature) — it
-//! needs only the OS microphone permission, no signed bundle. **System audio is not**: on
-//! macOS it requires a ScreenCaptureKit grant against a signed bundle, a TCC prompt no build
-//! process can answer.
+//! needs only the OS microphone permission, no signed bundle.
+//!
+//! **System audio is implemented on macOS** ([`SystemAudioSource`], `os-capture` feature),
+//! via ScreenCaptureKit. It is written and it compiles, but it cannot be *verified* by a test
+//! run: it needs the Screen Recording grant, and TCC issues that against a signed bundle
+//! identifier which a `cargo test` binary does not have. Its tests are therefore `#[ignore]`d
+//! with that reason and are runnable from a signed build. Windows (WASAPI loopback) and Linux
+//! (PipeWire) remain unimplemented and return [`CaptureError::Unsupported`].
 //!
 //! [`FileSource`] and [`SyntheticSource`] are real and work everywhere, which is what lets
 //! the transcription pipeline above be developed and tested with no audio hardware.
@@ -33,6 +38,8 @@ mod microphone;
 mod mixer;
 mod permissions;
 mod source;
+#[cfg(all(feature = "os-capture", target_os = "macos"))]
+mod system_audio;
 mod vad;
 
 pub use convert::{resample_linear, rms, to_mono};
@@ -43,6 +50,8 @@ pub use microphone::{input_devices, DeviceInfo, MicrophoneSource};
 pub use mixer::{soft_clip, MixedSource, Mixer};
 pub use permissions::{permission_status, request_permission, PermissionStatus};
 pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticSource, Waveform};
+#[cfg(all(feature = "os-capture", target_os = "macos"))]
+pub use system_audio::SystemAudioSource;
 pub use vad::{Vad, VadConfig, VadReport};
 
 use thiserror::Error;
@@ -57,6 +66,14 @@ pub enum CaptureError {
 
     #[error("permission to capture {what} was not granted")]
     PermissionDenied { what: &'static str },
+
+    /// A platform capture SDK refused a request, carrying its own reason.
+    ///
+    /// Separate from [`CaptureError::Unsupported`], whose reasons are compile-time facts about
+    /// the build. This one is a runtime refusal — most often a missing permission — and the
+    /// message is written for the person who has to go and grant it.
+    #[error("{0}")]
+    Platform(String),
 
     #[error("no audio device matching '{0}'")]
     DeviceNotFound(String),
@@ -153,10 +170,11 @@ impl OsBackend {
             return Some("built without the 'os-capture' feature");
         }
         match self {
-            OsBackend::ScreenCaptureKit => Some(
-                "ScreenCaptureKit requires a screen-recording permission grant against a \
-                 signed application bundle",
-            ),
+            // Implemented. Whether it *works* depends on a runtime TCC grant, which is a
+            // different question from whether this build can attempt it — see
+            // [`permission_status`].
+            OsBackend::ScreenCaptureKit if cfg!(target_os = "macos") => None,
+            OsBackend::ScreenCaptureKit => Some("ScreenCaptureKit exists only on macOS"),
             _ => Some("this backend is not implemented yet"),
         }
     }
@@ -240,13 +258,25 @@ mod tests {
         }
     }
 
+    /// ScreenCaptureKit is implemented on macOS, so with capture compiled in there is no
+    /// *build-time* reason it is unavailable. Whether it will actually capture is a runtime
+    /// TCC question, which [`permission_status`] answers and this does not.
     #[test]
-    fn screencapturekit_explains_the_permission_requirement() {
-        let reason = OsBackend::ScreenCaptureKit.unavailable_reason().unwrap();
-        assert!(
-            reason.contains("permission") || reason.contains("feature"),
-            "{reason}"
-        );
+    fn screencapturekit_is_available_where_it_exists_and_explains_itself_where_it_does_not() {
+        let reason = OsBackend::ScreenCaptureKit.unavailable_reason();
+
+        if cfg!(all(target_os = "macos", feature = "os-capture")) {
+            assert!(
+                reason.is_none(),
+                "system audio is implemented on macOS, but reported: {reason:?}"
+            );
+        } else {
+            let reason = reason.expect("unavailable backends must say why");
+            assert!(
+                reason.contains("macOS") || reason.contains("feature"),
+                "{reason}"
+            );
+        }
     }
 
     #[test]

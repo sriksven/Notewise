@@ -564,6 +564,12 @@ struct StartRecordingBody {
     language: Option<String>,
     /// Separate speakers when the recording stops. Defaults to on.
     diarize: Option<bool>,
+    /// Also capture system audio, as a second channel. Defaults to on.
+    ///
+    /// On a call this separates you from everyone else exactly, with no guessing. Where the
+    /// platform will not provide it — no Screen Recording grant, or not macOS — the recording
+    /// quietly falls back to the microphone alone.
+    capture_system_audio: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -615,6 +621,10 @@ async fn start_recording(
                 model: body.as_ref().and_then(|b| b.model.clone()),
                 language: body.as_ref().and_then(|b| b.language.clone()),
                 diarize: body.as_ref().and_then(|b| b.diarize).unwrap_or(true),
+                capture_system_audio: body
+                    .as_ref()
+                    .and_then(|b| b.capture_system_audio)
+                    .unwrap_or(true),
             },
         )
         .await?;
@@ -1050,6 +1060,10 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
     Ok(Json(serde_json::json!({
         "backends": backends,
         "active": {
+            // `kind` so a client can match the active backend against the list above. Without
+            // it the only way to name what is running is to guess from `is_local`, which
+            // matches several entries and picks the wrong one.
+            "kind": state.ai().kind().as_str(),
             "model": state.ai().model_id(),
             "is_local": state.ai().is_local(),
         },

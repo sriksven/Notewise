@@ -27,9 +27,13 @@
 
 pub mod cluster;
 pub mod embedding;
+pub mod spans;
+pub mod voice;
 
 pub use cluster::{cosine_distance, normalize, ClusterConfig};
 pub use embedding::{SpeakerEmbedder, MIN_EMBEDDING_MS};
+pub use spans::{samples_for, select_spans, subtract_overlaps, Span, SpanConfig};
+pub use voice::{AudioDiarizer, EmbeddingDiarizer};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

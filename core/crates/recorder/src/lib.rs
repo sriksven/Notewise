@@ -1,7 +1,23 @@
 //! The recording pipeline.
 //!
 //! Connects the pieces that until now existed only as separate, individually-tested
-//! components: **capture → mix → transcribe → diarize → store**.
+//! components: **capture → transcribe → attribute → store**.
+//!
+//! # Two ways to record, and why the second one is better
+//!
+//! [`ChannelPipeline`] keeps each capture source separate and labels every segment by the
+//! source it arrived on. On a call that answers "who said this" exactly — the microphone is
+//! you, the system tap is everyone else — with no model and no inference.
+//!
+//! ```text
+//!   microphone ──→ TranscriptionEngine ──→ storage  ("You")
+//!   system tap ──→ TranscriptionEngine ──→ storage  ("Others")
+//!                  (sharing one loaded model)
+//! ```
+//!
+//! [`Pipeline`] sums the sources into one stream and infers the speaker afterwards. It is what
+//! to use when there is only one source, or when a caller genuinely wants a single mixed
+//! track — but the inference is a guess, and summing is irreversible, so prefer the above.
 //!
 //! ```text
 //!   AudioSource ──┐
@@ -199,25 +215,8 @@ impl Pipeline {
     ///
     /// Takes the lock only for the write, and only when there is something to write.
     fn store(&self, db: &Database, meeting_id: Id, segments: &[Segment]) -> Result<usize> {
-        if segments.is_empty() {
-            return Ok(0);
-        }
-
-        let repo = MeetingRepository::new(db);
-        let batch: Vec<NewTranscriptSegment> = segments
-            .iter()
-            .map(|s| NewTranscriptSegment {
-                meeting_id,
-                // Left unattributed on purpose; filled in by the diarization pass.
-                speaker: s.speaker.clone(),
-                text: s.text.clone(),
-                start_ms: s.start_ms,
-                end_ms: s.end_ms,
-                confidence: s.confidence,
-            })
-            .collect();
-
-        Ok(repo.add_segments(batch)?.len())
+        // Left unattributed on purpose; filled in by the diarization pass.
+        store_segments(db, meeting_id, segments, None)
     }
 
     /// Label stored segments with speakers.
@@ -263,6 +262,212 @@ impl Pipeline {
         }
 
         Ok((count, speakers.len()))
+    }
+}
+
+/// Write segments, optionally forcing a speaker label.
+///
+/// `speaker` overrides whatever the engine reported. Channel recording uses it: the label is
+/// known from the capture source before a word is decoded, so there is nothing to infer.
+fn store_segments(
+    db: &Database,
+    meeting_id: Id,
+    segments: &[Segment],
+    speaker: Option<&str>,
+) -> Result<usize> {
+    if segments.is_empty() {
+        return Ok(0);
+    }
+
+    let repo = MeetingRepository::new(db);
+    let batch: Vec<NewTranscriptSegment> = segments
+        .iter()
+        .map(|s| NewTranscriptSegment {
+            meeting_id,
+            speaker: speaker.map(str::to_string).or_else(|| s.speaker.clone()),
+            text: s.text.clone(),
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            confidence: s.confidence,
+        })
+        .collect();
+
+    Ok(repo.add_segments(batch)?.len())
+}
+
+/// Which capture source audio arrived on.
+///
+/// The channel *is* the speaker, on a call. Everything the microphone hears is the person at
+/// this machine; everything the system tap hears is the far end. That is not an inference from
+/// timings or a clustering of voices — it is which cable the audio came down, and it is the
+/// most reliable speaker signal available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    /// The local microphone: whoever is sitting at this machine.
+    Microphone,
+    /// The system audio tap: everyone on the far end of the call.
+    System,
+}
+
+impl Channel {
+    /// The label segments from this channel are attributed to.
+    pub fn speaker_label(self) -> &'static str {
+        match self {
+            Channel::Microphone => "You",
+            Channel::System => "Others",
+        }
+    }
+}
+
+/// One capture source and the engine transcribing it.
+#[derive(Debug)]
+pub struct ChannelInput {
+    channel: Channel,
+    source: Box<dyn AudioSource>,
+    engine: Box<dyn TranscriptionEngine>,
+    exhausted: bool,
+    audio_ms: i64,
+    segments: usize,
+}
+
+impl ChannelInput {
+    pub fn new(
+        channel: Channel,
+        source: Box<dyn AudioSource>,
+        engine: Box<dyn TranscriptionEngine>,
+    ) -> Self {
+        Self {
+            channel,
+            source,
+            engine,
+            exhausted: false,
+            audio_ms: 0,
+            segments: 0,
+        }
+    }
+
+    pub fn channel(&self) -> Channel {
+        self.channel
+    }
+}
+
+/// Records several channels at once, attributing each segment to the channel it arrived on.
+///
+/// # Why this is not [`Pipeline`] with a mixer
+///
+/// [`Pipeline::mixed_source`] sums the microphone and the system tap into one mono stream, and
+/// summing is irreversible: once the two are added together, no amount of downstream cleverness
+/// recovers which side of the call a sentence came from. The pipeline then has to *infer* the
+/// speaker from the mixed audio — from pauses, or from clustering voice embeddings — and both
+/// are guesses that get it wrong.
+///
+/// Keeping the streams apart makes the question disappear for the case that matters most. On a
+/// video call the microphone is you and the system tap is everyone else, so "who said this" is
+/// answered by which stream it arrived on, exactly, for free, with no model.
+///
+/// Diarization does not run here, and that is deliberate: it would overwrite known attribution
+/// with an inferred one. Separating several voices *within* one channel — three people around
+/// one microphone — is a different problem, and the job of a [`Diarizer`] applied per channel.
+///
+/// # Cost
+///
+/// One engine per channel, but not one model per channel: engines that can share loaded weights
+/// (see `WhisperEngine::sibling`) should be built that way by the caller. What is not shared is
+/// the speech gating, which is per-channel by necessity — two streams cutting each other's
+/// phrases would be worse than mixing them.
+#[derive(Debug)]
+pub struct ChannelPipeline {
+    inputs: Vec<ChannelInput>,
+}
+
+impl ChannelPipeline {
+    /// Build a pipeline over one or more channels.
+    pub fn new(inputs: Vec<ChannelInput>) -> Result<Self> {
+        if inputs.is_empty() {
+            return Err(RecorderError::NoInput);
+        }
+        Ok(Self { inputs })
+    }
+
+    /// Run every channel to completion, storing segments as they are produced.
+    pub async fn run(
+        &mut self,
+        db: &Database,
+        meeting_id: Id,
+        mut should_stop: impl FnMut() -> bool,
+    ) -> Result<RecordingStats> {
+        let mut stats = RecordingStats::default();
+
+        loop {
+            if should_stop() {
+                tracing::debug!("stop requested");
+                break;
+            }
+
+            // One frame from each live channel per turn. Channels are read in the same order
+            // every time so a fast source cannot starve a slow one.
+            let mut progressed = false;
+
+            for input in &mut self.inputs {
+                if input.exhausted {
+                    continue;
+                }
+
+                let Some(frame) = input.source.next_frame()? else {
+                    input.exhausted = true;
+                    continue;
+                };
+
+                progressed = true;
+                stats.frames_processed += 1;
+                input.audio_ms += frame.duration_ms();
+
+                let required = input.engine.required_format();
+                let ready = if frame.format == required {
+                    input.engine.feed(&frame).await?
+                } else {
+                    input.engine.feed(&frame.to_transcription_format()).await?
+                };
+
+                let stored =
+                    store_segments(db, meeting_id, &ready, Some(input.channel.speaker_label()))?;
+                input.segments += stored;
+                stats.segments_stored += stored;
+            }
+
+            // Every channel is exhausted.
+            if !progressed {
+                break;
+            }
+        }
+
+        for input in &mut self.inputs {
+            let remaining = input.engine.finish().await?;
+            let stored = store_segments(
+                db,
+                meeting_id,
+                &remaining,
+                Some(input.channel.speaker_label()),
+            )?;
+            input.segments += stored;
+            stats.segments_stored += stored;
+        }
+
+        // Wall clock, so the longest channel — not the sum, which would report a two-channel
+        // recording as twice its real length.
+        stats.audio_ms = self.inputs.iter().map(|i| i.audio_ms).max().unwrap_or(0);
+        stats.segments_attributed = stats.segments_stored;
+        stats.speakers_detected = self.inputs.iter().filter(|i| i.segments > 0).count();
+
+        tracing::info!(
+            frames = stats.frames_processed,
+            segments = stats.segments_stored,
+            channels = self.inputs.len(),
+            speakers = stats.speakers_detected,
+            "channel recording finished"
+        );
+
+        Ok(stats)
     }
 }
 
@@ -697,6 +902,166 @@ mod tests {
             stored.iter().all(|s| s.speaker.is_some()),
             "segments should still be attributed, just not to invented people"
         );
+    }
+
+    /// The point of channel recording: attribution is exact, not inferred.
+    ///
+    /// Two people talking over each other is the case every timing heuristic and every
+    /// embedding clusterer gets wrong. Arriving on two separate streams, it is not a hard case
+    /// at all — each word is labelled by the cable it came down.
+    #[tokio::test]
+    async fn each_channel_is_attributed_to_its_own_speaker() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::Microphone,
+                Box::new(tone(1_000)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(
+                Channel::System,
+                Box::new(tone(1_000)),
+                Box::new(MockEngine::new()),
+            ),
+        ])
+        .expect("two channels");
+
+        let stats = pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        assert_eq!(stats.speakers_detected, 2, "one speaker per channel");
+        assert!(stats.segments_stored > 0);
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let speakers: std::collections::HashSet<_> =
+            stored.iter().filter_map(|s| s.speaker.clone()).collect();
+        assert_eq!(
+            speakers,
+            ["You".to_string(), "Others".to_string()]
+                .into_iter()
+                .collect(),
+            "got {speakers:?}"
+        );
+        assert!(
+            stored.iter().all(|s| s.speaker.is_some()),
+            "channel recording knows every speaker before it decodes a word"
+        );
+    }
+
+    /// A two-channel recording is as long as the meeting, not twice as long.
+    #[tokio::test]
+    async fn audio_length_is_wall_clock_not_the_sum_of_channels() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::Microphone,
+                Box::new(tone(1_000)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(
+                Channel::System,
+                Box::new(tone(1_000)),
+                Box::new(MockEngine::new()),
+            ),
+        ])
+        .unwrap();
+
+        let stats = pipeline.run(&db, id, never_stop()).await.unwrap();
+        assert_eq!(
+            stats.audio_ms, 1_000,
+            "summed the channels instead of taking the span"
+        );
+    }
+
+    /// One side of a call going quiet must not end the recording.
+    #[tokio::test]
+    async fn one_channel_ending_early_does_not_stop_the_other() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::Microphone,
+                Box::new(tone(300)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(
+                Channel::System,
+                Box::new(tone(2_000)),
+                Box::new(MockEngine::new()),
+            ),
+        ])
+        .unwrap();
+
+        let stats = pipeline.run(&db, id, never_stop()).await.unwrap();
+
+        assert_eq!(
+            stats.audio_ms, 2_000,
+            "the longer channel should have run to its end"
+        );
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        assert!(
+            stored
+                .iter()
+                .any(|s| s.speaker.as_deref() == Some("Others")),
+            "the channel that kept going produced nothing"
+        );
+    }
+
+    /// Recording with only a microphone is the common case and must still work.
+    #[tokio::test]
+    async fn a_single_channel_recording_is_valid() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::Microphone,
+            Box::new(tone(1_000)),
+            Box::new(MockEngine::new()),
+        )])
+        .unwrap();
+
+        let stats = pipeline.run(&db, id, never_stop()).await.unwrap();
+        assert_eq!(stats.speakers_detected, 1);
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        assert!(stored.iter().all(|s| s.speaker.as_deref() == Some("You")));
+    }
+
+    #[test]
+    fn a_channel_pipeline_needs_a_channel() {
+        assert!(matches!(
+            ChannelPipeline::new(Vec::new()).unwrap_err(),
+            RecorderError::NoInput
+        ));
+    }
+
+    /// Stopping must end a channel recording promptly, as it does a mixed one.
+    #[tokio::test]
+    async fn stopping_ends_a_channel_recording() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::Microphone,
+            Box::new(tone(60_000)),
+            Box::new(MockEngine::new()),
+        )])
+        .unwrap();
+
+        let mut turns = 0;
+        let stats = pipeline
+            .run(&db, id, move || {
+                turns += 1;
+                turns > 5
+            })
+            .await
+            .unwrap();
+
+        assert!(stats.audio_ms < 60_000, "ran to {} ms", stats.audio_ms);
     }
 
     #[tokio::test]

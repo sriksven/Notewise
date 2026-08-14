@@ -1,0 +1,13 @@
+[package]
+name = "notewise-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+notewise-transcription = { path = "../transcription" }
+serde.workspace = true
+thiserror.workspace = true

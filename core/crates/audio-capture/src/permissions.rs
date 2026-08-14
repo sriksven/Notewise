@@ -89,6 +89,31 @@ fn probe(kind: CaptureKind) -> PermissionStatus {
                 Err(e) => PermissionStatus::Unavailable(e.to_string()),
             }
         }
+        // Opening the tap is the probe, for the same reason as the microphone: on macOS the
+        // first attempt is what raises the Screen Recording dialog, and a refused grant is
+        // what comes back once the user has declined.
+        //
+        // Note this is a *stronger* check than `CGPreflightScreenCaptureAccess`, which reports
+        // the TCC record without proving a stream can actually start.
+        #[cfg(target_os = "macos")]
+        CaptureKind::SystemAudio => {
+            use crate::system_audio::SystemAudioSource;
+
+            let config = CaptureConfig {
+                kind: CaptureKind::SystemAudio,
+                ..CaptureConfig::default()
+            };
+
+            match SystemAudioSource::open(&config) {
+                Ok(source) => {
+                    drop(source);
+                    PermissionStatus::Granted
+                }
+                Err(CaptureError::PermissionDenied { .. }) => PermissionStatus::Denied,
+                Err(e) if is_permission_error(&e.to_string()) => PermissionStatus::Denied,
+                Err(e) => PermissionStatus::Unavailable(e.to_string()),
+            }
+        }
         other => PermissionStatus::Unavailable(format!("no probe for {other:?}")),
     }
 }
@@ -114,16 +139,29 @@ pub(crate) fn is_permission_error(message: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// System audio has no working backend on any current build, so it must report why rather
-    /// than claim to be merely un-asked. A caller that cannot tell those apart would block a
-    /// user on a grant that does not exist.
+    /// A build that cannot capture system audio must say so rather than claim to be merely
+    /// un-asked: a caller that cannot tell those apart would send a user to grant a permission
+    /// that would not help.
+    ///
+    /// Where the backend does exist, "not asked yet" becomes the honest answer, because
+    /// nothing has raised the Screen Recording prompt.
     #[test]
-    fn system_audio_is_unavailable_with_a_stated_reason() {
-        match permission_status(CaptureKind::SystemAudio) {
-            PermissionStatus::Unavailable(reason) => {
-                assert!(!reason.is_empty(), "an unavailable capability must say why");
+    fn system_audio_reports_a_reason_when_it_cannot_be_had() {
+        let status = permission_status(CaptureKind::SystemAudio);
+
+        if cfg!(all(target_os = "macos", feature = "os-capture")) {
+            assert_eq!(
+                status,
+                PermissionStatus::NotRequested,
+                "system audio is implemented here; nothing has prompted yet"
+            );
+        } else {
+            match status {
+                PermissionStatus::Unavailable(reason) => {
+                    assert!(!reason.is_empty(), "an unavailable capability must say why");
+                }
+                other => panic!("expected Unavailable, got {other:?}"),
             }
-            other => panic!("expected Unavailable, got {other:?}"),
         }
     }
 

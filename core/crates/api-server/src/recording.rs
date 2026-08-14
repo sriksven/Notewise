@@ -72,6 +72,12 @@ pub struct StartRequest {
     /// Spoken language, e.g. `en`. `None` lets the model detect it.
     pub language: Option<String>,
     pub diarize: bool,
+    /// Also capture what the machine is playing, as a second channel.
+    ///
+    /// On a call this is the other participants, and capturing it separately is what makes
+    /// "you" and "them" exact rather than guessed. Falls back to microphone-only if the
+    /// platform will not provide it.
+    pub capture_system_audio: bool,
 }
 
 /// What a caller asked to import.
@@ -204,7 +210,28 @@ mod imp {
 
     use chrono::Utc;
     use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
-    use notewise_recorder::{Pipeline, PipelineConfig};
+    use notewise_recorder::{Channel, ChannelInput, ChannelPipeline, Pipeline, PipelineConfig};
+
+    /// Open the system audio tap, where the platform has one.
+    ///
+    /// Returns a boxed source so the caller does not need a different type per platform. Only
+    /// macOS has an implementation today; elsewhere this is an error the caller treats as
+    /// "microphone only", which is exactly right.
+    fn open_system_audio(
+        config: &CaptureConfig,
+    ) -> std::result::Result<Box<dyn notewise_audio_capture::AudioSource>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            notewise_audio_capture::SystemAudioSource::open(config)
+                .map(|s| Box::new(s) as Box<dyn notewise_audio_capture::AudioSource>)
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = config;
+            Err("system audio capture is not implemented on this platform".into())
+        }
+    }
     use notewise_storage::{Database, MeetingRepository, MeetingSource, NewMeeting};
     use notewise_transcription::{ModelRegistry, ModelStore, WhisperEngine};
     use tokio::sync::oneshot;
@@ -275,6 +302,27 @@ mod imp {
             MicrophoneSource::open(&capture).map_err(|e| RecordingError::Failed(e.to_string()))?;
         let device = source.device_name().to_string();
 
+        // The far end of the call, if this machine will give it to us.
+        //
+        // Deliberately not fatal. System audio needs a Screen Recording grant that many users
+        // will not have given, and a microphone-only recording is the thing this product did
+        // yesterday — refusing to record at all because the *better* mode is unavailable would
+        // be a regression dressed up as a feature.
+        let system_source = if request.capture_system_audio {
+            match open_system_audio(&capture) {
+                Ok(source) => Some(source),
+                Err(e) => {
+                    tracing::info!(
+                        reason = %e,
+                        "recording the microphone only; system audio is unavailable"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // The language the caller picked has to reach the engine here, not just on the import
         // path: without it a live meeting is detected from its first buffer, and a meeting
         // detected wrong transcribes as nonsense for its whole length.
@@ -317,15 +365,40 @@ mod imp {
                     }
                 };
 
-                let mut pipeline = Pipeline::new(Box::new(engine)).with_config(PipelineConfig {
-                    diarize,
-                    ..Default::default()
-                });
+                let should_stop = move || poll_stop.load(Ordering::Relaxed);
 
-                let result =
-                    runtime.block_on(pipeline.run(&db, meeting_id, &mut source, move || {
-                        poll_stop.load(Ordering::Relaxed)
-                    }));
+                let result = match system_source {
+                    // Two channels: attribution comes from which stream a word arrived on, so
+                    // no diarizer runs and none is needed. The second engine shares the first
+                    // one's loaded weights rather than loading the model twice.
+                    Some(system) => {
+                        let mic_engine = engine.sibling();
+                        let inputs = vec![
+                            ChannelInput::new(
+                                Channel::Microphone,
+                                Box::new(source),
+                                Box::new(mic_engine),
+                            ),
+                            ChannelInput::new(Channel::System, system, Box::new(engine)),
+                        ];
+
+                        match ChannelPipeline::new(inputs) {
+                            Ok(mut pipeline) => {
+                                runtime.block_on(pipeline.run(&db, meeting_id, should_stop))
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    // One channel: the microphone alone, diarized as before.
+                    None => {
+                        let mut pipeline =
+                            Pipeline::new(Box::new(engine)).with_config(PipelineConfig {
+                                diarize,
+                                ..Default::default()
+                            });
+                        runtime.block_on(pipeline.run(&db, meeting_id, &mut source, should_stop))
+                    }
+                };
 
                 // End the meeting from this thread. It owns the connection that has been
                 // writing, and it is the only place that knows the recording is truly over.
