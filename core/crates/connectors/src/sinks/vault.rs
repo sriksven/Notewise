@@ -10,10 +10,20 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
 
 use crate::connector::{Connector, SinkConnector};
 use crate::error::{ConnectorError, Result};
 use crate::types::{ExternalRef, Health, Outbound};
+
+/// Fingerprint of what is in a file, used to tell our own last write from someone else's edit.
+///
+/// A hash rather than a modification time: a sync client touching a file, or a restore from a
+/// backup, moves the timestamp without changing a word. What matters is whether the bytes are
+/// still the bytes we wrote.
+fn fingerprint(content: &str) -> String {
+    hex::encode(Sha256::digest(content.as_bytes()))
+}
 
 #[derive(Debug)]
 pub struct VaultSink {
@@ -21,6 +31,16 @@ pub struct VaultSink {
 }
 
 impl VaultSink {
+    /// The one place this connector's name is written.
+    ///
+    /// It appears in the registry builder, in the API's list of ids it will accept, and in the
+    /// credential store's key — and it is persisted in `connector_outbox` and `external_items`,
+    /// so a rename is a breaking change to data already on disk. As three separate string
+    /// literals that drift silently: the API accepts `POST /v1/connectors/vault`, writes the
+    /// account row, and the registry never registers it. Named once, a rename is a compile
+    /// error at every site instead.
+    pub const ID: &'static str = "vault";
+
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
@@ -66,7 +86,7 @@ fn file_name(title: &str, node_id: &str) -> String {
 #[async_trait]
 impl Connector for VaultSink {
     fn id(&self) -> &str {
-        "vault"
+        Self::ID
     }
 
     fn display_name(&self) -> &str {
@@ -107,6 +127,35 @@ impl SinkConnector for VaultSink {
         let name = file_name(title, &outbound.node_id.to_string());
         let path = self.root.join(&name);
 
+        // Never overwrite something the user wrote.
+        //
+        // The whole promise of this connector is that the files are theirs — a vault lives in
+        // Obsidian, and people annotate meeting notes. Blind writes make that promise false in
+        // the one case where it matters, and silently: the edit is gone with no error and no
+        // copy. So a file that no longer matches what we last put there is treated as theirs.
+        //
+        // Only claimed when there is a previous version to compare against. A first push, or
+        // one whose record predates this check, cannot tell an edit from a file it wrote
+        // itself, and refusing on that basis would strand every meeting behind a conflict that
+        // never happened.
+        if let Some(previous) = outbound
+            .existing
+            .as_ref()
+            .and_then(|e| e.remote_version.as_deref())
+        {
+            match tokio::fs::read_to_string(&path).await {
+                Ok(current) if fingerprint(&current) != previous => {
+                    return Err(ConnectorError::Permanent(format!(
+                        "{} has been edited since Notewise last wrote it — not overwriting. \
+                         Move or delete the file to let it be rewritten.",
+                        path.display()
+                    )));
+                }
+                // Unchanged since our last write, or gone. Both are ours to write.
+                Ok(_) | Err(_) => {}
+            }
+        }
+
         // A missing vault folder is a configuration mistake, not a blip: the user moved or
         // never chose the directory. Retrying cannot fix it, so it must not be Transient.
         // `tokio::fs`, not `std::fs`. A vault is very often inside an iCloud, Dropbox, or
@@ -121,7 +170,9 @@ impl SinkConnector for VaultSink {
             external_id: name,
             url: Some(format!("file://{}", path.display())),
             title: Some(title.to_string()),
-            remote_version: None,
+            // What we just wrote, so the next push can tell it from an edit. Previously `None`,
+            // which left the comparison above with nothing to compare against.
+            remote_version: Some(fingerprint(markdown)),
         })
     }
 }
@@ -142,6 +193,16 @@ mod tests {
         }
     }
 
+    /// The literal is pinned here on purpose, and this is the only place it should be written
+    /// besides the constant itself. It is persisted in `connector_outbox` and `external_items`,
+    /// so changing it orphans every row already on disk — a deliberate migration, never a
+    /// rename that compiled.
+    #[test]
+    fn the_id_is_a_stored_value_and_cannot_drift() {
+        assert_eq!(VaultSink::ID, "vault");
+        assert_eq!(VaultSink::new("/tmp").id(), VaultSink::ID);
+    }
+
     #[tokio::test]
     async fn push_writes_a_markdown_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -154,6 +215,97 @@ mod tests {
 
         let written = std::fs::read_to_string(dir.path().join(&reference.external_id)).unwrap();
         assert!(written.contains("Shipped."));
+    }
+
+    /// The promise of this connector is that the files are yours. A vault lives in Obsidian and
+    /// people annotate meeting notes; overwriting that loses work silently, with no error and
+    /// no copy.
+    #[tokio::test]
+    async fn an_edited_file_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = VaultSink::new(dir.path());
+
+        let first = outbound("Standup", "v1");
+        let reference = sink.push(&first).await.unwrap();
+        let path = dir.path().join(&reference.external_id);
+
+        // The user opens it in their editor and adds a line.
+        std::fs::write(&path, "v1\n\nMy own note about this meeting.").unwrap();
+
+        let second = Outbound {
+            payload: serde_json::json!({"title": "Standup", "markdown": "v2"}),
+            existing: Some(reference),
+            ..first.clone()
+        };
+
+        let refused = sink.push(&second).await;
+        assert!(
+            matches!(refused, Err(ConnectorError::Permanent(_))),
+            "an edited file must not be overwritten, got {refused:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "v1\n\nMy own note about this meeting.",
+            "the user's edit must survive"
+        );
+    }
+
+    /// The other half: a file we wrote and nobody touched is still ours to update. Refusing
+    /// here would strand every meeting behind a conflict that never happened.
+    #[tokio::test]
+    async fn an_untouched_file_is_still_updated() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = VaultSink::new(dir.path());
+
+        let first = outbound("Standup", "v1");
+        let reference = sink.push(&first).await.unwrap();
+        let path = dir.path().join(&reference.external_id);
+
+        let second = Outbound {
+            payload: serde_json::json!({"title": "Standup", "markdown": "v2"}),
+            existing: Some(reference),
+            ..first.clone()
+        };
+
+        sink.push(&second).await.expect("an untouched file updates");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "v2");
+    }
+
+    /// A push with no prior version cannot tell an edit from its own earlier write, so it must
+    /// not guess. Anything else would refuse on first contact with a pre-existing vault.
+    #[tokio::test]
+    async fn a_first_push_does_not_claim_a_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = VaultSink::new(dir.path());
+
+        let first = outbound("Standup", "v1");
+        let reference = sink.push(&first).await.unwrap();
+        std::fs::write(dir.path().join(&reference.external_id), "edited").unwrap();
+
+        // `existing` carries no version — the record predates this check.
+        let second = Outbound {
+            payload: serde_json::json!({"title": "Standup", "markdown": "v2"}),
+            existing: Some(ExternalRef {
+                remote_version: None,
+                ..reference.clone()
+            }),
+            ..first.clone()
+        };
+
+        sink.push(&second).await.expect("no version means no claim");
+    }
+
+    #[tokio::test]
+    async fn a_write_records_the_version_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = VaultSink::new(dir.path());
+
+        let reference = sink.push(&outbound("Standup", "body")).await.unwrap();
+        assert_eq!(
+            reference.remote_version.as_deref(),
+            Some(fingerprint("body").as_str()),
+            "without this the conflict check has nothing to compare against"
+        );
     }
 
     #[tokio::test]

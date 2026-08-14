@@ -50,9 +50,11 @@ pub fn build_registry(
             continue;
         };
 
+        // Matched against the sinks' own constants, so a rename cannot leave this arm
+        // pointing at a name nothing answers to.
         match account.connector_id.as_str() {
-            "vault" => registry.register_sink(Arc::new(VaultSink::new(target))),
-            "webhook" => match credentials.get("webhook", SIGNING_KEY)? {
+            VaultSink::ID => registry.register_sink(Arc::new(VaultSink::new(target))),
+            WebhookSink::ID => match credentials.get(WebhookSink::ID, SIGNING_KEY)? {
                 Some(secret) => registry.register_sink(Arc::new(WebhookSink::new(target, secret))),
                 None => tracing::warn!("webhook has no signing secret; skipping"),
             },

@@ -14,7 +14,7 @@ use axum::extract::{Path, State};
 use axum::Json;
 use notewise_connectors::{
     build_registry, generate_signing_secret, ConnectorRegistry, CredentialStore, KeychainStore,
-    SIGNING_KEY,
+    VaultSink, WebhookSink, SIGNING_KEY,
 };
 use notewise_storage::{ConnectorAccountRepository, Database, OutboxRepository};
 use serde::{Deserialize, Serialize};
@@ -113,7 +113,7 @@ pub(crate) fn apply_connect(
     // succeeds, writes an account row, and then `build_registry` quietly skips it — the
     // "half a connector that fails invisibly" failure this design exists to avoid, moved
     // from the registry to the API boundary.
-    if !matches!(id, "vault" | "webhook") {
+    if !matches!(id, VaultSink::ID | WebhookSink::ID) {
         return Err(ApiError::NotFound(format!(
             "no connector '{id}' in this build"
         )));
@@ -124,16 +124,16 @@ pub(crate) fn apply_connect(
     // there would silently break every receiver still validating the old one, and since the
     // secret is shown exactly once, a user who changed the URL could not recover it.
     // Rotation should be an explicit act, not a side effect of editing a field.
-    let signing_secret = if id == "webhook" {
+    let signing_secret = if id == WebhookSink::ID {
         match credentials
-            .get("webhook", SIGNING_KEY)
+            .get(WebhookSink::ID, SIGNING_KEY)
             .map_err(|e| ApiError::Internal(format!("cannot read the signing secret: {e}")))?
         {
             Some(_) => None,
             None => {
                 let secret = generate_signing_secret();
                 credentials
-                    .set("webhook", SIGNING_KEY, &secret)
+                    .set(WebhookSink::ID, SIGNING_KEY, &secret)
                     .map_err(|e| {
                         ApiError::Internal(format!("cannot store the signing secret: {e}"))
                     })?;

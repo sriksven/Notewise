@@ -35,6 +35,9 @@ pub struct WebhookSink {
 }
 
 impl WebhookSink {
+    /// The one place this connector's name is written. See [`VaultSink::ID`] for why.
+    pub const ID: &'static str = "webhook";
+
     pub fn new(url: impl Into<String>, secret: Secret) -> Self {
         Self {
             url: url.into(),
@@ -50,7 +53,7 @@ impl WebhookSink {
 #[async_trait]
 impl Connector for WebhookSink {
     fn id(&self) -> &str {
-        "webhook"
+        Self::ID
     }
 
     fn display_name(&self) -> &str {
@@ -142,6 +145,18 @@ mod tests {
     use axum::Router;
     use notewise_storage::Id;
     use std::sync::{Arc, Mutex};
+
+    /// Pinned for the same reason as [`VaultSink::ID`]: it is a stored value, and the
+    /// credential store keys the signing secret on it. A rename that only compiled would
+    /// orphan both the outbox rows and the secret in the keychain.
+    #[test]
+    fn the_id_is_a_stored_value_and_cannot_drift() {
+        assert_eq!(WebhookSink::ID, "webhook");
+        assert_eq!(
+            WebhookSink::new("https://example.com", Secret::new("k")).id(),
+            WebhookSink::ID
+        );
+    }
 
     /// Start a test receiver that records what it was sent and replies with `status`.
     async fn receiver(status: u16) -> (String, Arc<Mutex<Vec<(HeaderMap, String)>>>) {
