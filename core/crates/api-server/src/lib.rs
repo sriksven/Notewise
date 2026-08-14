@@ -33,6 +33,7 @@ pub mod downloads;
 mod error;
 pub mod recording;
 mod routes;
+mod setup;
 mod state;
 
 pub use downloads::{DownloadManager, DownloadState, DownloadStatus};

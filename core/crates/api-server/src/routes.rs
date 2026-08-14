@@ -17,8 +17,8 @@ use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
     meeting_to_markdown, DraftStatus, EmailDraft, EmailDraftRepository, ExportOptions, Id, Meeting,
     MeetingRepository, MeetingSource, NewEmailDraft, NewMeeting, NewNote, NewSummary,
-    NewTranscriptSegment, Note, NoteRepository, SearchRepository, SummaryRepository, Ticket,
-    TicketRepository, TranscriptSegment,
+    NewTranscriptSegment, Note, NoteRepository, SearchRepository, SettingsRepository,
+    SummaryRepository, Ticket, TicketRepository, TranscriptSegment,
 };
 use notewise_transcription::ModelRegistry;
 
@@ -57,6 +57,9 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             post(download_model).get(download_progress),
         )
         .route("/v1/downloads", get(list_downloads))
+        .route("/v1/setup", get(setup_readiness))
+        .route("/v1/setup/complete", post(complete_setup))
+        .route("/v1/permissions/:kind", post(request_permission))
         .route("/v1/devices", get(list_devices))
         .route("/v1/languages", get(list_languages))
         .route("/v1/backend", post(switch_backend))
@@ -1181,6 +1184,172 @@ async fn download_progress(
 /// Every download this engine has started, running or finished.
 async fn list_downloads(State(state): State<Shared>) -> Json<Vec<DownloadState>> {
     Json(state.downloads().all().await)
+}
+
+// ---------------------------------------------------------------- setup
+
+/// What first-run setup still needs.
+///
+/// Never prompts. Permission status is read without opening a device, so loading the wizard
+/// cannot raise an OS dialog before the user has pressed anything.
+async fn setup_readiness(
+    State(state): State<Shared>,
+) -> ApiResult<Json<crate::setup::SetupReadiness>> {
+    Ok(Json(readiness(&state).await?))
+}
+
+/// Mark first-run setup finished.
+///
+/// Re-checks readiness server-side. The wizard already disables its Finish button, but a gate
+/// enforced only in the UI is not a gate.
+async fn complete_setup(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
+    let readiness = readiness(&state).await?;
+
+    // Already finished: answer with the original timestamp. Rewriting it would make a
+    // double-click look like a second setup, and re-checking readiness could refuse someone
+    // who legitimately completed setup before a model was later removed.
+    if let Some(existing) = readiness.completed_at {
+        return Ok(Json(serde_json::json!({ "completed_at": existing })));
+    }
+
+    let unsatisfied = readiness.unsatisfied();
+    if !unsatisfied.is_empty() {
+        return Err(ApiError::Conflict(format!(
+            "setup is not finished: {} still {} attention",
+            unsatisfied.join(", "),
+            if unsatisfied.len() == 1 {
+                "needs"
+            } else {
+                "need"
+            }
+        )));
+    }
+
+    let stamp = Utc::now().to_rfc3339();
+    {
+        let db = state.db().await;
+        SettingsRepository::new(&db).set(crate::setup::COMPLETED_KEY, &stamp)?;
+    }
+
+    tracing::info!("first-run setup completed");
+    Ok(Json(serde_json::json!({ "completed_at": stamp })))
+}
+
+/// Ask the OS for a capability, prompting if it decides to.
+///
+/// Runs on a blocking thread: opening an audio device is not async, and holding a runtime
+/// worker while a modal permission dialog waits on the user would stall every other request.
+async fn request_permission(
+    Path(kind): Path<String>,
+) -> ApiResult<Json<crate::setup::PermissionReadiness>> {
+    let kind = CaptureKindArg::parse(&kind).ok_or_else(|| {
+        ApiError::BadRequest(format!(
+            "unknown permission '{kind}' — expected 'microphone' or 'system_audio'"
+        ))
+    })?;
+
+    let readiness = tokio::task::spawn_blocking(move || permission_readiness(kind, true))
+        .await
+        .map_err(|e| ApiError::Internal(format!("the permission probe panicked: {e}")))?;
+
+    Ok(Json(readiness))
+}
+
+/// Assemble the readiness snapshot both setup routes work from.
+async fn readiness(state: &AppState) -> ApiResult<crate::setup::SetupReadiness> {
+    use crate::setup::{PermissionsReadiness, SetupReadiness, StepReadiness, Steps};
+
+    let completed_at = {
+        let db = state.db().await;
+        SettingsRepository::new(&db).get(crate::setup::COMPLETED_KEY)?
+    };
+
+    let model_installed = !state.model_store().installed().is_empty();
+    let backend_reachable = state.ai().probe().await.is_ok();
+
+    Ok(SetupReadiness {
+        completed_at,
+        steps: Steps {
+            model: StepReadiness {
+                satisfied: model_installed,
+                required: true,
+            },
+            backend: StepReadiness {
+                satisfied: backend_reachable,
+                required: true,
+            },
+            permissions: PermissionsReadiness::from_parts(
+                permission_readiness(CaptureKindArg::Microphone, false),
+                permission_readiness(CaptureKindArg::SystemAudio, false),
+            ),
+        },
+    })
+}
+
+/// Which capability a permission route is about.
+///
+/// A local enum rather than re-exporting `CaptureKind`, because `audio-capture` is an
+/// optional dependency and this route table must compile without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureKindArg {
+    Microphone,
+    SystemAudio,
+}
+
+impl CaptureKindArg {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "microphone" => Some(Self::Microphone),
+            "system_audio" => Some(Self::SystemAudio),
+            _ => None,
+        }
+    }
+}
+
+/// Report one capability. `prompt` opens a device and may raise an OS dialog.
+fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::PermissionReadiness {
+    #[cfg(feature = "record")]
+    {
+        use notewise_audio_capture::{CaptureKind, PermissionStatus};
+
+        let kind = match kind {
+            CaptureKindArg::Microphone => CaptureKind::Microphone,
+            CaptureKindArg::SystemAudio => CaptureKind::SystemAudio,
+        };
+
+        let probed = if prompt {
+            notewise_audio_capture::request_permission(kind)
+        } else {
+            notewise_audio_capture::permission_status(kind)
+        };
+
+        let (status, detail) = match probed {
+            PermissionStatus::NotRequested => ("not_requested", None),
+            PermissionStatus::Granted => ("granted", None),
+            PermissionStatus::Denied => ("denied", None),
+            PermissionStatus::Unavailable(reason) => ("unavailable", Some(reason)),
+        };
+
+        crate::setup::PermissionReadiness {
+            status: status.into(),
+            // Only an obtainable permission gates the user. Anything unavailable has no action
+            // behind it, so requiring it would be a trap.
+            required: status != "unavailable",
+            detail,
+        }
+    }
+
+    #[cfg(not(feature = "record"))]
+    {
+        let _ = (kind, prompt);
+        crate::setup::PermissionReadiness {
+            status: "unavailable".into(),
+            required: false,
+            detail: Some(
+                "this build has no capture support (built without the 'record' feature)".into(),
+            ),
+        }
+    }
 }
 
 // ---------------------------------------------------------------- graph
@@ -2563,5 +2732,151 @@ mod tests {
             listed["installed"], true,
             "a model in the configured directory must list as installed"
         );
+    }
+
+    #[tokio::test]
+    async fn setup_reports_an_unfinished_first_run() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let (status, body) = json(
+            &app_with_model_dir(dir.path()),
+            Request::get("/v1/setup").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body["completed_at"].is_null(),
+            "nothing has completed setup"
+        );
+        assert_eq!(
+            body["steps"]["model"]["satisfied"], false,
+            "empty model dir"
+        );
+        assert_eq!(body["steps"]["model"]["required"], true);
+
+        // System audio has no working backend on any current build, so it must be excluded
+        // from the gate rather than left permanently blocking.
+        assert_eq!(
+            body["steps"]["permissions"]["system_audio"]["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            body["steps"]["permissions"]["system_audio"]["required"],
+            false
+        );
+        assert!(body["steps"]["permissions"]["system_audio"]["detail"].is_string());
+    }
+
+    /// A GET must never raise a TCC dialog. The only defence in code is that the handler calls
+    /// the non-prompting probe, so pin the status that produces.
+    #[tokio::test]
+    async fn setup_does_not_prompt_for_permissions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let (_, body) = json(
+            &app_with_model_dir(dir.path()),
+            Request::get("/v1/setup").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        let status = body["steps"]["permissions"]["microphone"]["status"]
+            .as_str()
+            .unwrap();
+        assert!(
+            status == "not_requested" || status == "unavailable",
+            "a GET must not have asked the OS anything, got {status}"
+        );
+    }
+
+    /// The gate must hold at the API, not only in the UI. A client calling this directly with
+    /// nothing installed must be refused, and told which step is missing.
+    #[tokio::test]
+    async fn completing_setup_with_unsatisfied_steps_is_a_conflict() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let (status, body) = json(
+            &app_with_model_dir(dir.path()),
+            Request::post("/v1/setup/complete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(
+            body["error"].as_str().unwrap().contains("model"),
+            "the refusal must name the missing step, got {}",
+            body["error"]
+        );
+    }
+
+    #[tokio::test]
+    async fn completing_setup_records_a_timestamp_and_is_idempotent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        install_model(dir.path(), "tiny.en");
+
+        // One app, so both calls share a database — a fresh router per call would start from
+        // an empty one and never exercise idempotency.
+        let app = app_with_model_dir(dir.path());
+
+        let (status, first) = json(
+            &app,
+            Request::post("/v1/setup/complete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+
+        let stamp = first["completed_at"]
+            .as_str()
+            .expect("a timestamp")
+            .to_string();
+        assert!(!stamp.is_empty());
+
+        let (status, second) = json(
+            &app,
+            Request::post("/v1/setup/complete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            second["completed_at"].as_str().unwrap(),
+            stamp,
+            "completing twice must not move the timestamp"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_permission_kind_is_a_400() {
+        let (status, _) = json(
+            &app(),
+            Request::post("/v1/permissions/webcam")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// On a build without capture, asking for system audio must answer "unavailable" rather
+    /// than fail — the wizard needs a reason to show, not an error banner.
+    #[tokio::test]
+    async fn requesting_system_audio_reports_unavailable_rather_than_failing() {
+        let (status, body) = json(
+            &app(),
+            Request::post("/v1/permissions/system_audio")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "unavailable");
+        assert_eq!(body["required"], false);
     }
 }
