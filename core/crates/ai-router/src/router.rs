@@ -309,6 +309,11 @@ impl Router {
     pub fn model_id(&self) -> &str {
         self.backend.model_id()
     }
+
+    /// Whether the active backend is usable right now. See [`AiBackend::probe`].
+    pub async fn probe(&self) -> Result<()> {
+        self.backend.probe().await
+    }
 }
 
 #[async_trait]

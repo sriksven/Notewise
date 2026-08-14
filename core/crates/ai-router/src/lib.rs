@@ -88,6 +88,16 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
     ) -> Result<Vec<ExtractedActionItem>>;
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse>;
+
+    /// Whether this backend is usable right now.
+    ///
+    /// The default answers yes without a network call, which is correct for every hosted
+    /// provider: the backend was constructed, so a key was present, and spending a real
+    /// completion to prove the endpoint is up would cost money on every launch. Local
+    /// backends that depend on a separate daemon override this.
+    async fn probe(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -108,5 +118,14 @@ mod tests {
 
         assert!(!backend.summarize(&input).await.unwrap().text.is_empty());
         assert!(backend.is_local());
+    }
+
+    /// Cloud backends inherit the default: having been constructed, a key was present, and
+    /// that is the check. Spending a real completion on every launch to prove the endpoint is
+    /// up would cost money for an answer nobody reads.
+    #[tokio::test]
+    async fn the_default_probe_succeeds_without_a_network_call() {
+        let backend: Box<dyn AiBackend> = Box::new(MockBackend::new());
+        assert!(backend.probe().await.is_ok());
     }
 }

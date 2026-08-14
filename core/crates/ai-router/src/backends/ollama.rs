@@ -219,6 +219,42 @@ impl AiBackend for OllamaBackend {
             model: completion.model.unwrap_or_else(|| self.model.clone()),
         })
     }
+
+    /// Ask the daemon for its model list.
+    ///
+    /// `/api/tags` is a cheap GET that loads no model. The configured endpoint points at
+    /// `/api/chat`, so the base is recovered by trimming that suffix rather than by storing a
+    /// second URL that could drift out of sync with the first.
+    async fn probe(&self) -> Result<()> {
+        let base = self
+            .endpoint
+            .strip_suffix("/api/chat")
+            .unwrap_or(&self.endpoint);
+
+        let response = self
+            .http
+            .get(format!("{base}/api/tags"))
+            // Bounded, because this runs on the setup screen's critical path: an installed but
+            // stopped daemon must answer "not reachable" in a moment rather than hang until
+            // the OS connect timeout expires.
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|source| AiError::Transport {
+                backend: BACKEND,
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(AiError::Provider {
+                backend: BACKEND,
+                status: response.status().as_u16(),
+                message: "the Ollama daemon did not return its model list".into(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,6 +349,15 @@ mod tests {
             matches!(err, AiError::InvalidRequest(_)),
             "expected local validation, not a transport error: {err:?}"
         );
+    }
+
+    /// A refused connection is a reachability answer, not a panic. Port 1 is reserved and
+    /// nothing listens on it, so this exercises the failure path without a network.
+    #[tokio::test]
+    async fn probe_reports_an_unreachable_daemon() {
+        let backend = OllamaBackend::new().with_endpoint("http://127.0.0.1:1/api/chat");
+        let err = backend.probe().await.expect_err("nothing listens on port 1");
+        assert!(matches!(err, AiError::Transport { .. }), "got {err:?}");
     }
 
     #[tokio::test]
