@@ -20,7 +20,7 @@
 #![warn(missing_debug_implementations)]
 
 mod connector;
-// mod credentials; // Task 9: Secret, CredentialStore, MemoryStore
+mod credentials;
 // mod dispatcher;  // Task 11: Dispatcher, DispatchReport, RetryPolicy
 mod error;
 // mod keychain;    // Task 10: KeychainStore
@@ -29,7 +29,7 @@ mod sinks;
 mod types;
 
 pub use connector::{Connector, SinkConnector, SourceConnector};
-// pub use credentials::{CredentialStore, MemoryStore, Secret}; // Task 9
+pub use credentials::{CredentialStore, MemoryStore, Secret};
 // pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy}; // Task 11
 pub use error::{ConnectorError, Result};
 // pub use keychain::KeychainStore; // Task 10
