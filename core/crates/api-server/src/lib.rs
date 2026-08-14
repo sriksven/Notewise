@@ -35,12 +35,14 @@ mod error;
 pub mod recording;
 mod routes;
 mod setup;
+pub mod speakers;
 mod state;
 mod workspace;
 
 pub use downloads::{DownloadManager, DownloadState, DownloadStatus};
 pub use error::{ApiError, ApiResult};
 pub use recording::{RecordingError, RecordingManager};
+pub use speakers::{PendingTimeline, PendingTimelines, SpeakerEvents};
 pub use state::AppState;
 
 use std::net::SocketAddr;

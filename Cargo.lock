@@ -1365,6 +1365,7 @@ dependencies = [
  "notewise-ai-router",
  "notewise-audio-capture",
  "notewise-connectors",
+ "notewise-diarization",
  "notewise-graph",
  "notewise-recorder",
  "notewise-storage",
