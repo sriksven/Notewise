@@ -31,6 +31,12 @@ pub struct AppState {
     /// the lock immediately, so a summarization that takes thirty seconds does not block
     /// someone switching model in another window.
     ai: std::sync::RwLock<Arc<AiRouter>>,
+    /// Connectors currently registered.
+    ///
+    /// An `RwLock<Arc<_>>` for the same reason as `ai`: connecting a vault in one window must
+    /// not block a request reading the list in another. Handlers clone the `Arc` and drop the
+    /// lock immediately.
+    connectors: std::sync::RwLock<Arc<notewise_connectors::ConnectorRegistry>>,
     recording: RecordingManager,
     downloads: DownloadManager,
 }
@@ -43,6 +49,9 @@ impl AppState {
             db_path,
             model_dir: default_model_dir(),
             ai: std::sync::RwLock::new(Arc::new(ai)),
+            connectors: std::sync::RwLock::new(Arc::new(
+                notewise_connectors::ConnectorRegistry::new(),
+            )),
             recording: RecordingManager::new(),
             downloads: DownloadManager::new(),
         }
@@ -98,6 +107,27 @@ impl AppState {
     /// spends thirty seconds inside a model call.
     pub fn ai(&self) -> Arc<AiRouter> {
         Arc::clone(&self.ai.read().expect("ai router lock poisoned"))
+    }
+
+    /// The connectors this engine can deliver through.
+    ///
+    /// Returns an owned handle for the same reason as [`Self::ai`]: the lock is released before
+    /// the caller does anything with the registry.
+    pub fn connectors(&self) -> Arc<notewise_connectors::ConnectorRegistry> {
+        Arc::clone(
+            &self
+                .connectors
+                .read()
+                .expect("connector registry lock poisoned"),
+        )
+    }
+
+    /// Replace the registry — used when a connector is connected or disconnected.
+    pub fn set_connectors(&self, registry: notewise_connectors::ConnectorRegistry) {
+        *self
+            .connectors
+            .write()
+            .expect("connector registry lock poisoned") = Arc::new(registry);
     }
 
     /// Replace the active backend.

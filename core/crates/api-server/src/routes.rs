@@ -80,6 +80,12 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
                 .post(start_recording)
                 .delete(stop_recording),
         )
+        // Read-only connector status. Connecting an account is a separate, explicit flow.
+        .route("/v1/connectors", get(crate::connectors::list_connectors))
+        .route(
+            "/v1/connectors/failures",
+            get(crate::connectors::list_failed_deliveries),
+        )
         // Workspace writes — notes, tickets, action items, decisions, people, series.
         // Kept in their own module so this table stays readable.
         .merge(crate::workspace::router())

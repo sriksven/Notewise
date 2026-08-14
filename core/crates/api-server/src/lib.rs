@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod connectors;
 pub mod downloads;
 mod error;
 pub mod recording;
