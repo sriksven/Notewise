@@ -70,6 +70,14 @@ pub enum RecorderError {
 
     #[error("no audio source was attached")]
     NoInput,
+
+    /// Two inputs claimed the same capture channel.
+    ///
+    /// Channels are identified downstream by the speaker label they write, so two inputs on one
+    /// channel would be indistinguishable in storage — and a per-channel refinement pass would
+    /// silently re-label both.
+    #[error("channel {channel:?} was attached twice")]
+    DuplicateChannel { channel: Channel },
 }
 
 pub type Result<T> = std::result::Result<T, RecorderError>;
@@ -325,6 +333,9 @@ pub struct ChannelInput {
     channel: Channel,
     source: Box<dyn AudioSource>,
     engine: Box<dyn TranscriptionEngine>,
+    /// Splits this one channel into several speakers once recording stops. See
+    /// [`ChannelInput::with_diarizer`].
+    diarizer: Option<Box<dyn Diarizer + Send>>,
     exhausted: bool,
     audio_ms: i64,
     segments: usize,
@@ -340,10 +351,42 @@ impl ChannelInput {
             channel,
             source,
             engine,
+            diarizer: None,
             exhausted: false,
             audio_ms: 0,
             segments: 0,
         }
+    }
+
+    /// Split this channel's segments into individual speakers after recording.
+    ///
+    /// # What this is for
+    ///
+    /// The channel label answers "which side of the call" and stops there. On a five-person
+    /// video call the system tap is one channel carrying four people, all stored as `Others` —
+    /// correct, and not what a reader wants. This is the hook that turns those four into four
+    /// names.
+    ///
+    /// The intended argument is [`notewise_diarization::TimelineDiarizer`], carrying speaker
+    /// events reported by the meeting platform. That needs no audio and no model: the platform
+    /// routing the call already knows who was unmuted, so this is an interval join rather than an
+    /// inference.
+    ///
+    /// # Why it runs after, not during
+    ///
+    /// The same reason the rest of the pipeline works this way — the label is refined once the
+    /// whole channel is known, while the live transcript still appears immediately under its
+    /// channel label. A reader sees `Others` during the call and names afterwards, rather than
+    /// nothing during the call.
+    ///
+    /// # A segment this leaves unlabelled keeps its channel label
+    ///
+    /// [`notewise_diarization::TimelineDiarizer`] returns `None` for a segment the platform
+    /// reported no speaker for, rather than guessing a name. Those segments stay `Others`, which
+    /// is still true. Refinement only ever replaces a coarse label with a specific one.
+    pub fn with_diarizer(mut self, diarizer: Box<dyn Diarizer + Send>) -> Self {
+        self.diarizer = Some(diarizer);
+        self
     }
 
     pub fn channel(&self) -> Channel {
@@ -365,9 +408,13 @@ impl ChannelInput {
 /// video call the microphone is you and the system tap is everyone else, so "who said this" is
 /// answered by which stream it arrived on, exactly, for free, with no model.
 ///
-/// Diarization does not run here, and that is deliberate: it would overwrite known attribution
-/// with an inferred one. Separating several voices *within* one channel — three people around
-/// one microphone — is a different problem, and the job of a [`Diarizer`] applied per channel.
+/// Diarization does not run *across* channels, and that is deliberate: it would overwrite known
+/// attribution with an inferred one.
+///
+/// Separating several voices *within* one channel is a different problem, and the common one — a
+/// five-person call puts four people on the system tap, and three people around one microphone
+/// are one channel too. [`ChannelInput::with_diarizer`] is that hook: a per-channel pass that
+/// refines `Others` into names without touching what the channel already established.
 ///
 /// # Cost
 ///
@@ -382,10 +429,26 @@ pub struct ChannelPipeline {
 
 impl ChannelPipeline {
     /// Build a pipeline over one or more channels.
+    ///
+    /// # Errors
+    ///
+    /// [`RecorderError::DuplicateChannel`] if two inputs share a channel. Stored segments carry
+    /// only the channel's speaker label, so two inputs on one channel cannot be told apart
+    /// afterwards — and [`ChannelInput::with_diarizer`] would then re-label both from one
+    /// channel's evidence.
     pub fn new(inputs: Vec<ChannelInput>) -> Result<Self> {
         if inputs.is_empty() {
             return Err(RecorderError::NoInput);
         }
+
+        for (index, input) in inputs.iter().enumerate() {
+            if inputs[..index].iter().any(|e| e.channel == input.channel) {
+                return Err(RecorderError::DuplicateChannel {
+                    channel: input.channel,
+                });
+            }
+        }
+
         Ok(Self { inputs })
     }
 
@@ -459,16 +522,122 @@ impl ChannelPipeline {
         stats.segments_attributed = stats.segments_stored;
         stats.speakers_detected = self.inputs.iter().filter(|i| i.segments > 0).count();
 
+        // Split any channel that carries more than one person. Runs after every channel has
+        // finished, so a diarizer sees that channel's whole transcript.
+        let refined = self.refine(db, meeting_id)?;
+        if refined > 0 {
+            stats.speakers_detected = distinct_speakers(db, meeting_id)?;
+        }
+
         tracing::info!(
             frames = stats.frames_processed,
             segments = stats.segments_stored,
             channels = self.inputs.len(),
+            refined,
             speakers = stats.speakers_detected,
             "channel recording finished"
         );
 
         Ok(stats)
     }
+
+    /// Run each channel's diarizer over that channel's stored segments.
+    ///
+    /// Returns how many segments were given a more specific speaker than their channel label.
+    fn refine(&self, db: &Database, meeting_id: Id) -> Result<usize> {
+        let mut refined = 0;
+
+        for input in &self.inputs {
+            let Some(diarizer) = &input.diarizer else {
+                continue;
+            };
+            refined += refine_channel(db, meeting_id, input.channel, diarizer.as_ref())?;
+        }
+
+        Ok(refined)
+    }
+}
+
+/// Re-label one channel's stored segments using a per-channel diarizer.
+///
+/// # Identifying a channel's segments
+///
+/// By the speaker label the channel wrote. That is the only marker storage keeps, and it is
+/// sufficient because [`ChannelPipeline::new`] rejects two inputs on one channel — so a label maps
+/// to exactly one channel for the life of a recording.
+///
+/// # What is not overwritten
+///
+/// A segment the diarizer returns unlabelled keeps its channel label. `Others` is a true
+/// statement about a segment the platform reported no speaker for; replacing it with a guess, or
+/// with nothing, would both be worse.
+fn refine_channel(
+    db: &Database,
+    meeting_id: Id,
+    channel: Channel,
+    diarizer: &dyn Diarizer,
+) -> Result<usize> {
+    let repo = MeetingRepository::new(db);
+    let label = channel.speaker_label();
+
+    let mine: Vec<_> = repo
+        .segments(meeting_id)?
+        .into_iter()
+        .filter(|s| s.speaker.as_deref() == Some(label))
+        .collect();
+
+    if mine.is_empty() {
+        return Ok(0);
+    }
+
+    let transcript = Transcript::new(
+        mine.iter()
+            .map(|s| Segment {
+                text: s.text.clone(),
+                start_ms: s.start_ms,
+                end_ms: s.end_ms,
+                confidence: s.confidence,
+                speaker: s.speaker.clone(),
+            })
+            .collect(),
+    );
+
+    let labelled = diarizer.diarize(&transcript)?;
+    let mut count = 0;
+
+    // Zip by position: diarization preserves order and length.
+    for (stored, labelled) in mine.iter().zip(labelled.segments.iter()) {
+        match &labelled.speaker {
+            // Unchanged, or declined. Either way there is nothing more specific to write.
+            None => continue,
+            Some(speaker) if speaker == label => continue,
+            Some(speaker) => {
+                repo.set_segment_speaker(stored.id, speaker)?;
+                count += 1;
+            }
+        }
+    }
+
+    tracing::debug!(
+        ?channel,
+        diarizer = diarizer.name(),
+        segments = mine.len(),
+        refined = count,
+        "refined a channel's speakers"
+    );
+
+    Ok(count)
+}
+
+/// How many distinct speakers a meeting's stored segments name.
+fn distinct_speakers(db: &Database, meeting_id: Id) -> Result<usize> {
+    let speakers: std::collections::HashSet<String> = MeetingRepository::new(db)
+        .segments(meeting_id)?
+        .into_iter()
+        .filter_map(|s| s.speaker)
+        .collect();
+
+    Ok(speakers.len())
 }
 
 /// Record the relationship between a meeting and the transcript it produced.
@@ -946,6 +1115,233 @@ mod tests {
         assert!(
             stored.iter().all(|s| s.speaker.is_some()),
             "channel recording knows every speaker before it decodes a word"
+        );
+    }
+
+    /// An engine that emits a fixed script, so a test controls segment timings exactly.
+    ///
+    /// Timings are what a timeline joins against, so they cannot be left to a mock's discretion.
+    #[derive(Debug)]
+    struct PlannedEngine(Vec<Segment>);
+
+    #[notewise_transcription::async_trait]
+    impl TranscriptionEngine for PlannedEngine {
+        fn name(&self) -> &str {
+            "planned"
+        }
+        async fn feed(
+            &mut self,
+            _frame: &notewise_audio_capture::AudioFrame,
+        ) -> notewise_transcription::Result<Vec<Segment>> {
+            Ok(Vec::new())
+        }
+        async fn finish(&mut self) -> notewise_transcription::Result<Vec<Segment>> {
+            Ok(std::mem::take(&mut self.0))
+        }
+    }
+
+    /// Four participants, each holding the floor for five seconds.
+    fn four_people() -> notewise_diarization::SpeakerTimeline {
+        use notewise_diarization::{Participant, ParticipantId, SpeakerTimeline};
+
+        let mut timeline = SpeakerTimeline::new();
+        for (i, name) in ["Priya", "Marcus", "Ana", "Jun"].iter().enumerate() {
+            timeline.upsert_participant(Participant::new(format!("p{i}"), *name));
+            timeline
+                .add_turn(
+                    ParticipantId::new(format!("p{i}")),
+                    i as i64 * 5_000,
+                    i as i64 * 5_000 + 5_000,
+                )
+                .expect("turn");
+        }
+        timeline
+    }
+
+    /// The requirement that motivated all of this: five people on a call, each voice named.
+    ///
+    /// The microphone is the user. The system tap carries the other four, which the channel label
+    /// can only call `Others` — so the platform timeline splits that one channel into four names.
+    #[tokio::test]
+    async fn a_channel_carrying_several_people_is_split_into_names() {
+        use notewise_diarization::TimelineDiarizer;
+
+        let db = db();
+        let id = meeting(&db);
+
+        let remote = PlannedEngine(vec![
+            Segment::new("first point", 0, 4_000),
+            Segment::new("second point", 5_000, 9_000),
+            Segment::new("third point", 10_000, 14_000),
+            Segment::new("fourth point", 15_000, 19_000),
+        ]);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::Microphone,
+                Box::new(tone(500)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(Channel::System, Box::new(tone(500)), Box::new(remote))
+                .with_diarizer(Box::new(TimelineDiarizer::new(four_people()))),
+        ])
+        .expect("two channels");
+
+        let stats = pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let speakers: std::collections::HashSet<_> =
+            stored.iter().filter_map(|s| s.speaker.clone()).collect();
+
+        assert!(
+            !speakers.contains("Others"),
+            "every remote segment should have been named, got {speakers:?}"
+        );
+        for name in ["Priya", "Marcus", "Ana", "Jun"] {
+            assert!(speakers.contains(name), "missing {name} in {speakers:?}");
+        }
+        assert!(
+            speakers.contains("You"),
+            "the microphone channel keeps its own label, got {speakers:?}"
+        );
+        assert_eq!(
+            stats.speakers_detected, 5,
+            "four named remotes plus the local user, got {speakers:?}"
+        );
+    }
+
+    /// A gap in the platform feed must not become a name.
+    ///
+    /// The channel label is still true for a segment nobody was reported speaking over, and a
+    /// borrowed name from a neighbouring turn would put words in a real colleague's mouth.
+    #[tokio::test]
+    async fn a_segment_the_platform_never_reported_keeps_its_channel_label() {
+        use notewise_diarization::{Participant, ParticipantId, SpeakerTimeline, TimelineDiarizer};
+
+        let db = db();
+        let id = meeting(&db);
+
+        let mut timeline = SpeakerTimeline::new();
+        timeline.upsert_participant(Participant::new("p1", "Priya"));
+        timeline
+            .add_turn(ParticipantId::new("p1"), 0, 5_000)
+            .expect("turn");
+
+        let remote = PlannedEngine(vec![
+            Segment::new("covered", 0, 4_000),
+            // Long after the feed stopped reporting.
+            Segment::new("uncovered", 60_000, 64_000),
+        ]);
+
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::System,
+            Box::new(tone(500)),
+            Box::new(remote),
+        )
+        .with_diarizer(Box::new(TimelineDiarizer::new(timeline)))])
+        .expect("one channel");
+
+        pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let by_text: std::collections::HashMap<_, _> = stored
+            .iter()
+            .map(|s| (s.text.as_str(), s.speaker.as_deref()))
+            .collect();
+
+        assert_eq!(by_text.get("covered"), Some(&Some("Priya")));
+        assert_eq!(
+            by_text.get("uncovered"),
+            Some(&Some("Others")),
+            "an unreported segment keeps a true coarse label rather than gaining a false name"
+        );
+    }
+
+    /// Refinement is scoped to the channel that asked for it.
+    #[tokio::test]
+    async fn one_channels_diarizer_does_not_relabel_another_channel() {
+        use notewise_diarization::TimelineDiarizer;
+
+        let db = db();
+        let id = meeting(&db);
+
+        // The microphone's segments sit inside the timeline's turns, so a diarizer applied to the
+        // wrong channel would rename them.
+        let local = PlannedEngine(vec![Segment::new("my words", 0, 4_000)]);
+        let remote = PlannedEngine(vec![Segment::new("their words", 5_000, 9_000)]);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(Channel::Microphone, Box::new(tone(500)), Box::new(local)),
+            ChannelInput::new(Channel::System, Box::new(tone(500)), Box::new(remote))
+                .with_diarizer(Box::new(TimelineDiarizer::new(four_people()))),
+        ])
+        .expect("two channels");
+
+        pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let by_text: std::collections::HashMap<_, _> = stored
+            .iter()
+            .map(|s| (s.text.as_str(), s.speaker.as_deref()))
+            .collect();
+
+        assert_eq!(
+            by_text.get("my words"),
+            Some(&Some("You")),
+            "the microphone channel was not asked to be split"
+        );
+        assert_eq!(by_text.get("their words"), Some(&Some("Marcus")));
+    }
+
+    /// Without this, two inputs on one channel would both be refined from one channel's evidence.
+    #[test]
+    fn two_inputs_on_one_channel_are_rejected() {
+        let error = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::System,
+                Box::new(tone(100)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(
+                Channel::System,
+                Box::new(tone(100)),
+                Box::new(MockEngine::new()),
+            ),
+        ])
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                RecorderError::DuplicateChannel {
+                    channel: Channel::System
+                }
+            ),
+            "got {error:?}"
+        );
+    }
+
+    /// A channel with no diarizer behaves exactly as before.
+    #[tokio::test]
+    async fn a_channel_without_a_diarizer_is_unchanged() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::System,
+            Box::new(tone(1_000)),
+            Box::new(MockEngine::new()),
+        )])
+        .expect("one channel");
+
+        pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        assert!(
+            stored
+                .iter()
+                .all(|s| s.speaker.as_deref() == Some("Others")),
+            "refinement must be opt-in"
         );
     }
 

@@ -18,21 +18,38 @@
 //! [`PauseDiarizer::confidence`] for how to tell when its output is unreliable.
 //!
 //! Separating voices needs the voices. [`SpeakerEmbedder`] and [`cluster`] are the acoustic
-//! half of that, already built and tested; what is missing is a [`Diarizer`] that carries
-//! per-segment audio through to them. Until that exists, no caller is told speakers were
-//! separated when they were not.
+//! half of that; [`EmbeddingDiarizer`] carries per-segment audio through to them. It produces
+//! **anonymous** labels — clustering can prove there were five voices and can never learn that
+//! one of them was Priya.
+//!
+//! # Names come from the platform, not from the audio
+//!
+//! [`SpeakerTimeline`] carries who a meeting platform said was talking, and when. Meet, Zoom,
+//! and Teams all know this exactly, because they route the audio. [`TimelineDiarizer`] joins
+//! that against a transcript to produce real names with no model and no inference.
+//!
+//! [`NamedClusterDiarizer`] combines the two, and is better than either alone: acoustic
+//! clustering finds precise turn boundaries, and the timeline supplies the names to put on them.
+//! See its docs for the failure it is specifically built to avoid.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
 pub mod cluster;
 pub mod embedding;
+pub mod named;
 pub mod spans;
+pub mod timeline;
 pub mod voice;
 
 pub use cluster::{cosine_distance, normalize, ClusterConfig};
 pub use embedding::{SpeakerEmbedder, MIN_EMBEDDING_MS};
+pub use named::{NamedClusterDiarizer, NamingConfig};
 pub use spans::{samples_for, select_spans, subtract_overlaps, Span, SpanConfig};
+pub use timeline::{
+    Participant, ParticipantId, SpeakerTimeline, SpeakerTurn, TimelineDiarizer,
+    TURN_COALESCE_TOLERANCE_MS,
+};
 pub use voice::{AudioDiarizer, EmbeddingDiarizer};
 
 use serde::{Deserialize, Serialize};
@@ -58,6 +75,21 @@ pub enum DiarizationError {
 
     #[error("transcript segments must be in chronological order")]
     UnorderedSegments,
+
+    /// A speaker turn named someone the timeline has no roster entry for.
+    ///
+    /// Rejected rather than stored: a turn we cannot put a name to would become either a hole in
+    /// the transcript or, worse, a hole filled in from a neighbour — which attributes words to
+    /// whichever named person happened to be adjacent.
+    #[error("no participant is known with id {id}")]
+    UnknownParticipant { id: String },
+
+    /// A turn that ends before it starts, or starts before the recording did.
+    ///
+    /// Both mean the producer converted its clock wrongly. A negative or inverted span silently
+    /// poisons every overlap calculation downstream, so it fails at the boundary instead.
+    #[error("a speaker turn cannot run from {start_ms} ms to {end_ms} ms")]
+    InvalidTurn { start_ms: i64, end_ms: i64 },
 }
 
 pub type Result<T> = std::result::Result<T, DiarizationError>;
