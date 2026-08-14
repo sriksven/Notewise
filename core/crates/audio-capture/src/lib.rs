@@ -162,41 +162,75 @@ impl OsBackend {
         }
     }
 
+    /// Human name for this backend, for error messages.
+    fn describe(&self) -> &'static str {
+        match self {
+            OsBackend::CoreAudioInput => "Core Audio microphone capture",
+            OsBackend::ScreenCaptureKit => "ScreenCaptureKit system audio capture",
+            OsBackend::WasapiLoopback => "WASAPI loopback capture",
+            OsBackend::PipeWire => "PipeWire capture",
+        }
+    }
+
     /// Why this backend is not usable in the current build.
     ///
-    /// Returns `None` only when it would actually work.
+    /// Returns `None` only when it would actually work. Whether it *succeeds* is a separate
+    /// question from whether this build can attempt it — a macOS backend can be perfectly
+    /// available here and still fail at runtime for want of a TCC grant. See
+    /// [`permission_status`].
     pub fn unavailable_reason(&self) -> Option<&'static str> {
         if !cfg!(feature = "os-capture") {
             return Some("built without the 'os-capture' feature");
         }
         match self {
-            // Implemented. Whether it *works* depends on a runtime TCC grant, which is a
-            // different question from whether this build can attempt it — see
-            // [`permission_status`].
+            // Implemented, via cpal.
+            OsBackend::CoreAudioInput if cfg!(target_os = "macos") => None,
+            OsBackend::CoreAudioInput => Some("Core Audio exists only on macOS"),
+            // Implemented, via the screencapturekit crate.
             OsBackend::ScreenCaptureKit if cfg!(target_os = "macos") => None,
             OsBackend::ScreenCaptureKit => Some("ScreenCaptureKit exists only on macOS"),
-            _ => Some("this backend is not implemented yet"),
+            OsBackend::WasapiLoopback | OsBackend::PipeWire => {
+                Some("this backend is not implemented yet")
+            }
         }
+    }
+
+    /// Whether this build can attempt to open this backend at all.
+    pub fn is_available(&self) -> bool {
+        self.unavailable_reason().is_none()
     }
 
     /// Open this backend, or explain why it cannot be opened.
     ///
     /// Deliberately fails loudly. A capture path that silently yields no audio produces an
-    /// empty transcript and a user who thinks the product is broken rather than unpermitted.
-    pub fn open(&self, _config: &CaptureConfig) -> Result<Box<dyn AudioSource>> {
-        let reason = self
-            .unavailable_reason()
-            .unwrap_or("no implementation registered");
+    /// empty transcript and a user who concludes the product is broken rather than
+    /// unpermitted.
+    #[cfg_attr(not(feature = "os-capture"), allow(unused_variables))]
+    pub fn open(&self, config: &CaptureConfig) -> Result<Box<dyn AudioSource>> {
+        if let Some(reason) = self.unavailable_reason() {
+            return Err(CaptureError::Unsupported {
+                what: self.describe(),
+                reason,
+            });
+        }
 
-        Err(CaptureError::Unsupported {
-            what: match self {
-                OsBackend::CoreAudioInput => "Core Audio microphone capture",
-                OsBackend::ScreenCaptureKit => "ScreenCaptureKit system audio capture",
-                OsBackend::WasapiLoopback => "WASAPI loopback capture",
-                OsBackend::PipeWire => "PipeWire capture",
-            },
-            reason,
-        })
+        // Only reachable for backends `unavailable_reason` just vouched for, so each arm
+        // below is compiled under exactly the cfg that makes its source type exist.
+        match self {
+            #[cfg(feature = "os-capture")]
+            OsBackend::CoreAudioInput => Ok(Box::new(MicrophoneSource::open(config)?)),
+
+            #[cfg(all(feature = "os-capture", target_os = "macos"))]
+            OsBackend::ScreenCaptureKit => Ok(Box::new(SystemAudioSource::open(config)?)),
+
+            // Either the feature is off or the backend genuinely has no implementation. The
+            // guard above has already returned for every such case; this arm exists so the
+            // match is exhaustive under every cfg combination rather than by accident.
+            other => Err(CaptureError::Unsupported {
+                what: other.describe(),
+                reason: "no implementation registered for this build",
+            }),
+        }
     }
 }
 
@@ -242,19 +276,90 @@ mod tests {
         }
     }
 
+    /// An unavailable backend must fail loudly rather than yield silence — a capture path
+    /// that quietly produces nothing looks like a broken product.
+    ///
+    /// This deliberately only opens backends that [`OsBackend::unavailable_reason`] has
+    /// already ruled out. Opening an available one would reach for real hardware and, on
+    /// macOS, a TCC grant that cannot be obtained headlessly. That the two agree is the
+    /// invariant worth testing, and it is checked separately below.
     #[test]
-    fn os_backends_fail_loudly_rather_than_yielding_silence() {
-        // A capture path that silently produces nothing looks like a broken product.
+    fn unavailable_backends_fail_loudly_rather_than_yielding_silence() {
         for backend in [
             OsBackend::CoreAudioInput,
             OsBackend::ScreenCaptureKit,
             OsBackend::WasapiLoopback,
             OsBackend::PipeWire,
         ] {
+            let Some(reason) = backend.unavailable_reason() else {
+                continue;
+            };
+
             let err = backend
                 .open(&CaptureConfig::default())
                 .expect_err("must not pretend to work");
-            assert!(matches!(err, CaptureError::Unsupported { .. }), "{err:?}");
+            match err {
+                CaptureError::Unsupported { reason: got, .. } => assert_eq!(
+                    got, reason,
+                    "open() and unavailable_reason() disagree for {backend:?}"
+                ),
+                other => panic!("{backend:?} gave {other:?}"),
+            }
+        }
+    }
+
+    /// `open` used to return `Err` unconditionally, including for backends
+    /// `unavailable_reason` vouched for — so the two disagreed and the only working paths
+    /// were the ones that bypassed `open` entirely. Nothing but this test stops that
+    /// returning.
+    #[test]
+    fn availability_is_reported_consistently() {
+        for backend in [
+            OsBackend::CoreAudioInput,
+            OsBackend::ScreenCaptureKit,
+            OsBackend::WasapiLoopback,
+            OsBackend::PipeWire,
+        ] {
+            assert_eq!(
+                backend.is_available(),
+                backend.unavailable_reason().is_none(),
+                "{backend:?} reports availability two different ways"
+            );
+        }
+
+        // Whatever the host is, at least one arrangement must hold: with capture compiled
+        // out nothing is available, and with it compiled in on macOS both mic and system
+        // audio are.
+        if !cfg!(feature = "os-capture") {
+            assert!(
+                !OsBackend::CoreAudioInput.is_available()
+                    && !OsBackend::ScreenCaptureKit.is_available(),
+                "nothing is available without the capture feature"
+            );
+        } else if cfg!(target_os = "macos") {
+            assert!(
+                OsBackend::CoreAudioInput.is_available(),
+                "microphone capture is implemented on macOS via cpal"
+            );
+            assert!(
+                OsBackend::ScreenCaptureKit.is_available(),
+                "system audio is implemented on macOS via screencapturekit"
+            );
+        }
+    }
+
+    /// Backends that genuinely have no implementation must say so even in a capture build,
+    /// rather than being reported as available and then failing at the call site.
+    #[test]
+    fn unimplemented_backends_say_so_even_with_capture_compiled_in() {
+        for backend in [OsBackend::WasapiLoopback, OsBackend::PipeWire] {
+            let reason = backend
+                .unavailable_reason()
+                .expect("not implemented anywhere yet");
+            assert!(
+                reason.contains("not implemented") || reason.contains("feature"),
+                "{backend:?}: {reason}"
+            );
         }
     }
 
