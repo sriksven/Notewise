@@ -208,6 +208,16 @@ const MIGRATIONS: &[&str] = &[
         DELETE FROM search_index WHERE entity_kind = 'transcript_segment' AND entity_id = old.id;
     END;
     "#,
+    // Application-level configuration. A generic key/value table rather than an `onboarding`
+    // table: this is not a domain object, it has no edges, and the next setting to need
+    // persisting should not cost another migration.
+    r#"
+    CREATE TABLE app_settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// Schema version this build understands.
