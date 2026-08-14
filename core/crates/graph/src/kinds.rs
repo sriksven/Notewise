@@ -23,6 +23,12 @@ pub enum NodeKind {
     /// An artifact that lives in another system — a Linear issue, a calendar event, a file
     /// in a user's vault. Notewise records it but does not own it.
     ExternalItem,
+    /// A human: an attendee, a speaker, or whoever owns an action item. Distinct from a
+    /// workspace member — most people in a user's meetings will never have an account.
+    Person,
+    /// A recurring meeting, threading its instances so unfinished business carries forward
+    /// from one to the next.
+    MeetingSeries,
 }
 
 impl NodeKind {
@@ -39,6 +45,8 @@ impl NodeKind {
         NodeKind::EmailDraft,
         NodeKind::Notification,
         NodeKind::ExternalItem,
+        NodeKind::Person,
+        NodeKind::MeetingSeries,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -55,6 +63,8 @@ impl NodeKind {
             NodeKind::EmailDraft => "email_draft",
             NodeKind::Notification => "notification",
             NodeKind::ExternalItem => "external_item",
+            NodeKind::Person => "person",
+            NodeKind::MeetingSeries => "meeting_series",
         }
     }
 
@@ -174,8 +184,20 @@ mod tests {
     #[test]
     fn all_lists_are_exhaustive() {
         // A missing entry in ALL silently breaks `parse`, so guard the count.
-        assert_eq!(NodeKind::ALL.len(), 12);
+        assert_eq!(NodeKind::ALL.len(), 14);
         assert_eq!(EdgeKind::ALL.len(), 9);
+    }
+
+    /// Person and MeetingSeries deliberately add no edge kinds. A person is `Mentions`ed by
+    /// a segment and `Contains`ed by nothing; a series `Contains` its meetings. Inventing
+    /// `Attended` or `PartOfSeries` would add vocabulary that traversal already covers.
+    #[test]
+    fn people_and_series_are_reachable_kinds() {
+        assert_eq!(NodeKind::parse("person"), Some(NodeKind::Person));
+        assert_eq!(
+            NodeKind::parse("meeting_series"),
+            Some(NodeKind::MeetingSeries)
+        );
     }
 
     #[test]

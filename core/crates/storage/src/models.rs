@@ -78,6 +78,37 @@ pub struct Meeting {
     pub started_at: DateTime<Utc>,
     /// `None` while a meeting is still recording.
     pub ended_at: Option<DateTime<Utc>>,
+    /// The recurring series this instance belongs to, if any.
+    pub series_id: Option<Id>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A human. Not a workspace member: most people in a user's meetings will never have an
+/// account, and requiring one would make attribution impossible for exactly the people it
+/// matters most for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Person {
+    pub id: Id,
+    pub display_name: String,
+    pub email: Option<String>,
+    /// Whether a voiceprint has been enrolled for this person.
+    ///
+    /// The vector itself is deliberately not on this struct. It is biometric data, it is
+    /// large, and nothing outside speaker matching has any business holding it — so it is
+    /// fetched explicitly rather than riding along on every read of a person.
+    pub has_voice_print: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A recurring meeting. Threading instances is what lets unfinished business carry forward
+/// rather than being rediscovered by hand each week.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeetingSeries {
+    pub id: Id,
+    pub title: String,
+    pub project_id: Option<Id>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -350,6 +381,7 @@ mod tests {
             source: MeetingSource::Microphone,
             started_at: ts(1000),
             ended_at: None,
+            series_id: None,
             created_at: ts(1000),
             updated_at: ts(1000),
         };
@@ -366,6 +398,7 @@ mod tests {
             source: MeetingSource::Combined,
             started_at: ts(1000),
             ended_at: Some(ts(1090)),
+            series_id: None,
             created_at: ts(1000),
             updated_at: ts(1090),
         };

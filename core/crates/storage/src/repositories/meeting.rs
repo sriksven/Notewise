@@ -45,6 +45,7 @@ impl<'a> MeetingRepository<'a> {
             source: new.source,
             started_at: new.started_at,
             ended_at: None,
+            series_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -82,7 +83,7 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, created_at, updated_at
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
              FROM meetings ORDER BY started_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit], map_meeting)?;
@@ -94,7 +95,7 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_in_project(&self, project_id: Id) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, created_at, updated_at
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
              FROM meetings WHERE project_id = ?1 ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![project_id], map_meeting)?;
@@ -107,7 +108,7 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_active(&self) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, created_at, updated_at
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
              FROM meetings WHERE ended_at IS NULL ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map([], map_meeting)?;
@@ -293,7 +294,7 @@ impl<'a> MeetingRepository<'a> {
 }
 
 const SELECT_MEETING: &str =
-    "SELECT id, project_id, title, source, started_at, ended_at, created_at, updated_at
+    "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
      FROM meetings WHERE id = ?1";
 
 fn map_meeting(row: &Row<'_>) -> rusqlite::Result<Result<Meeting>> {
@@ -306,8 +307,9 @@ fn map_meeting(row: &Row<'_>) -> rusqlite::Result<Result<Meeting>> {
             source: decode_enum("meetings.source", &source_raw, MeetingSource::parse)?,
             started_at: row.get(4)?,
             ended_at: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            series_id: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
         })
     })())
 }

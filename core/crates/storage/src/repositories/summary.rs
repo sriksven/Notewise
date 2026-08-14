@@ -382,7 +382,7 @@ fn map_decision(row: &Row<'_>) -> rusqlite::Result<Decision> {
     })
 }
 
-fn map_action_item(row: &Row<'_>) -> rusqlite::Result<Result<ActionItem>> {
+pub(super) fn map_action_item(row: &Row<'_>) -> rusqlite::Result<Result<ActionItem>> {
     let status_raw: String = row.get(7)?;
     Ok((|| {
         Ok(ActionItem {
