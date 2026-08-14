@@ -22,6 +22,7 @@ sha2.workspace = true
 hmac.workspace = true
 hex.workspace = true
 keyring.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

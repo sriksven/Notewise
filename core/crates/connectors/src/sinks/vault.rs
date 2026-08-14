@@ -53,7 +53,12 @@ fn file_name(title: &str, node_id: &str) -> String {
     } else {
         trimmed
     };
-    let short_id: String = node_id.chars().take(8).collect();
+    // 12 hex characters, not 8. The id is a v4 UUID, so 8 characters is 32 bits — and a
+    // collision here is silent, because one meeting's file simply overwrites another's and
+    // `push` still reports success. At 2^32, a recurring "Standup" reaches a 1% chance of
+    // collision by its 9,300th instance, which a daily meeting hits inside thirty years.
+    // 12 characters is 48 bits and puts the same figure past any plausible vault.
+    let short_id: String = node_id.chars().take(12).collect();
 
     format!("{stem}-{short_id}.md")
 }
@@ -104,7 +109,11 @@ impl SinkConnector for VaultSink {
 
         // A missing vault folder is a configuration mistake, not a blip: the user moved or
         // never chose the directory. Retrying cannot fix it, so it must not be Transient.
-        std::fs::write(&path, markdown).map_err(|e| {
+        // `tokio::fs`, not `std::fs`. A vault is very often inside an iCloud, Dropbox, or
+        // Google Drive folder, where a sync client can stall a write for seconds while it
+        // holds a lock. A blocking write of that length on a runtime worker starves every
+        // other task on that thread; `tokio::fs` moves it to the blocking pool.
+        tokio::fs::write(&path, markdown).await.map_err(|e| {
             ConnectorError::Permanent(format!("cannot write {}: {e}", path.display()))
         })?;
 
