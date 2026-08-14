@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Notewise speaker identity",
+  "version": "0.1.0",
+  "description": "Tells your local Notewise engine who is speaking in a meeting. Sends names and speaking times only — never audio, video, or chat.",
+  "permissions": [],
+  "host_permissions": [
+    "http://127.0.0.1:47821/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://*.zoom.us/wc/*",
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*"
+      ],
+      "js": ["src/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/session.js", "src/platforms.js", "src/tracker.js", "src/engine.js"],
+      "matches": [
+        "https://meet.google.com/*",
+        "https://*.zoom.us/*",
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*"
+      ]
+    }
+  ],
+  "_comments": {
+    "permissions": "Empty on purpose. This extension reads the participant roster of a page the user is already on and posts to loopback. It needs no tabCapture, no storage, no scripting, and no activeTab — see README.md.",
+    "host_permissions": "Loopback only, and one port. The engine binds 127.0.0.1 and refuses anything else.",
+    "all_frames": "The roster is in the top frame. Injecting into subframes would duplicate every observation.",
+    "web_accessible_resources": "A Manifest V3 content script is not a module, so content.js reaches these by dynamic import. Scoped to the four meeting origins rather than <all_urls> so no other site can load them."
+  }
+}

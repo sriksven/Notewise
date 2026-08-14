@@ -1,0 +1,10 @@
+{
+  "name": "notewise-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reports who is speaking in a meeting to the local Notewise engine. No build step: the sources are what ships.",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
