@@ -34,7 +34,6 @@ pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy};
 pub use error::{ConnectorError, Result};
 pub use keychain::KeychainStore;
 pub use registry::ConnectorRegistry;
-// `sinks` also grows VaultSink (Task 12) and WebhookSink (Task 13); only MockConnector exists
-// so far, so it is the only one re-exported here.
-pub use sinks::MockConnector;
+// `sinks` also grows WebhookSink (Task 13), which stays pending until that task lands.
+pub use sinks::{MockConnector, VaultSink};
 pub use types::{Cursor, ExternalRef, Health, Inbound, Operation, Outbound, PullBatch};
