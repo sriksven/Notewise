@@ -6,6 +6,12 @@
  * handling to get wrong.
  */
 
+import type { PermissionReadiness, SetupReadiness } from "../onboarding/readiness";
+
+// Re-exported so callers can keep importing every API type from one place. The shapes are
+// defined beside the pure logic that reasons about them, which has no other dependency.
+export type { PermissionReadiness, SetupReadiness };
+
 export interface Health {
   status: string;
   schema_version: number;
@@ -284,6 +290,27 @@ export const api = {
     }),
 
   downloads: () => request<DownloadState[]>("/v1/downloads"),
+
+  /**
+   * What first-run setup still needs.
+   *
+   * Never prompts — permission status is read without opening a device, so calling this on
+   * mount cannot raise an OS dialog before the user has pressed anything.
+   */
+  setup: () => request<SetupReadiness>("/v1/setup"),
+
+  /**
+   * Mark setup finished.
+   *
+   * Rejects with a 409 when a required step is unsatisfied, so a UI bug cannot let anyone
+   * past the gate. Completing twice returns the original timestamp.
+   */
+  completeSetup: () =>
+    request<{ completed_at: string }>("/v1/setup/complete", { method: "POST" }),
+
+  /** Ask the OS for a capability. May raise a permission dialog. */
+  requestPermission: (kind: "microphone" | "system_audio") =>
+    request<PermissionReadiness>(`/v1/permissions/${kind}`, { method: "POST" }),
 
   /**
    * Stream a download's progress.

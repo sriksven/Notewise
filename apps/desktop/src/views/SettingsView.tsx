@@ -1,22 +1,15 @@
 import { useEffect, useState } from "react";
 import { Check, Cloud, Download, HardDrive, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { api, ApiError, type DownloadState, type BackendInfo, type ModelInfo } from "../lib/api";
-
-/** Bytes as GB/MB. Model sizes span 77 MB to 3 GB, so one unit does not serve both. */
-function size(bytes: number): string {
-  return bytes >= 1_000_000_000
-    ? `${(bytes / 1_000_000_000).toFixed(1)} GB`
-    : `${Math.round(bytes / 1_000_000)} MB`;
-}
+import { api, ApiError, type BackendInfo, type ModelInfo } from "../lib/api";
+import { size } from "../lib/format";
+import { useModelDownload } from "../lib/useModelDownload";
 
 export function SettingsView() {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [active, setActive] = useState<{ model: string; is_local: boolean } | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [directory, setDirectory] = useState("");
-  const [downloading, setDownloading] = useState<string | null>(null);
-  const [progress, setProgress] = useState<DownloadState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -36,80 +29,18 @@ export function SettingsView() {
     void load();
   }, []);
 
-  const download = async (name: string) => {
-    setDownloading(name);
-    setProgress(null);
-    setError(null);
-
-    try {
-      const started = await api.downloadModel(name);
-
-      // Already on disk: the POST answers `done` and there is nothing to stream.
-      if (started.status === "done") {
-        setDownloading(null);
-        await load();
-        return;
-      }
-
-      setProgress(started);
-      api.watchDownload(
-        name,
-        setProgress,
-        async () => {
-          setDownloading(null);
-          setProgress(null);
-          await load();
-        },
-        (message) => {
-          setError(message);
-          setDownloading(null);
-          setProgress(null);
-        },
-      );
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Download failed.");
-      setDownloading(null);
-    }
-  };
-
-  // Recover a download already running when this view mounted — the engine owns it, so
-  // switching away from Settings and back must not lose the progress bar.
-  useEffect(() => {
-    let cancel: (() => void) | undefined;
-
-    void api.downloads().then((states) => {
-      const running = states.find((s) => s.status === "downloading");
-      if (!running) return;
-
-      setDownloading(running.model);
-      setProgress(running);
-      cancel = api.watchDownload(
-        running.model,
-        setProgress,
-        async () => {
-          setDownloading(null);
-          setProgress(null);
-          await load();
-        },
-        (message) => {
-          setError(message);
-          setDownloading(null);
-          setProgress(null);
-        },
-      );
-    });
-
-    return () => cancel?.();
-  }, []);
+  // The download itself belongs to the engine; this only follows it. Shared with the
+  // first-run setup wizard, which needs exactly the same behaviour.
+  const { downloading, progress, error: downloadError, start } = useModelDownload(load);
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-2xl space-y-8">
         <h1 className="text-[20px] font-semibold tracking-tight">Settings</h1>
 
-        {error && (
+        {(error ?? downloadError) && (
           <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-            {error}
+            {error ?? downloadError}
           </div>
         )}
 
@@ -205,7 +136,7 @@ export function SettingsView() {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => download(model.name)}
+                    onClick={() => void start(model.name)}
                     disabled={downloading !== null}
                     className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline
                                px-2.5 py-1 text-[12px] text-neutral-700 transition
