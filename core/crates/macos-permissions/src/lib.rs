@@ -58,6 +58,38 @@ pub fn microphone() -> Authorization {
     Authorization::Unknown
 }
 
+#[cfg(target_os = "macos")]
+mod screen {
+    // CoreGraphics, not AVFoundation: screen recording is not an `AVCaptureDevice` media type,
+    // and this is the only public call that reads the grant without asking for it.
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        /// Whether this process currently holds the screen-recording grant. Does not prompt.
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+
+    pub fn granted() -> bool {
+        // The function takes no arguments, returns a plain bool, and only reads TCC state for
+        // the calling process.
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+}
+
+/// Whether this process may capture the screen — which on macOS is what gates system audio.
+///
+/// Only two answers, and that is the API's limit rather than a simplification: preflight
+/// reports `false` both for "never asked" and for "asked and refused". Distinguishing them
+/// needs the memory of having asked, which belongs to whoever did the asking.
+#[cfg(target_os = "macos")]
+pub fn screen_recording_granted() -> bool {
+    screen::granted()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn screen_recording_granted() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -44,20 +44,39 @@ pub fn permission_status(kind: CaptureKind) -> PermissionStatus {
 fn recorded_status(kind: CaptureKind) -> PermissionStatus {
     use notewise_macos_permissions::Authorization;
 
-    // Microphone is the AVFoundation audio capability, and the only one this can answer for.
-    // System audio is ScreenCaptureKit, whose authorization is not an `AVCaptureDevice` media
-    // type; `unavailable_reason` has already handled the unsigned case, and for a signed bundle
-    // the honest answer is that we have not asked.
-    if !matches!(kind, CaptureKind::Microphone) {
-        return PermissionStatus::NotRequested;
-    }
+    match kind {
+        CaptureKind::Microphone => match notewise_macos_permissions::microphone() {
+            Authorization::Granted => PermissionStatus::Granted,
+            Authorization::Denied => PermissionStatus::Denied,
+            Authorization::NotDetermined | Authorization::Unknown => PermissionStatus::NotRequested,
+        },
 
-    match notewise_macos_permissions::microphone() {
-        Authorization::Granted => PermissionStatus::Granted,
-        Authorization::Denied => PermissionStatus::Denied,
-        Authorization::NotDetermined | Authorization::Unknown => PermissionStatus::NotRequested,
+        // System audio is ScreenCaptureKit, gated by the screen-recording grant. Preflight is
+        // authoritative for "yes" and ambiguous for "no" — it cannot separate never-asked from
+        // refused — so a refusal we saw ourselves fills that gap. Without it, asking and being
+        // turned down reads as never having asked, and the button appears to do nothing.
+        CaptureKind::SystemAudio => {
+            if notewise_macos_permissions::screen_recording_granted() {
+                PermissionStatus::Granted
+            } else if SYSTEM_AUDIO_REFUSED.load(std::sync::atomic::Ordering::Relaxed) {
+                PermissionStatus::Denied
+            } else {
+                PermissionStatus::NotRequested
+            }
+        }
+
+        _ => PermissionStatus::NotRequested,
     }
 }
+
+/// Whether this process has already asked for screen recording and been turned down.
+///
+/// Deliberately not persisted. The grant can be given in System Settings at any moment, and
+/// preflight reports that truthfully on the next launch — a remembered "denied" written to disk
+/// would outlive the refusal and tell the user they cannot do something they now can.
+#[cfg(all(target_os = "macos", feature = "os-capture"))]
+static SYSTEM_AUDIO_REFUSED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Everywhere else there is nothing to read, so the honest answer is that we have not asked.
 #[cfg(not(all(target_os = "macos", feature = "os-capture")))]
@@ -69,10 +88,21 @@ fn recorded_status(_kind: CaptureKind) -> PermissionStatus {
 ///
 /// Blocking: it opens an audio device. Callers on an async runtime must use `spawn_blocking`.
 pub fn request_permission(kind: CaptureKind) -> PermissionStatus {
-    match unavailable_reason(kind) {
+    let status = match unavailable_reason(kind) {
         Some(reason) => PermissionStatus::Unavailable(reason),
         None => probe(kind),
+    };
+
+    // Remember a screen-recording refusal, because the OS will not tell us about it again:
+    // preflight reports the same `false` whether we were refused or never asked. Without this
+    // the next readiness read says "not requested", the row redraws unchanged, and pressing
+    // Enable looks like it did nothing.
+    #[cfg(all(target_os = "macos", feature = "os-capture"))]
+    if matches!(kind, CaptureKind::SystemAudio) && status == PermissionStatus::Denied {
+        SYSTEM_AUDIO_REFUSED.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+
+    status
 }
 
 /// Why `kind` cannot be granted here, or `None` when it can.
@@ -285,5 +315,28 @@ mod tests {
             request_permission(CaptureKind::Microphone),
             PermissionStatus::Granted | PermissionStatus::Denied
         ));
+    }
+
+    /// The bug this pairs with, for the capability a test binary cannot reach.
+    ///
+    /// A test runs as a loose executable, where system audio is `Unavailable` before any of
+    /// this is consulted — so the interesting path only exists inside an application bundle.
+    /// What it pins: asking and being refused must still read as refused afterwards. macOS
+    /// preflight cannot say so on its own, and when the answer regressed to "not requested"
+    /// the Enable button appeared to do nothing at all.
+    #[test]
+    #[ignore = "requires running from inside a .app bundle, which cargo test does not"]
+    #[cfg(all(target_os = "macos", feature = "os-capture"))]
+    fn a_refused_system_audio_request_is_still_refused_when_read_back() {
+        let asked = request_permission(CaptureKind::SystemAudio);
+        if asked != PermissionStatus::Denied {
+            return; // Granted on this machine; nothing to pin.
+        }
+
+        assert_eq!(
+            permission_status(CaptureKind::SystemAudio),
+            PermissionStatus::Denied,
+            "a refusal the OS will not repeat has to be remembered for this process"
+        );
     }
 }
