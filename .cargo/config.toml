@@ -1,0 +1,18 @@
+# Swift runtime search path for macOS capture backends.
+#
+# ScreenCaptureKit reaches `audio-capture` through bindings carrying a Swift shim, and Swift's
+# runtime (`libswift_Concurrency.dylib` and friends) resolves from the dyld shared cache via
+# `/usr/lib/swift` — nowhere the default search path looks.
+#
+# `audio-capture/build.rs` emits the same rpath, but a `cargo:rustc-link-arg` from a *library*
+# build script is not propagated to the final binary link. Only the crate being linked can
+# contribute link arguments, so the flag has to live here to reach `notewise`, the Tauri shell,
+# and every test binary alike.
+#
+# The symptom without it is the worst kind: everything compiles, every test passes, and the
+# binary aborts at startup with "Library not loaded: @rpath/libswift_Concurrency.dylib".
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
