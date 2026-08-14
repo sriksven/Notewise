@@ -109,12 +109,37 @@ pub(crate) fn apply_connect(
         return Err(ApiError::BadRequest("target must not be empty".into()));
     }
 
+    // Reject ids this build has no connector for. Without this, POST /v1/connectors/jira
+    // succeeds, writes an account row, and then `build_registry` quietly skips it — the
+    // "half a connector that fails invisibly" failure this design exists to avoid, moved
+    // from the registry to the API boundary.
+    if !matches!(id, "vault" | "webhook") {
+        return Err(ApiError::NotFound(format!(
+            "no connector '{id}' in this build"
+        )));
+    }
+
+    // Generate a signing secret only when there isn't one. `connect` is an upsert, so
+    // "change my webhook URL" is the same call as "connect my webhook" — rotating the key
+    // there would silently break every receiver still validating the old one, and since the
+    // secret is shown exactly once, a user who changed the URL could not recover it.
+    // Rotation should be an explicit act, not a side effect of editing a field.
     let signing_secret = if id == "webhook" {
-        let secret = generate_signing_secret();
-        credentials
-            .set("webhook", SIGNING_KEY, &secret)
-            .map_err(|e| ApiError::Internal(format!("cannot store the signing secret: {e}")))?;
-        Some(secret.expose().to_string())
+        match credentials
+            .get("webhook", SIGNING_KEY)
+            .map_err(|e| ApiError::Internal(format!("cannot read the signing secret: {e}")))?
+        {
+            Some(_) => None,
+            None => {
+                let secret = generate_signing_secret();
+                credentials
+                    .set("webhook", SIGNING_KEY, &secret)
+                    .map_err(|e| {
+                        ApiError::Internal(format!("cannot store the signing secret: {e}"))
+                    })?;
+                Some(secret.expose().to_string())
+            }
+        }
     } else {
         None
     };
@@ -132,12 +157,20 @@ pub(crate) fn apply_disconnect(
     credentials: &dyn CredentialStore,
     id: &str,
 ) -> ApiResult<()> {
-    // Credential first: an account row without a credential is inert, but a credential
-    // without an account row is an orphan nothing will ever clean up.
+    // Account row first, then the credential. These live in two stores with no transaction
+    // between them, so one of the two failure shapes is going to happen eventually and the
+    // question is which one you want.
+    //
+    // Deleting the credential first leaves an account still marked Connected with no secret,
+    // which `build_registry` skips — so the connector goes silently dark while the UI still
+    // shows it connected. Deleting the row first leaves an orphaned keychain entry, which is
+    // inert: nothing reads a credential except by way of an account row, and the next
+    // `connect` overwrites it. `disconnect` on an absent account already succeeds, so
+    // retrying finishes the job.
+    ConnectorAccountRepository::new(db).disconnect(id)?;
     credentials
         .delete(id, SIGNING_KEY)
         .map_err(|e| ApiError::Internal(format!("cannot remove the credential: {e}")))?;
-    ConnectorAccountRepository::new(db).disconnect(id)?;
     Ok(())
 }
 
@@ -264,6 +297,73 @@ mod tests {
         .unwrap();
 
         assert!(response.signing_secret.is_none());
+    }
+
+    #[test]
+    fn reconnecting_preserves_the_existing_signing_secret() {
+        let db = Database::open_in_memory().unwrap();
+        let store = notewise_connectors::MemoryStore::new();
+
+        let first = apply_connect(
+            &db,
+            &store,
+            "webhook",
+            &ConnectRequest {
+                target: "https://a.example/hook".into(),
+            },
+        )
+        .unwrap();
+        let issued = first.signing_secret.expect("first connect issues a secret");
+
+        let second = apply_connect(
+            &db,
+            &store,
+            "webhook",
+            &ConnectRequest {
+                target: "https://b.example/hook".into(),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            second.signing_secret.is_none(),
+            "changing the URL must not rotate the key"
+        );
+        assert_eq!(
+            store
+                .get("webhook", notewise_connectors::SIGNING_KEY)
+                .unwrap()
+                .map(|s| s.expose().to_string()),
+            Some(issued),
+            "a receiver validating the old secret must keep working"
+        );
+    }
+
+    #[test]
+    fn an_unknown_connector_id_is_rejected() {
+        let db = Database::open_in_memory().unwrap();
+        let store = notewise_connectors::MemoryStore::new();
+
+        let result = apply_connect(
+            &db,
+            &store,
+            "jira",
+            &ConnectRequest {
+                target: "https://jira.example".into(),
+            },
+        );
+
+        assert!(
+            result.is_err(),
+            "an id with no connector in this build must not write an account row"
+        );
+        assert!(
+            ConnectorAccountRepository::new(&db)
+                .get("jira")
+                .unwrap()
+                .is_none(),
+            "a rejected connect must leave nothing behind"
+        );
     }
 
     #[test]
