@@ -12,6 +12,7 @@ import { OPEN_SETTINGS_EVENT } from "./onboarding/SetupGate";
 import { AboutView } from "./views/AboutView";
 import { ChatView } from "./views/ChatView";
 import { SettingsView } from "./views/SettingsView";
+import { NotesView } from "./views/NotesView";
 import { SummaryView } from "./views/SummaryView";
 import { TicketsView } from "./views/TicketsView";
 import {
@@ -416,6 +417,7 @@ export default function App() {
               </>
             )}
 
+            {view === "notes" && <NotesView />}
             {view === "tickets" && <TicketsView />}
             {view === "settings" && <SettingsView />}
             {view === "about" && <AboutView health={health} />}
