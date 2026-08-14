@@ -24,7 +24,7 @@ rustfft.workspace = true
 screencapturekit = { version = "8", optional = true }
 # Reads an existing TCC grant without prompting. Its own crate because that needs `unsafe`,
 # which this crate forbids.
-notewise-macos-permissions = { path = "../macos-permissions", optional = true }
+notewise-macos-permissions = { workspace = true, optional = true }
 
 [features]
 default = []

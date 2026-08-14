@@ -26,7 +26,7 @@ exclude = ["apps/desktop/src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.86"
 license = "MIT"
 repository = "https://github.com/notewise/notewise"
 authors = ["Notewise contributors"]
@@ -38,6 +38,7 @@ notewise-storage = { path = "core/crates/storage", version = "0.1.0" }
 notewise-graph = { path = "core/crates/graph", version = "0.1.0" }
 notewise-ai-router = { path = "core/crates/ai-router", version = "0.1.0" }
 notewise-audio-capture = { path = "core/crates/audio-capture", version = "0.1.0" }
+notewise-macos-permissions = { path = "core/crates/macos-permissions", version = "0.1.0" }
 notewise-transcription = { path = "core/crates/transcription", version = "0.1.0" }
 notewise-diarization = { path = "core/crates/diarization", version = "0.1.0" }
 notewise-api-server = { path = "core/crates/api-server", version = "0.1.0" }

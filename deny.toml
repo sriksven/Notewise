@@ -19,6 +19,12 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "MPL-2.0", # File-level copyleft; linking is fine, modifications must be published.
+    # Covers `webpki-roots`, which is Mozilla's CA certificate list — data, not code, and
+    # reached only through `reqwest`'s rustls backend. The Community Data License
+    # Agreement's permissive variant imposes no copyleft and no obligation on what the data
+    # is used to produce, so it does not reach `core/` or `apps/`. Listed as a deliberate
+    # decision rather than to make a build pass.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 

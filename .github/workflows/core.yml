@@ -72,7 +72,13 @@ jobs:
 
       # Pinned to rust-version in the workspace manifest. Raising the MSRV should be a
       # deliberate change, not something that happens because a dependency moved.
-      - uses: dtolnay/rust-toolchain@1.82.0
+      #
+      # Raised 1.82 → 1.86, verified by checking against each toolchain rather than
+      # inferred. Edition 2024 forces 1.85 — 22 crates already in the lockfile (clap,
+      # indexmap, hashbrown, rand, getrandom, zeroize, ort) have adopted it — and the
+      # `icu` crates reqwest pulls in need 1.86 on top of that. Holding 1.82 would mean
+      # pinning all of them to older releases and forgoing their security updates.
+      - uses: dtolnay/rust-toolchain@1.86.0
 
       - uses: Swatinem/rust-cache@v2
 

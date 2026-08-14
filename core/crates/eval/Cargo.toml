@@ -8,6 +8,6 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-notewise-transcription = { path = "../transcription" }
+notewise-transcription.workspace = true
 serde.workspace = true
 thiserror.workspace = true
