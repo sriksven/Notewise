@@ -2,7 +2,14 @@ import { useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { api, ApiError } from "../lib/api";
-import { canFinish, firstUnsatisfied, stepsFor, type SetupReadiness, type StepId } from "./readiness";
+import {
+  canFinish,
+  firstUnsatisfied,
+  skipConsequences,
+  stepsFor,
+  type SetupReadiness,
+  type StepId,
+} from "./readiness";
 import { Stepper } from "./Stepper";
 import { BackendStep } from "./steps/BackendStep";
 import { ModelStep } from "./steps/ModelStep";
@@ -30,11 +37,15 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
   const isLast = index === order.length - 1;
   const ready = canFinish(readiness);
 
+  const skipping = skipConsequences(readiness);
+
   const finish = async () => {
     setFinishing(true);
     setError(null);
     try {
-      await api.completeSetup();
+      // The engine refuses an unsatisfied completion unless it is asked for deliberately, so
+      // the intent has to be passed along rather than inferred there.
+      await api.completeSetup(!ready);
       onFinished();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not finish setup.");
@@ -78,39 +89,50 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
         )}
 
         {step !== "welcome" && (
-          <div className="mx-auto mt-10 flex w-full max-w-md items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setStep(order[Math.max(0, index - 1)])}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-3 text-[13px]
-                         text-neutral-500 transition hover:text-neutral-900"
-            >
-              <ArrowLeft size={14} aria-hidden />
-              Back
-            </button>
+          <div className="mx-auto mt-10 w-full max-w-md">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setStep(order[Math.max(0, index - 1)])}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-3 text-[13px]
+                           text-neutral-500 transition hover:text-neutral-900"
+              >
+                <ArrowLeft size={14} aria-hidden />
+                Back
+              </button>
 
-            {isLast ? (
-              <button
-                type="button"
-                onClick={() => void finish()}
-                disabled={!ready || finishing}
-                title={ready ? undefined : "Every step above has to be resolved first"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-neutral-900
-                           px-6 py-3 text-[14px] font-medium text-white transition
-                           hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-              >
-                {finishing && <Loader2 size={15} className="animate-spin" aria-hidden />}
-                Finish setup
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setStep(order[index + 1])}
-                className="flex-1 rounded-lg bg-neutral-900 px-6 py-3 text-[14px] font-medium
-                           text-white transition hover:bg-neutral-800"
-              >
-                Continue
-              </button>
+              {isLast ? (
+                // Never disabled. A permission the user declined, or cannot grant, would
+                // otherwise leave the only way into the app greyed out on a screen with no
+                // other exit — a first launch that ends in a dead end.
+                <button
+                  type="button"
+                  onClick={() => void finish()}
+                  disabled={finishing}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-neutral-900
+                             px-6 py-3 text-[14px] font-medium text-white transition
+                             hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                >
+                  {finishing && <Loader2 size={15} className="animate-spin" aria-hidden />}
+                  {ready ? "Finish setup" : "Continue anyway"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setStep(order[index + 1])}
+                  className="flex-1 rounded-lg bg-neutral-900 px-6 py-3 text-[14px] font-medium
+                             text-white transition hover:bg-neutral-800"
+                >
+                  Continue
+                </button>
+              )}
+            </div>
+
+            {isLast && skipping.length > 0 && (
+              <p className="mt-3 text-center text-[12px] leading-relaxed text-neutral-500">
+                You can go in without finishing — but {skipping.join(", and ")}. Everything else
+                works, and Settings can pick this up later.
+              </p>
             )}
           </div>
         )}

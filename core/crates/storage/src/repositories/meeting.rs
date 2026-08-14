@@ -249,6 +249,36 @@ impl<'a> MeetingRepository<'a> {
         Ok(out)
     }
 
+    /// Which meeting each of these segments belongs to.
+    ///
+    /// Exists for search. A hit on a transcript segment is only useful if it can be opened, and
+    /// what a user wants to open is the meeting it was said in — the segment id on its own
+    /// names a row nothing in the product can navigate to.
+    ///
+    /// Batched rather than looked up one at a time: a search returns up to a hundred hits, and
+    /// a hundred round trips to answer one keystroke is a cost worth not paying.
+    pub fn segment_meetings(&self, segment_ids: &[Id]) -> Result<Vec<(Id, Id)>> {
+        if segment_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Placeholders are generated from the count and the ids are bound, so the ids
+        // themselves never reach the SQL text.
+        let placeholders = std::iter::repeat_n("?", segment_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, meeting_id FROM transcript_segments WHERE id IN ({placeholders})"
+        ))?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(segment_ids), |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Attach a speaker label to a segment. Called by `diarization` after the fact.
     pub fn set_segment_speaker(&self, segment_id: Id, speaker: &str) -> Result<()> {
         let changed = self.db.conn().execute(

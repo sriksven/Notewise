@@ -4,6 +4,7 @@ import {
   canFinish,
   firstUnsatisfied,
   regressions,
+  skipConsequences,
   stepsFor,
   type SetupReadiness,
 } from "./readiness";
@@ -116,5 +117,41 @@ describe("regressions", () => {
 
   it("is empty when nothing has regressed", () => {
     expect(regressions(snapshot())).toEqual([]);
+  });
+});
+
+describe("skipConsequences", () => {
+  it("is empty when there is nothing to give up", () => {
+    expect(skipConsequences(snapshot())).toEqual([]);
+  });
+
+  // The lock-out this exists to prevent: a declined microphone left Finish permanently disabled
+  // on the last screen of a first launch, with no other way into the app.
+  it("names what a declined microphone costs, rather than blocking", () => {
+    const declined = snapshot({
+      permissions: {
+        satisfied: false,
+        required: true,
+        microphone: { status: "denied", required: true, detail: null },
+        system_audio: { status: "unavailable", required: false, detail: "x" },
+      },
+    });
+
+    expect(canFinish(declined)).toBe(false);
+    expect(skipConsequences(declined)).toEqual([
+      "Notewise will not be able to hear a meeting",
+    ]);
+  });
+
+  it("lists every unfinished step in wizard order", () => {
+    const nothing = snapshot({
+      model: { satisfied: false, required: true },
+      backend: { satisfied: false, required: true },
+    });
+
+    expect(skipConsequences(nothing)).toEqual([
+      "meetings will not be transcribed",
+      "summaries, chat and suggested questions will not run",
+    ]);
   });
 });

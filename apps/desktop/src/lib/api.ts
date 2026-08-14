@@ -156,6 +156,13 @@ export interface SearchHit {
   id: string;
   title: string;
   snippet: string;
+  /**
+   * The meeting a transcript hit was said in, or null for kinds that belong to no meeting.
+   *
+   * `id` is the matching row, which is usually not something the UI can open. This is what a
+   * result navigates to.
+   */
+  meeting_id: string | null;
 }
 
 export interface RelatedNode {
@@ -303,11 +310,16 @@ export const api = {
   /**
    * Mark setup finished.
    *
-   * Rejects with a 409 when a required step is unsatisfied, so a UI bug cannot let anyone
-   * past the gate. Completing twice returns the original timestamp.
+   * Rejects with a 409 when a required step is unsatisfied, so a UI bug cannot let anyone past
+   * the gate by accident. `skip` is the deliberate override, for a user who cannot satisfy a
+   * step — it records completion and reports back what was left unresolved. Completing twice
+   * returns the original timestamp.
    */
-  completeSetup: () =>
-    request<{ completed_at: string }>("/v1/setup/complete", { method: "POST" }),
+  completeSetup: (skip = false) =>
+    request<{ completed_at: string; skipped: string[] }>(
+      `/v1/setup/complete${skip ? "?skip=true" : ""}`,
+      { method: "POST" },
+    ),
 
   /** Ask the OS for a capability. May raise a permission dialog. */
   requestPermission: (kind: "microphone" | "system_audio") =>

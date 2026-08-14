@@ -16,8 +16,6 @@ interface Props {
   /** The input the engine is capturing from, once it is recording. */
   device: string | null;
   onToggle: () => void;
-  onSummarize: () => void;
-  canSummarize: boolean;
   onExport: (variant: "full" | "brief") => void;
   canExport: boolean;
   onImport: () => void;
@@ -48,8 +46,6 @@ export function RecordDock({
   canRecord,
   device,
   onToggle,
-  onSummarize,
-  canSummarize,
   onExport,
   canExport,
   onImport,
@@ -150,27 +146,6 @@ export function RecordDock({
             className="absolute bottom-full right-0 mb-2 w-52 overflow-hidden rounded-xl
                        border border-hairline bg-white py-1 shadow-dock"
           >
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!canSummarize}
-              onClick={() => {
-                setMenuOpen(false);
-                onSummarize();
-              }}
-              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
-                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
-            >
-              Summarize this meeting
-            </button>
-            <p className="px-3 pb-1 pt-1 text-[11px] leading-snug text-neutral-400">
-              {canSummarize
-                ? "Runs on the configured backend."
-                : "Needs a finished meeting with a transcript."}
-            </p>
-
-            <div className="my-1 border-t border-hairline" />
-
             <button
               type="button"
               role="menuitem"

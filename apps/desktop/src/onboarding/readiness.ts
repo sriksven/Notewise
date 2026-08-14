@@ -84,3 +84,27 @@ export function canFinish(readiness: SetupReadiness): boolean {
 export function regressions(readiness: SetupReadiness): Step[] {
   return stepsFor(readiness).filter((step) => step.required && !step.satisfied);
 }
+
+/**
+ * What each step costs a user who leaves it unfinished.
+ *
+ * Written as consequences rather than as the name of the step. "Permissions is unsatisfied"
+ * describes the wizard's state; "Notewise will not be able to hear a meeting" describes theirs,
+ * and is what makes skipping an informed choice instead of a shrug.
+ */
+const CONSEQUENCE: Record<Exclude<StepId, "welcome">, string> = {
+  model: "meetings will not be transcribed",
+  backend: "summaries, chat and suggested questions will not run",
+  permissions: "Notewise will not be able to hear a meeting",
+};
+
+/**
+ * What is given up by finishing setup now, in the user's terms. Empty when nothing is.
+ *
+ * Setup can always be finished. A required step the user cannot satisfy — a grant that belongs
+ * to an administrator, a 3 GB download they do not want today — must not become a locked door
+ * on their own machine, and the parts of the app that need none of it still work.
+ */
+export function skipConsequences(readiness: SetupReadiness): string[] {
+  return regressions(readiness).map((step) => CONSEQUENCE[step.id as keyof typeof CONSEQUENCE]);
+}

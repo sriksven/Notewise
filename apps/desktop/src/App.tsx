@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, HelpCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
-import { MeetingList } from "./components/MeetingList";
-import { QuestionsPanel } from "./components/QuestionsPanel";
+import { IntelPanel } from "./components/IntelPanel";
+import { MeetingLibrary } from "./components/MeetingLibrary";
 import { RecordDock } from "./components/RecordDock";
 import { Sidebar, type View } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { TranscriptView } from "./components/TranscriptView";
+import { WorkspaceHeader, type Tab } from "./components/WorkspaceHeader";
 import { AboutView } from "./views/AboutView";
-import { CalendarView } from "./views/CalendarView";
 import { ChatView } from "./views/ChatView";
 import { SettingsView } from "./views/SettingsView";
 import { SummaryView } from "./views/SummaryView";
@@ -20,14 +20,23 @@ import {
   type Meeting,
   type Segment,
 } from "./lib/api";
+import { useSummary } from "./lib/useSummary";
 
 /** How often to ask the engine for clarifying questions while recording. */
 const QUESTION_POLL_MS = 30_000;
 
+/**
+ * The window.
+ *
+ * One meeting at a time, in four columns: what the app is (rail), which meeting (library), the
+ * meeting itself (workspace), and what it means (intelligence). The last of those is the point —
+ * decisions, commitments and the questions still worth asking sit beside the transcript as it
+ * arrives, rather than behind a screen nobody visits until the meeting is over.
+ */
 export default function App() {
-  const [view, setView] = useState<View>("home");
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [questionsOpen, setQuestionsOpen] = useState(true);
+  const [view, setView] = useState<View>("meetings");
+  const [tab, setTab] = useState<Tab>("transcript");
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const [health, setHealth] = useState<Health | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -44,11 +53,13 @@ export default function App() {
   /** Chosen spoken language, or null to let the model detect it. */
   const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const isRecording = recordingId !== null;
   const selectedMeeting = meetings.find((m) => m.id === selectedId) ?? null;
+  const summaryState = useSummary(selectedId);
 
   const report = useCallback((e: unknown) => {
     setError(e instanceof ApiError ? e.message : "Something went wrong.");
@@ -56,10 +67,7 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [nextHealth, nextMeetings] = await Promise.all([
-        api.health(),
-        api.meetings(50),
-      ]);
+      const [nextHealth, nextMeetings] = await Promise.all([api.health(), api.meetings(50)]);
       setHealth(nextHealth);
       setMeetings(nextMeetings);
       setError(null);
@@ -137,7 +145,7 @@ export default function App() {
   // interval here cannot become an over-eager panel. Failures are swallowed: a suggestion
   // that did not arrive is not worth an error banner during someone's meeting.
   useEffect(() => {
-    if (!recordingId || !questionsOpen) return;
+    if (!recordingId) return;
 
     let cancelled = false;
     const ask = async () => {
@@ -160,7 +168,7 @@ export default function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [recordingId, questionsOpen]);
+  }, [recordingId]);
 
   /**
    * Start or stop capture.
@@ -225,6 +233,8 @@ export default function App() {
           );
         }
         setQuestions([]);
+        setView("meetings");
+        setTab("transcript");
       }
       await refresh();
     } catch (e) {
@@ -234,13 +244,14 @@ export default function App() {
     }
   };
 
+  /** Run the model, then re-read the stored summary so every view of it agrees. */
   const summarize = async () => {
     if (!selectedId) return;
-    setBusy(true);
+    setSummarizing(true);
     setError(null);
     try {
       const result = await api.summarize(selectedId);
-      setView("summary");
+      await summaryState.reload();
       setNotice(
         `Summarized with ${result.model} — ${result.decisions} decision(s), ` +
           `${result.action_items} action item(s).`,
@@ -248,7 +259,7 @@ export default function App() {
     } catch (e) {
       report(e);
     } finally {
-      setBusy(false);
+      setSummarizing(false);
     }
   };
 
@@ -259,9 +270,7 @@ export default function App() {
    * gigabytes through HTTP to reach a file that is already there.
    */
   const importAudio = async () => {
-    const path = window.prompt(
-      "Path to a 32-bit float WAV file on this machine:",
-    );
+    const path = window.prompt("Path to an audio file on this machine:");
     if (!path?.trim()) return;
 
     setBusy(true);
@@ -273,6 +282,8 @@ export default function App() {
         language: language ?? undefined,
       });
       setSelectedId(result.meeting_id);
+      setView("meetings");
+      setTab("transcript");
       setNotice(
         `Imported ${Math.round(result.audio_ms / 1000)}s of audio — ` +
           `${result.segments} segment(s), ${result.speakers} speaker(s).`,
@@ -293,17 +304,31 @@ export default function App() {
     window.location.href = api.exportUrl(selectedId, variant);
   };
 
-  const showsTranscript = view === "home" || view === "record";
+  const select = (id: string) => {
+    setSelectedId(id);
+    setView("meetings");
+  };
+
+  const inWorkspace = view === "meetings";
 
   return (
     <div className="flex h-full overflow-hidden">
-      <Sidebar view={view} onChange={setView} isRecording={isRecording} />
+      <Sidebar
+        view={view}
+        onChange={setView}
+        isRecording={isRecording}
+        onGoLive={() => {
+          if (recordingId) select(recordingId);
+        }}
+      />
+
+      {inWorkspace && (
+        <MeetingLibrary meetings={meetings} selectedId={selectedId} onSelect={select} />
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
           health={health}
-          panelOpen={panelOpen}
-          onTogglePanel={() => setPanelOpen((open) => !open)}
           isRecording={isRecording}
           device={preferredDevice}
           onDeviceChange={setPreferredDevice}
@@ -314,14 +339,6 @@ export default function App() {
         />
 
         <div className="relative flex min-h-0 flex-1">
-          {panelOpen && showsTranscript && (
-            <MeetingList
-              meetings={meetings}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
-          )}
-
           <main className="flex min-w-0 flex-1 flex-col">
             {error && (
               <div
@@ -339,63 +356,73 @@ export default function App() {
               </div>
             )}
 
-            {showsTranscript && (
-              <TranscriptView segments={segments} isRecording={isRecording} />
+            {inWorkspace && (
+              <>
+                <WorkspaceHeader
+                  meeting={selectedMeeting}
+                  segments={segments}
+                  tab={tab}
+                  onTabChange={setTab}
+                  isRecording={isRecording && selectedId === recordingId}
+                  // Only where the dock is not: two stop buttons on one screen invite the
+                  // second press that starts a new recording.
+                  onStop={tab === "ask" && !busy ? toggleRecording : undefined}
+                  panelHidden={!panelOpen}
+                  onShowPanel={() => setPanelOpen(true)}
+                />
+
+                {tab === "transcript" && (
+                  <TranscriptView
+                    segments={segments}
+                    isRecording={isRecording && selectedId === recordingId}
+                    hasMeeting={selectedId !== null}
+                  />
+                )}
+                {tab === "summary" && (
+                  <SummaryView
+                    meetingId={selectedId}
+                    summary={summaryState.summary}
+                    loading={summaryState.loading}
+                    error={summaryState.error}
+                    hasTranscript={segments.length > 0}
+                    summarizing={summarizing}
+                    onSummarize={() => void summarize()}
+                  />
+                )}
+                {tab === "ask" && (
+                  <ChatView
+                    meetingId={selectedId}
+                    meetingTitle={selectedMeeting?.title ?? null}
+                    hasTranscript={segments.length > 0}
+                  />
+                )}
+              </>
             )}
-            {view === "calendar" && (
-              <CalendarView
-                meetings={meetings}
-                selectedId={selectedId}
-                onSelect={(id) => {
-                  setSelectedId(id);
-                  setView("home");
-                }}
-              />
-            )}
-            {view === "chat" && (
-              <ChatView
-                meetingId={selectedId}
-                meetingTitle={selectedMeeting?.title ?? null}
-                hasTranscript={segments.length > 0}
-              />
-            )}
-            {view === "summary" && (
-              <SummaryView
-                meetingId={selectedId}
-                meetingTitle={selectedMeeting?.title ?? null}
-                hasTranscript={segments.length > 0}
-              />
-            )}
+
             {view === "settings" && <SettingsView />}
             {view === "about" && <AboutView health={health} />}
           </main>
 
-          {showsTranscript && questionsOpen && isRecording && (
-            <QuestionsPanel
-              questions={questions}
-              onDismiss={(question) =>
+          {inWorkspace && panelOpen && (
+            <IntelPanel
+              meetingId={selectedId}
+              summary={summaryState.summary}
+              summaryLoading={summaryState.loading}
+              questions={selectedId === recordingId ? questions : []}
+              isRecording={isRecording && selectedId === recordingId}
+              hasTranscript={segments.length > 0}
+              summarizing={summarizing}
+              onSummarize={() => void summarize()}
+              onDismissQuestion={(question) =>
                 setQuestions((current) => current.filter((q) => q !== question))
               }
-              onClose={() => setQuestionsOpen(false)}
+              onClose={() => setPanelOpen(false)}
             />
           )}
 
-          {/* Re-open affordance, so dismissing the panel is not a one-way door. */}
-          {showsTranscript && !questionsOpen && isRecording && (
-            <button
-              type="button"
-              onClick={() => setQuestionsOpen(true)}
-              aria-label="Show suggested questions"
-              title="Show suggested questions"
-              className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center
-                         rounded-full border border-hairline bg-white text-neutral-500
-                         shadow-sm transition hover:text-neutral-900"
-            >
-              <HelpCircle size={14} aria-hidden />
-            </button>
-          )}
-
-          {showsTranscript && (
+          {/* Not on Ask: the dock floats bottom-centre, which is exactly where that tab puts
+              its message box, and a button sitting on top of a text field is not a control. */}
+          {inWorkspace && tab !== "ask" && (
             <RecordDock
               isRecording={isRecording}
               startedAt={startedAt}
@@ -403,12 +430,10 @@ export default function App() {
               canRecord={health?.can_record ?? false}
               device={device}
               onToggle={toggleRecording}
-              onSummarize={summarize}
-              canSummarize={selectedId !== null && !isRecording && segments.length > 0}
-              onExport={exportMeeting}
-              canExport={selectedId !== null}
               onImport={importAudio}
               canImport={(health?.can_record ?? false) && !isRecording}
+              onExport={exportMeeting}
+              canExport={selectedId !== null}
             />
           )}
         </div>

@@ -1,20 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Check,
-  ChevronRight,
-  Globe,
-  Mic,
-  Settings2,
-  ShieldAlert,
-  ShieldCheck,
-} from "lucide-react";
+import { Check, Globe, Mic, Settings2, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { api, type BackendInfo, type DeviceInfo, type Health, type LanguageOption } from "../lib/api";
 
 interface Props {
   health: Health | null;
-  onTogglePanel: () => void;
-  panelOpen: boolean;
   /** Locked while recording: changing input or language mid-meeting cannot take effect. */
   isRecording: boolean;
   device: string | null;
@@ -140,8 +130,6 @@ function Item({
  */
 export function TopBar({
   health,
-  onTogglePanel,
-  panelOpen,
   isRecording,
   device,
   onDeviceChange,
@@ -184,22 +172,6 @@ export function TopBar({
 
   return (
     <header className="chrome relative flex h-14 shrink-0 items-center justify-center border-b border-hairline px-3">
-      <button
-        type="button"
-        onClick={onTogglePanel}
-        aria-label={panelOpen ? "Hide meeting list" : "Show meeting list"}
-        aria-expanded={panelOpen}
-        title={panelOpen ? "Hide meeting list" : "Show meeting list"}
-        className="absolute left-3 flex h-7 w-7 items-center justify-center rounded-full border border-hairline
-                   bg-white text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-900"
-      >
-        <ChevronRight
-          size={15}
-          className={`transition-transform duration-200 ${panelOpen ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
-
       <div className="flex items-center gap-2">
         <Pill
           icon={<Settings2 size={14} aria-hidden />}

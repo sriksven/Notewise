@@ -1212,11 +1212,28 @@ async fn setup_readiness(
     Ok(Json(readiness(&state).await?))
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct CompleteSetupQuery {
+    /// Finish with required steps still unsatisfied.
+    ///
+    /// Has to be asked for explicitly. Without it an accidental call is still refused, which is
+    /// the whole point of checking server-side — but a user who cannot satisfy a step is not
+    /// thereby locked out of their own machine.
+    #[serde(default)]
+    skip: bool,
+}
+
 /// Mark first-run setup finished.
 ///
-/// Re-checks readiness server-side. The wizard already disables its Finish button, but a gate
-/// enforced only in the UI is not a gate.
-async fn complete_setup(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
+/// Re-checks readiness server-side, because a gate enforced only in the UI is not a gate. The
+/// check refuses an *unintended* completion; it is not a capability lock. A denied microphone is
+/// not always something the user can reverse — it may belong to an administrator, or they may
+/// only want to import files today — and refusing to open the app over it would strand them with
+/// no way forward. `?skip=true` records that, and the answer names what was left unresolved.
+async fn complete_setup(
+    State(state): State<Shared>,
+    Query(params): Query<CompleteSetupQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
     let readiness = readiness(&state).await?;
 
     // Already finished: answer with the original timestamp. Rewriting it would make a
@@ -1227,7 +1244,7 @@ async fn complete_setup(State(state): State<Shared>) -> ApiResult<Json<serde_jso
     }
 
     let unsatisfied = readiness.unsatisfied();
-    if !unsatisfied.is_empty() {
+    if !unsatisfied.is_empty() && !params.skip {
         return Err(ApiError::Conflict(format!(
             "setup is not finished: {} still {} attention",
             unsatisfied.join(", "),
@@ -1245,8 +1262,18 @@ async fn complete_setup(State(state): State<Shared>) -> ApiResult<Json<serde_jso
         SettingsRepository::new(&db).set(crate::setup::COMPLETED_KEY, &stamp)?;
     }
 
-    tracing::info!("first-run setup completed");
-    Ok(Json(serde_json::json!({ "completed_at": stamp })))
+    if unsatisfied.is_empty() {
+        tracing::info!("first-run setup completed");
+    } else {
+        tracing::warn!(skipped = ?unsatisfied, "first-run setup completed with steps skipped");
+    }
+
+    // The skipped steps are reported back rather than swallowed: a client that let someone
+    // through needs to be able to say what will not work, and `GET /v1/setup` keeps answering
+    // truthfully afterwards.
+    Ok(Json(
+        serde_json::json!({ "completed_at": stamp, "skipped": unsatisfied }),
+    ))
 }
 
 /// Ask the OS for a capability, prompting if it decides to.
@@ -1537,6 +1564,12 @@ struct SearchHitView {
     id: Id,
     title: String,
     snippet: String,
+    /// The meeting a transcript hit was said in, so a result can be opened.
+    ///
+    /// Null for kinds that do not belong to a meeting. Without it a search for a phrase someone
+    /// remembers hearing returns the id of a transcript row, which no screen can show — the
+    /// index knew the answer and the API threw it away.
+    meeting_id: Option<Id>,
 }
 
 async fn search(
@@ -1546,15 +1579,52 @@ async fn search(
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let db = state.db().await;
 
+    let hits = SearchRepository::new(&db).search(&query.q, limit)?;
+
+    let segment_ids: Vec<Id> = hits
+        .iter()
+        .filter(|hit| hit.entity_kind == "transcript_segment")
+        .map(|hit| hit.entity_id)
+        .collect();
+
+    let owners: std::collections::HashMap<Id, Id> = MeetingRepository::new(&db)
+        .segment_meetings(&segment_ids)?
+        .into_iter()
+        .collect();
+
+    // A transcript segment has no title of its own, so it borrows the meeting's — a result
+    // reading "Postgres migration sync" is something a user can recognise; a blank one is not.
+    let titles: std::collections::HashMap<Id, String> = {
+        let meetings = MeetingRepository::new(&db);
+        let mut titles = std::collections::HashMap::new();
+        for meeting_id in owners.values() {
+            if let std::collections::hash_map::Entry::Vacant(slot) = titles.entry(*meeting_id) {
+                if let Ok(meeting) = meetings.get(*meeting_id) {
+                    slot.insert(meeting.title);
+                }
+            }
+        }
+        titles
+    };
+
     Ok(Json(
-        SearchRepository::new(&db)
-            .search(&query.q, limit)?
-            .into_iter()
-            .map(|hit| SearchHitView {
-                kind: hit.entity_kind,
-                id: hit.entity_id,
-                title: hit.title,
-                snippet: hit.snippet,
+        hits.into_iter()
+            .map(|hit| {
+                let meeting_id = owners.get(&hit.entity_id).copied();
+                let title = match (&hit.title, meeting_id) {
+                    (title, Some(meeting)) if title.is_empty() => {
+                        titles.get(&meeting).cloned().unwrap_or_default()
+                    }
+                    (title, _) => title.clone(),
+                };
+
+                SearchHitView {
+                    kind: hit.entity_kind,
+                    id: hit.entity_id,
+                    title,
+                    snippet: hit.snippet,
+                    meeting_id,
+                }
             })
             .collect(),
     ))
@@ -1843,6 +1913,51 @@ mod tests {
         let hits = hits.as_array().unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["kind"], "note");
+    }
+
+    /// Searching for a phrase someone remembers hearing has to lead back to the meeting. The
+    /// hit is a transcript row, which no screen can open on its own — so it has to carry the
+    /// meeting it belongs to, and borrow that meeting's name.
+    #[tokio::test]
+    async fn a_transcript_hit_names_the_meeting_it_can_be_opened_in() {
+        let app = app();
+        let (_, meeting) = call(
+            &app,
+            post(
+                "/v1/meetings",
+                serde_json::json!({"title": "Postgres migration sync"}),
+            ),
+        )
+        .await;
+        let meeting_id = meeting["id"].as_str().unwrap().to_string();
+
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{meeting_id}/transcript"),
+                serde_json::json!([{
+                    "text": "Are we keeping the read replica after the split?",
+                    "start_ms": 0,
+                    "end_ms": 4000
+                }]),
+            ),
+        )
+        .await;
+
+        let (status, hits) = call(&app, get("/v1/search?q=read%20replica")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let hits = hits.as_array().unwrap();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0]["kind"], "transcript_segment");
+        assert_eq!(
+            hits[0]["meeting_id"], meeting_id,
+            "the hit must name the meeting it can be opened in"
+        );
+        assert_eq!(
+            hits[0]["title"], "Postgres migration sync",
+            "a segment has no title of its own, so it borrows the meeting's"
+        );
     }
 
     #[tokio::test]
@@ -2822,6 +2937,47 @@ mod tests {
             body["error"].as_str().unwrap().contains("model"),
             "the refusal must name the missing step, got {}",
             body["error"]
+        );
+    }
+
+    /// The gate refuses an unintended completion; it must not be a lock-out. Someone who cannot
+    /// satisfy a step — a grant that belongs to an administrator, a model they do not want to
+    /// download today — has to be able to reach the app, and the answer has to say what they
+    /// skipped rather than report a clean setup.
+    #[tokio::test]
+    async fn setup_can_be_skipped_explicitly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let app = app_with_model_dir(dir.path());
+
+        let (status, body) = json(
+            &app,
+            Request::post("/v1/setup/complete?skip=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["completed_at"].is_string(), "{body}");
+        assert!(
+            body["skipped"]
+                .as_array()
+                .expect("the skipped steps")
+                .iter()
+                .any(|step| step == "model"),
+            "the answer must name what was skipped, got {body}"
+        );
+
+        // Skipping records that the wizard is done, not that the machine is capable. The banner
+        // that nags afterwards reads this, so it has to keep telling the truth.
+        let (status, readiness) =
+            json(&app, Request::get("/v1/setup").body(Body::empty()).unwrap()).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(readiness["completed_at"].is_string(), "{readiness}");
+        assert_eq!(
+            readiness["steps"]["model"]["satisfied"], false,
+            "skipping must not fake readiness, got {readiness}"
         );
     }
 
