@@ -1,0 +1,29 @@
+[package]
+name = "notewise-connectors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The seam every external service in Notewise hides behind."
+
+[dependencies]
+notewise-storage.workspace = true
+notewise-graph.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
+keyring.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile.workspace = true
+axum.workspace = true

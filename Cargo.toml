@@ -8,6 +8,7 @@ members = [
     "core/crates/ai-router",
     "core/crates/storage",
     "core/crates/graph",
+    "core/crates/connectors",
     "core/crates/sync-client",
     "core/crates/api-server",
     "core/crates/mcp-server",
