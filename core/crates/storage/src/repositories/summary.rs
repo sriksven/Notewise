@@ -338,6 +338,74 @@ impl<'a> SummaryRepository<'a> {
         Ok(())
     }
 
+    /// One action item by id.
+    pub fn action_item(&self, id: Id) -> Result<ActionItem> {
+        self.db
+            .conn()
+            .query_row(
+                "SELECT id, meeting_id, summary_id, text, owner, owner_person_id, due_at, status,
+                        created_at, updated_at
+                 FROM action_items WHERE id = ?1",
+                rusqlite::params![id],
+                map_action_item,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StorageError::not_found("ActionItem", id),
+                other => other.into(),
+            })
+            .and_then(|r| r)
+    }
+
+    /// Set or clear an action item's due date. `None` clears it.
+    pub fn set_action_item_due(&self, id: Id, due_at: Option<DateTime<Utc>>) -> Result<()> {
+        let changed = self.db.conn().execute(
+            "UPDATE action_items SET due_at = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, due_at, Utc::now()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("ActionItem", id));
+        }
+        Ok(())
+    }
+
+    /// Point an action item at a known person, or clear the link with `None`.
+    ///
+    /// Leaves the free-text `owner` alone. The two are independent on purpose: a transcript
+    /// may name someone this install has no row for, and resolving that later should not
+    /// erase what was actually said.
+    pub fn set_action_item_person(&self, id: Id, person_id: Option<Id>) -> Result<()> {
+        let changed = self.db.conn().execute(
+            "UPDATE action_items SET owner_person_id = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, person_id, Utc::now()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("ActionItem", id));
+        }
+        Ok(())
+    }
+
+    pub fn delete_action_item(&self, id: Id) -> Result<()> {
+        let changed = self.db.conn().execute(
+            "DELETE FROM action_items WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("ActionItem", id));
+        }
+        Ok(())
+    }
+
+    pub fn delete_decision(&self, id: Id) -> Result<()> {
+        let changed = self
+            .db
+            .conn()
+            .execute("DELETE FROM decisions WHERE id = ?1", rusqlite::params![id])?;
+        if changed == 0 {
+            return Err(StorageError::not_found("Decision", id));
+        }
+        Ok(())
+    }
+
     pub fn set_action_item_status(&self, id: Id, status: WorkStatus) -> Result<()> {
         let changed = self.db.conn().execute(
             "UPDATE action_items SET status = ?2, updated_at = ?3 WHERE id = ?1",

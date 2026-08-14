@@ -30,7 +30,7 @@ pub use search::{SearchHit, SearchRepository};
 pub use series::{MeetingSeriesRepository, NewMeetingSeries};
 pub use setting::SettingsRepository;
 pub use summary::{NewActionItem, NewDecision, NewSummary, SummaryRepository};
-pub use ticket::{NewTicket, TicketRepository};
+pub use ticket::{NewTicket, TicketEdit, TicketRepository};
 pub use workspace::{NewProject, NewWorkspace, ProjectRepository, WorkspaceRepository};
 
 use crate::error::{Result, StorageError};

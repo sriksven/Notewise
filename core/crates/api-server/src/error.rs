@@ -66,6 +66,11 @@ impl ApiError {
             ApiError::Storage(StorageError::SchemaTooNew { .. }) => {
                 (StatusCode::SERVICE_UNAVAILABLE, "schema_too_new")
             }
+            // The caller sent fields that contradict each other. Their fault, not ours, and
+            // retrying the same body will fail the same way — so 400, not 500.
+            ApiError::Storage(StorageError::Invalid { .. }) => {
+                (StatusCode::BAD_REQUEST, "bad_request")
+            }
             ApiError::Storage(_) => (StatusCode::INTERNAL_SERVER_ERROR, "storage_error"),
 
             ApiError::Graph(notewise_graph::GraphError::DepthTooLarge(_)) => {

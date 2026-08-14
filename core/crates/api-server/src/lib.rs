@@ -35,6 +35,7 @@ pub mod recording;
 mod routes;
 mod setup;
 mod state;
+mod workspace;
 
 pub use downloads::{DownloadManager, DownloadState, DownloadStatus};
 pub use error::{ApiError, ApiResult};

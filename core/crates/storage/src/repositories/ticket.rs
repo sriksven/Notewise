@@ -17,6 +17,15 @@ pub struct NewTicket {
     pub due_at: Option<DateTime<Utc>>,
 }
 
+/// A partial edit. `None` leaves a field untouched; see [`TicketRepository::update`].
+#[derive(Debug, Clone, Default)]
+pub struct TicketEdit<'a> {
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub owner: Option<&'a str>,
+    pub due_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug)]
 pub struct TicketRepository<'a> {
     db: &'a Database,
@@ -99,6 +108,52 @@ impl<'a> TicketRepository<'a> {
         rows.collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .collect()
+    }
+
+    /// Edit a ticket's mutable fields.
+    ///
+    /// Every field is `Option`, and `None` means "leave alone" rather than "clear". Clearing
+    /// an owner or a due date therefore needs [`Self::clear_owner`] / [`Self::clear_due_at`]
+    /// — the alternative, treating `None` as a clear, makes a partial update silently wipe
+    /// fields the caller never mentioned.
+    pub fn update(&self, id: Id, edit: TicketEdit<'_>) -> Result<Ticket> {
+        let changed = self.db.conn().execute(
+            "UPDATE tickets
+                SET title       = COALESCE(?2, title),
+                    description = COALESCE(?3, description),
+                    owner       = COALESCE(?4, owner),
+                    due_at      = COALESCE(?5, due_at),
+                    updated_at  = ?6
+              WHERE id = ?1",
+            rusqlite::params![
+                id,
+                edit.title,
+                edit.description,
+                edit.owner,
+                edit.due_at,
+                Utc::now()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("Ticket", id));
+        }
+        self.get(id)
+    }
+
+    pub fn clear_owner(&self, id: Id) -> Result<Ticket> {
+        self.db.conn().execute(
+            "UPDATE tickets SET owner = NULL, updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, Utc::now()],
+        )?;
+        self.get(id)
+    }
+
+    pub fn clear_due_at(&self, id: Id) -> Result<Ticket> {
+        self.db.conn().execute(
+            "UPDATE tickets SET due_at = NULL, updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, Utc::now()],
+        )?;
+        self.get(id)
     }
 
     pub fn set_status(&self, id: Id, status: WorkStatus) -> Result<Ticket> {

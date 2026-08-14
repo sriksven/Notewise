@@ -80,6 +80,9 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
                 .post(start_recording)
                 .delete(stop_recording),
         )
+        // Workspace writes — notes, tickets, action items, decisions, people, series.
+        // Kept in their own module so this table stays readable.
+        .merge(crate::workspace::router())
         .with_state(state)
 }
 
