@@ -1,6 +1,6 @@
-import { Info, PenLine, Settings, Waves } from "lucide-react";
+import { Info, PenLine, Settings, TicketCheck, Waves } from "lucide-react";
 
-export type View = "meetings" | "settings" | "about";
+export type View = "meetings" | "tickets" | "settings" | "about";
 
 interface Props {
   view: View;
@@ -13,6 +13,7 @@ interface Props {
 
 const ITEMS: Array<{ id: View; label: string; Icon: typeof Info }> = [
   { id: "meetings", label: "Meetings", Icon: Waves },
+  { id: "tickets", label: "Tickets", Icon: TicketCheck },
   { id: "settings", label: "Settings", Icon: Settings },
   { id: "about", label: "About", Icon: Info },
 ];
@@ -20,11 +21,15 @@ const ITEMS: Array<{ id: View; label: string; Icon: typeof Info }> = [
 /**
  * The narrow icon rail.
  *
- * Three items, not seven. Transcript, summary and chat were rail destinations until they became
+ * Four items, not seven. Transcript, summary and chat were rail destinations until they became
  * tabs on the meeting itself — they are views of one thing, and promoting them to top-level
  * navigation made the rail look like a settings menu and made switching between them lose the
- * user's place. What is left is the app's actual top level: the meetings, its configuration,
- * and what it is.
+ * user's place. What is left is the app's actual top level: the meetings, the work they
+ * produced, its configuration, and what it is.
+ *
+ * Tickets earn a rail slot rather than a tab because they outlive the meeting that created
+ * them. Work filed on Monday is chased on Thursday, and reaching it should not require
+ * remembering which meeting it came out of.
  */
 export function Sidebar({ view, onChange, isRecording, onGoLive }: Props) {
   return (

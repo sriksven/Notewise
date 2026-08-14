@@ -13,6 +13,7 @@ import { AboutView } from "./views/AboutView";
 import { ChatView } from "./views/ChatView";
 import { SettingsView } from "./views/SettingsView";
 import { SummaryView } from "./views/SummaryView";
+import { TicketsView } from "./views/TicketsView";
 import {
   api,
   ApiError,
@@ -55,6 +56,13 @@ export default function App() {
   const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  /**
+   * Bumped after a summary run so the action-item list reloads.
+   *
+   * A counter rather than a boolean: two summaries in a row must both trigger a refresh, and
+   * a flag that is already true the second time would not.
+   */
+  const [actionItemsToken, setActionItemsToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -260,6 +268,7 @@ export default function App() {
     try {
       const result = await api.summarize(selectedId);
       await summaryState.reload();
+      setActionItemsToken((n) => n + 1);
       setNotice(
         `Summarized with ${result.model} — ${result.decisions} decision(s), ` +
           `${result.action_items} action item(s).`,
@@ -407,6 +416,7 @@ export default function App() {
               </>
             )}
 
+            {view === "tickets" && <TicketsView />}
             {view === "settings" && <SettingsView />}
             {view === "about" && <AboutView health={health} />}
           </main>
@@ -416,6 +426,7 @@ export default function App() {
               meetingId={selectedId}
               summary={summaryState.summary}
               summaryLoading={summaryState.loading}
+              actionItemsToken={actionItemsToken}
               questions={selectedId === recordingId ? questions : []}
               isRecording={isRecording && selectedId === recordingId}
               hasTranscript={segments.length > 0}

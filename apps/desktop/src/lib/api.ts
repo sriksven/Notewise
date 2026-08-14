@@ -50,6 +50,40 @@ export interface ActionItem {
   text: string;
   owner: string | null;
   due_at: string | null;
+  /**
+   * Absent on the items nested inside a `Summary`, which the summarize endpoint returns
+   * before they have been read back. The dedicated action-item endpoints always set it.
+   */
+  status?: string;
+  meeting_id?: string;
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Person {
+  id: string;
+  display_name: string;
+  email: string | null;
+  has_voice_print: boolean;
+}
+
+export interface MeetingSeries {
+  id: string;
+  title: string;
+}
+
+/** What a recurring meeting is still carrying from earlier instances. */
+export interface Brief {
+  series: MeetingSeries | null;
+  previous_meeting_id: string | null;
+  unfinished_business: ActionItem[];
+  recent_decisions: Decision[];
 }
 
 export interface Summary {
@@ -449,6 +483,151 @@ export const api = {
     request<RecordingStopped>("/v1/recording", { method: "DELETE" }),
 
   tickets: () => request<Ticket[]>("/v1/tickets"),
+
+  createTicket: (input: {
+    title: string;
+    description?: string;
+    owner?: string;
+    meeting_id?: string;
+  }) =>
+    request<Ticket>("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /**
+   * Partial edit. An omitted field is left alone, never blanked — pass `clear_owner` or
+   * `clear_due_at` to actually remove one. Getting this wrong wipes fields the user never
+   * touched, so the asymmetry is deliberate on both sides of the wire.
+   */
+  updateTicket: (
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      owner?: string;
+      status?: string;
+      clear_owner?: boolean;
+      clear_due_at?: boolean;
+    },
+  ) =>
+    request<Ticket>(`/v1/tickets/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteTicket: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/tickets/${id}`, { method: "DELETE" }),
+
+  /**
+   * Every action item from a meeting.
+   *
+   * Meeting-scoped rather than summary-scoped, so items typed by hand and items whose
+   * summary was regenerated both appear. `summary.action_items` is the narrower view.
+   */
+  actionItems: (meetingId: string) =>
+    request<ActionItem[]>(`/v1/meetings/${meetingId}/action-items`),
+
+  createActionItem: (
+    meetingId: string,
+    input: { text: string; owner?: string; due_at?: string },
+  ) =>
+    request<ActionItem>(`/v1/meetings/${meetingId}/action-items`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateActionItem: (
+    id: string,
+    patch: {
+      status?: string;
+      owner?: string;
+      due_at?: string;
+      clear_owner?: boolean;
+      clear_due_at?: boolean;
+    },
+  ) =>
+    request<ActionItem>(`/v1/action-items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteActionItem: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/action-items/${id}`, {
+      method: "DELETE",
+    }),
+
+  /**
+   * Turn an action item into a ticket. The item is kept — it is the record that the
+   * meeting produced this work. Calling twice returns the existing ticket.
+   */
+  promoteActionItem: (id: string) =>
+    request<Ticket>(`/v1/action-items/${id}/promote`, { method: "POST" }),
+
+  decisions: (meetingId: string) =>
+    request<Decision[]>(`/v1/meetings/${meetingId}/decisions`),
+
+  createDecision: (
+    meetingId: string,
+    input: { text: string; reasoning?: string },
+  ) =>
+    request<Decision>(`/v1/meetings/${meetingId}/decisions`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  notes: (limit = 50) => request<Note[]>(`/v1/notes?limit=${limit}`),
+
+  note: (id: string) => request<Note>(`/v1/notes/${id}`),
+
+  createNote: (input: { title: string; body: string }) =>
+    request<Note>("/v1/notes", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateNote: (id: string, title: string, body: string) =>
+    request<Note>(`/v1/notes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ title, body }),
+    }),
+
+  deleteNote: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/notes/${id}`, { method: "DELETE" }),
+
+  people: () => request<Person[]>("/v1/people"),
+
+  participants: (meetingId: string) =>
+    request<Person[]>(`/v1/meetings/${meetingId}/participants`),
+
+  addParticipant: (
+    meetingId: string,
+    input: { person_id?: string; display_name?: string; role?: string },
+  ) =>
+    request<Person>(`/v1/meetings/${meetingId}/participants`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  personMeetings: (personId: string) =>
+    request<Meeting[]>(`/v1/people/${personId}/meetings`),
+
+  /** Thread this meeting into a series. With no arguments, threads on its own title. */
+  assignSeries: (
+    meetingId: string,
+    input: { series_id?: string; title?: string; clear?: boolean } = {},
+  ) =>
+    request<{ series: MeetingSeries | null }>(
+      `/v1/meetings/${meetingId}/series`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+
+  /**
+   * What a recurring meeting is still carrying. Empty for a one-off, which is an ordinary
+   * state rather than an error.
+   */
+  brief: (meetingId: string) =>
+    request<Brief>(`/v1/meetings/${meetingId}/brief`),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

@@ -1,16 +1,15 @@
 import {
-  CalendarClock,
   CircleCheck,
   Gavel,
   HelpCircle,
   Loader2,
   PanelRightClose,
   Sparkles,
-  User,
   X,
 } from "lucide-react";
 
 import type { AmbiguityKind, ClarifyingQuestion, Summary } from "../lib/api";
+import { ActionItems } from "./ActionItems";
 
 interface Props {
   /** Null when no meeting is selected — the panel says so rather than showing an empty shell. */
@@ -22,6 +21,8 @@ interface Props {
   /** Whether this meeting has anything to summarize yet. */
   hasTranscript: boolean;
   summarizing: boolean;
+  /** Bumped after a summary run, so newly extracted action items appear without a reload. */
+  actionItemsToken: number;
   onSummarize: () => void;
   onDismissQuestion: (question: ClarifyingQuestion) => void;
   onClose: () => void;
@@ -104,6 +105,7 @@ export function IntelPanel({
   isRecording,
   hasTranscript,
   summarizing,
+  actionItemsToken,
   onSummarize,
   onDismissQuestion,
   onClose,
@@ -220,51 +222,11 @@ export function IntelPanel({
             )}
           </Section>
 
-          <Section
-            icon={<CircleCheck size={13} aria-hidden />}
-            title="Action items"
-            count={summary?.action_items.length}
-          >
-            {summaryLoading ? (
-              <Empty>Loading…</Empty>
-            ) : !summary ? (
-              <Empty>Not summarized yet.</Empty>
-            ) : summary.action_items.length === 0 ? (
-              <Empty>No action items were identified.</Empty>
-            ) : (
-              <ul className="space-y-1.5">
-                {summary.action_items.map((item) => (
-                  <li key={item.id} className="flex items-start gap-2">
-                    <span className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-300" />
-                    <span className="min-w-0">
-                      <span className="text-[12.5px] leading-snug text-neutral-800">
-                        {item.text}
-                      </span>{" "}
-                      {/* An unassigned item is shown as unassigned rather than left blank: a
-                          blank owner reads as a rendering bug, and the whole point is that
-                          nobody picked it up. */}
-                      <span
-                        className={`inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] ${
-                          item.owner ? "text-neutral-500" : "text-amber-700"
-                        }`}
-                      >
-                        <User size={10} aria-hidden />
-                        {item.owner ?? "unassigned"}
-                      </span>
-                      {item.due_at && (
-                        <span className="ml-1.5 inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] text-neutral-500">
-                          <CalendarClock size={10} aria-hidden />
-                          {new Date(item.due_at).toLocaleDateString([], {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          {/* Not driven by `summary`. Action items outlive the summary that proposed them —
+              a user can add one by hand before summarizing, and regenerating a summary no
+              longer takes the old ones with it — so this reads the meeting, not the summary. */}
+          <Section icon={<CircleCheck size={13} aria-hidden />} title="Action items">
+            <ActionItems meetingId={meetingId} refreshToken={actionItemsToken} />
           </Section>
 
           {/* The one action in this panel. Placed under the sections it fills in, so what it
