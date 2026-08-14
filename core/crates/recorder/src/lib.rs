@@ -45,8 +45,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use notewise_audio_capture::{AudioSource, CaptureError, MixedSource, Mixer};
-use notewise_diarization::{DiarizationError, Diarizer, SingleSpeakerDiarizer};
+use notewise_audio_capture::{AudioFormat, AudioSource, CaptureError, MixedSource, Mixer};
+use notewise_diarization::{AudioDiarizer, DiarizationError, Diarizer, SingleSpeakerDiarizer};
 use notewise_graph::{EdgeKind, Graph, GraphError, NodeKind, NodeRef};
 use notewise_storage::{Database, Id, MeetingRepository, NewTranscriptSegment, StorageError};
 use notewise_transcription::{Segment, Transcript, TranscriptionEngine, TranscriptionError};
@@ -81,6 +81,13 @@ pub enum RecorderError {
 }
 
 pub type Result<T> = std::result::Result<T, RecorderError>;
+
+/// The rate retained audio is held at, and the rate the acoustic diarizer is told.
+///
+/// Frames are converted to the transcription format before being retained, so retention has one
+/// rate regardless of what the capture device produced — which is what lets a span's millisecond
+/// bounds be turned back into sample offsets.
+const RETENTION_SAMPLE_RATE: u32 = AudioFormat::transcription().sample_rate.hz();
 
 /// What a recording produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -335,10 +342,48 @@ pub struct ChannelInput {
     engine: Box<dyn TranscriptionEngine>,
     /// Splits this one channel into several speakers once recording stops. See
     /// [`ChannelInput::with_diarizer`].
-    diarizer: Option<Box<dyn Diarizer + Send>>,
+    diarizer: Option<ChannelDiarizer>,
+    /// This channel's audio, retained only for [`ChannelDiarizer::Audio`].
+    audio: Vec<f32>,
+    /// Set when retention hit its budget. The partial buffer is dropped and the acoustic pass
+    /// skipped — see [`ChannelInput::retain`].
+    audio_truncated: bool,
     exhausted: bool,
     audio_ms: i64,
     segments: usize,
+}
+
+/// How one channel's speakers get separated after recording.
+///
+/// The two variants differ in what they need, not just in how they work, and the difference is
+/// expensive: one needs the channel's entire audio held in memory. Making them separate variants
+/// rather than two optional fields means a caller cannot ask for both and cannot forget the cost.
+enum ChannelDiarizer {
+    /// Needs only the transcript. [`notewise_diarization::TimelineDiarizer`] is the case that
+    /// matters: the platform already knows who spoke, so no audio is required.
+    Transcript(Box<dyn Diarizer + Send>),
+
+    /// Needs this channel's audio, and therefore a memory budget.
+    Audio {
+        diarizer: Box<dyn AudioDiarizer + Send>,
+        retain_ms: i64,
+    },
+}
+
+impl std::fmt::Debug for ChannelDiarizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transcript(d) => f.debug_tuple("Transcript").field(&d.name()).finish(),
+            Self::Audio {
+                diarizer,
+                retain_ms,
+            } => f
+                .debug_struct("Audio")
+                .field("diarizer", &diarizer.name())
+                .field("retain_ms", retain_ms)
+                .finish(),
+        }
+    }
 }
 
 impl ChannelInput {
@@ -352,6 +397,8 @@ impl ChannelInput {
             source,
             engine,
             diarizer: None,
+            audio: Vec::new(),
+            audio_truncated: false,
             exhausted: false,
             audio_ms: 0,
             segments: 0,
@@ -385,8 +432,68 @@ impl ChannelInput {
     /// reported no speaker for, rather than guessing a name. Those segments stay `Others`, which
     /// is still true. Refinement only ever replaces a coarse label with a specific one.
     pub fn with_diarizer(mut self, diarizer: Box<dyn Diarizer + Send>) -> Self {
-        self.diarizer = Some(diarizer);
+        self.diarizer = Some(ChannelDiarizer::Transcript(diarizer));
         self
+    }
+
+    /// Split this channel's speakers using its audio, retaining at most `retain_ms` of it.
+    ///
+    /// This is how [`notewise_diarization::EmbeddingDiarizer`] and
+    /// [`notewise_diarization::NamedClusterDiarizer`] reach the live recording path. The latter is
+    /// the best separation available — acoustic boundaries with platform names — and it needs both
+    /// the audio and a timeline.
+    ///
+    /// # Why the budget is a required argument
+    ///
+    /// Clustering cannot start until the whole channel is known, so the audio has to be kept.
+    /// Mono 16 kHz `f32` is 64 KB per second: about 230 MB for an hour, per channel. That is not a
+    /// cost to inherit from a default, so there is no default — a caller enabling this states what
+    /// it is willing to spend.
+    ///
+    /// # What happens at the budget
+    ///
+    /// Retention stops, the partial buffer is **dropped**, and the acoustic pass is skipped with a
+    /// warning; the channel keeps its channel label. Diarizing a prefix would be worse than not
+    /// diarizing: every segment past the cutoff would be labelled from
+    /// `nearest_cluster` against audio that was never examined, and with
+    /// [`notewise_diarization::NamedClusterDiarizer`] those labels are people's names.
+    ///
+    /// Pair it with [`Self::with_diarizer`]'s argument instead when the platform supplies a
+    /// timeline — that path needs no audio at all and so has no budget to blow.
+    pub fn with_audio_diarizer(
+        mut self,
+        diarizer: Box<dyn AudioDiarizer + Send>,
+        retain_ms: i64,
+    ) -> Self {
+        self.diarizer = Some(ChannelDiarizer::Audio {
+            diarizer,
+            retain_ms,
+        });
+        self
+    }
+
+    /// Keep a frame's samples for the acoustic pass, within budget.
+    fn retain(&mut self, samples: &[f32], retain_ms: i64) {
+        if self.audio_truncated {
+            return;
+        }
+
+        let budget = (RETENTION_SAMPLE_RATE as i64 * retain_ms / 1000).max(0) as usize;
+
+        if self.audio.len() + samples.len() > budget {
+            tracing::warn!(
+                channel = ?self.channel,
+                retain_ms,
+                "audio retention budget reached; skipping acoustic speaker separation for this \
+                 channel rather than labelling from a partial recording"
+            );
+            self.audio_truncated = true;
+            // A prefix is unusable, so do not go on holding it.
+            self.audio = Vec::new();
+            return;
+        }
+
+        self.audio.extend_from_slice(samples);
     }
 
     pub fn channel(&self) -> Channel {
@@ -485,6 +592,13 @@ impl ChannelPipeline {
                 stats.frames_processed += 1;
                 input.audio_ms += frame.duration_ms();
 
+                // Retain before feeding, and always from the transcription format, so a span's
+                // millisecond bounds map to sample offsets at one known rate.
+                if let Some(ChannelDiarizer::Audio { retain_ms, .. }) = input.diarizer {
+                    let converted = frame.to_transcription_format();
+                    input.retain(&converted.samples, retain_ms);
+                }
+
                 let required = input.engine.required_format();
                 let ready = if frame.format == required {
                     input.engine.feed(&frame).await?
@@ -548,10 +662,25 @@ impl ChannelPipeline {
         let mut refined = 0;
 
         for input in &self.inputs {
-            let Some(diarizer) = &input.diarizer else {
-                continue;
-            };
-            refined += refine_channel(db, meeting_id, input.channel, diarizer.as_ref())?;
+            match &input.diarizer {
+                None => continue,
+
+                Some(ChannelDiarizer::Transcript(diarizer)) => {
+                    refined += refine_channel(db, meeting_id, input.channel, |transcript| {
+                        Ok(diarizer.diarize(transcript)?)
+                    })?;
+                }
+
+                // The budget was exceeded mid-recording. `retain` has already warned and dropped
+                // the buffer; labelling from a prefix is the one thing not to do here.
+                Some(ChannelDiarizer::Audio { .. }) if input.audio_truncated => continue,
+
+                Some(ChannelDiarizer::Audio { diarizer, .. }) => {
+                    refined += refine_channel(db, meeting_id, input.channel, |transcript| {
+                        Ok(diarizer.diarize(transcript, &input.audio, RETENTION_SAMPLE_RATE)?)
+                    })?;
+                }
+            }
         }
 
         Ok(refined)
@@ -575,7 +704,7 @@ fn refine_channel(
     db: &Database,
     meeting_id: Id,
     channel: Channel,
-    diarizer: &dyn Diarizer,
+    label_with: impl FnOnce(&Transcript) -> Result<Transcript>,
 ) -> Result<usize> {
     let repo = MeetingRepository::new(db);
     let label = channel.speaker_label();
@@ -602,7 +731,7 @@ fn refine_channel(
             .collect(),
     );
 
-    let labelled = diarizer.diarize(&transcript)?;
+    let labelled = label_with(&transcript)?;
     let mut count = 0;
 
     // Zip by position: diarization preserves order and length.
@@ -620,7 +749,6 @@ fn refine_channel(
 
     tracing::debug!(
         ?channel,
-        diarizer = diarizer.name(),
         segments = mine.len(),
         refined = count,
         "refined a channel's speakers"
@@ -1342,6 +1470,118 @@ mod tests {
                 .iter()
                 .all(|s| s.speaker.as_deref() == Some("Others")),
             "refinement must be opt-in"
+        );
+    }
+
+    /// Records what audio it was handed, then labels every segment with one voice.
+    ///
+    /// Stands in for `EmbeddingDiarizer`, which needs the ONNX feature and a downloaded model.
+    #[derive(Debug, Clone, Default)]
+    struct SpyAudioDiarizer {
+        samples_seen: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        rate_seen: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl AudioDiarizer for SpyAudioDiarizer {
+        fn name(&self) -> &str {
+            "spy"
+        }
+
+        fn diarize(
+            &self,
+            transcript: &Transcript,
+            samples: &[f32],
+            sample_rate: u32,
+        ) -> notewise_diarization::Result<Transcript> {
+            use std::sync::atomic::Ordering;
+            self.samples_seen.store(samples.len(), Ordering::SeqCst);
+            self.rate_seen.store(sample_rate, Ordering::SeqCst);
+
+            Ok(Transcript::new(
+                transcript
+                    .segments
+                    .iter()
+                    .map(|s| {
+                        let mut s = s.clone();
+                        s.speaker = Some("Voice A".to_string());
+                        s
+                    })
+                    .collect(),
+            ))
+        }
+    }
+
+    /// The acoustic path reaches the live recorder, and gets the audio at the rate it expects.
+    #[tokio::test]
+    async fn an_audio_diarizer_receives_the_channels_retained_audio() {
+        use std::sync::atomic::Ordering;
+
+        let db = db();
+        let id = meeting(&db);
+
+        let spy = SpyAudioDiarizer::default();
+        let remote = PlannedEngine(vec![Segment::new("their words", 0, 1_000)]);
+
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::System,
+            Box::new(tone(1_000)),
+            Box::new(remote),
+        )
+        .with_audio_diarizer(Box::new(spy.clone()), 60_000)])
+        .expect("one channel");
+
+        pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        assert!(
+            spy.samples_seen.load(Ordering::SeqCst) > 0,
+            "the diarizer was handed no audio"
+        );
+        assert_eq!(
+            spy.rate_seen.load(Ordering::SeqCst),
+            16_000,
+            "retained audio must arrive at the transcription rate, whatever the device produced"
+        );
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        assert_eq!(stored[0].speaker.as_deref(), Some("Voice A"));
+    }
+
+    /// Blowing the budget must skip the pass, not label from a prefix.
+    ///
+    /// Labelling a truncated recording would attribute every segment past the cutoff from audio
+    /// that was never examined — and under `NamedClusterDiarizer` those labels are people's names.
+    #[tokio::test]
+    async fn exceeding_the_retention_budget_skips_the_acoustic_pass() {
+        use std::sync::atomic::Ordering;
+
+        let db = db();
+        let id = meeting(&db);
+
+        let spy = SpyAudioDiarizer::default();
+        let remote = PlannedEngine(vec![Segment::new("their words", 0, 1_000)]);
+
+        // One second of tone against a 10 ms budget.
+        let mut pipeline = ChannelPipeline::new(vec![ChannelInput::new(
+            Channel::System,
+            Box::new(tone(1_000)),
+            Box::new(remote),
+        )
+        .with_audio_diarizer(Box::new(spy.clone()), 10)])
+        .expect("one channel");
+
+        pipeline.run(&db, id, never_stop()).await.expect("pipeline");
+
+        assert_eq!(
+            spy.samples_seen.load(Ordering::SeqCst),
+            0,
+            "the acoustic pass should not have run at all"
+        );
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        assert_eq!(
+            stored[0].speaker.as_deref(),
+            Some("Others"),
+            "the channel keeps its true coarse label when separation is skipped"
         );
     }
 
