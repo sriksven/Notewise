@@ -48,10 +48,10 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
 
   return (
     <div className="flex flex-col items-center text-center">
-      <h1 className="text-[26px] font-semibold tracking-tight text-neutral-900">
+      <h1 className="text-[26px] font-semibold tracking-tight text-ink">
         Transcription model
       </h1>
-      <p className="mt-2 max-w-md text-[14px] text-neutral-500">
+      <p className="mt-2 max-w-md text-[14px] text-ink-muted">
         Speech recognition runs on this machine, so the model has to live here too. These are
         OpenAI's Whisper models — the same ones most local transcription apps use. One-time
         download.
@@ -60,13 +60,13 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
       {(listError ?? error) && (
         <div
           role="alert"
-          className="mt-6 w-full max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[13px] text-amber-900"
+          className="mt-6 w-full max-w-md rounded-lg border border-warn-line bg-warn px-3 py-2 text-left text-[13px] text-warn-text"
         >
           {listError ?? error}
         </div>
       )}
 
-      <div className="mt-8 w-full max-w-md overflow-hidden rounded-xl border border-hairline bg-white text-left">
+      <div className="mt-8 w-full max-w-md overflow-hidden rounded-xl border border-hairline bg-surface text-left">
         <ul className="divide-y divide-hairline">
           {shown.map((model) => {
             const active = model.name === selected;
@@ -80,25 +80,25 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
                   }}
                   aria-current={active ? "true" : undefined}
                   className={`w-full px-4 py-3 text-left transition ${
-                    active && expanded ? "bg-neutral-50" : "hover:bg-neutral-50"
+                    active && expanded ? "bg-overlay" : "hover:bg-overlay"
                   }`}
                 >
                   <div className="flex items-baseline gap-2">
-                    <span className="text-[14px] font-medium text-neutral-900">{model.name}</span>
+                    <span className="text-[14px] font-medium text-ink">{model.name}</span>
                     {model.recommended && (
-                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                      <span className="rounded-full border border-ok-line bg-ok px-1.5 py-0.5 text-[10px] text-ok-text">
                         recommended
                       </span>
                     )}
-                    <span className="ml-auto text-[11px] text-neutral-400">
+                    <span className="ml-auto text-[11px] text-ink-faint">
                       {size(model.bytes)} · ~{model.approx_ram_mb} MB RAM
                     </span>
                   </div>
 
-                  <p className="mt-1 text-[12px] leading-snug text-neutral-500">
+                  <p className="mt-1 text-[12px] leading-snug text-ink-muted">
                     {model.tradeoff}
                   </p>
-                  <p className="mt-0.5 text-[11px] leading-snug text-neutral-400">
+                  <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">
                     {model.language_note}
                   </p>
                 </button>
@@ -112,7 +112,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
             type="button"
             onClick={() => setExpanded((open) => !open)}
             aria-expanded={expanded}
-            className="flex items-center gap-1 text-[12px] text-neutral-500 transition hover:text-neutral-900"
+            className="flex items-center gap-1 text-[12px] text-ink-muted transition hover:text-ink"
           >
             <ChevronDown
               size={13}
@@ -124,7 +124,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
 
           <span className="ml-auto">
             {current?.installed ? (
-              <span className="flex items-center gap-1 text-[12px] text-emerald-600">
+              <span className="flex items-center gap-1 text-[12px] text-ok-text">
                 <Check size={14} aria-hidden />
                 Installed
               </span>
@@ -134,8 +134,8 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
                 disabled={!current || downloading !== null}
                 onClick={() => current && void start(current.name)}
                 className="flex items-center gap-1.5 rounded-full border border-hairline
-                           px-3 py-1.5 text-[12px] text-neutral-700 transition
-                           hover:bg-neutral-50 disabled:opacity-50"
+                           px-3 py-1.5 text-[12px] text-ink transition
+                           hover:bg-overlay disabled:opacity-50"
               >
                 {downloading ? (
                   <>
@@ -161,7 +161,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
               aria-valuemin={0}
               aria-valuemax={100}
               aria-label={`Downloading ${downloading}`}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100"
+              className="h-1.5 w-full overflow-hidden rounded-full bg-overlay"
             >
               <div
                 className="h-full rounded-full bg-record transition-[width] duration-300"
@@ -169,7 +169,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
               />
             </div>
 
-            <div className="mt-1.5 flex items-baseline justify-between text-[11px] text-neutral-500">
+            <div className="mt-1.5 flex items-baseline justify-between text-[11px] text-ink-muted">
               <span className="font-mono tabular-nums">
                 {progress
                   ? `${size(progress.downloaded_bytes)} / ${size(progress.total_bytes)}`
@@ -180,7 +180,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
               </span>
             </div>
 
-            <p className="mt-2 text-[11px] text-neutral-400">
+            <p className="mt-2 text-[11px] text-ink-faint">
               The engine owns this download — it resumes where it left off if the connection
               drops, and continues if you switch away.
             </p>
@@ -189,7 +189,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
       </div>
 
       {satisfied && !expanded && (
-        <p className="mt-3 text-[12px] text-neutral-400">
+        <p className="mt-3 text-[12px] text-ink-faint">
           You can add another model later in Settings.
         </p>
       )}

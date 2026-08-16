@@ -36,7 +36,7 @@ export function SummaryView({
   if (!meetingId) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-[13px] text-neutral-400">Select a meeting to see its summary.</p>
+        <p className="text-[13px] text-ink-faint">Select a meeting to see its summary.</p>
       </div>
     );
   }
@@ -47,17 +47,17 @@ export function SummaryView({
         {error && (
           <div
             role="alert"
-            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
+            className="rounded-lg border border-warn-line bg-warn px-3 py-2 text-[13px] text-warn-text"
           >
             {error}
           </div>
         )}
 
-        {loading && <p className="text-[13px] text-neutral-400">Loading…</p>}
+        {loading && <p className="text-[13px] text-ink-faint">Loading…</p>}
 
         {!loading && !summary && (
           <div className="flex flex-col items-start gap-3">
-            <p className="text-[13px] text-neutral-500">
+            <p className="text-[13px] text-ink-muted">
               {hasTranscript
                 ? "This meeting has not been summarized yet."
                 : "This meeting has no transcript to summarize."}
@@ -67,7 +67,7 @@ export function SummaryView({
               onClick={onSummarize}
               disabled={summarizing || !hasTranscript}
               className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-2
-                         text-[13px] text-neutral-700 transition hover:bg-neutral-50
+                         text-[13px] text-ink transition hover:bg-overlay
                          disabled:cursor-not-allowed disabled:opacity-50"
             >
               {summarizing ? (
@@ -88,7 +88,7 @@ export function SummaryView({
         {summary && (
           <section>
             <Markdown source={summary.text} />
-            <p className="mt-4 text-[11px] text-neutral-400">
+            <p className="mt-4 text-[11px] text-ink-faint">
               Summarized with {summary.model} on{" "}
               {new Date(summary.created_at).toLocaleString([], {
                 month: "short",

@@ -27,10 +27,10 @@ export function Stepper({ steps, current }: StepperProps) {
               title={step.title}
               className={`flex h-8 w-8 items-center justify-center rounded-full text-[12px] font-medium transition ${
                 isDone
-                  ? "bg-emerald-500 text-white"
+                  ? "bg-accent text-accent-on"
                   : isCurrent
-                    ? "bg-neutral-900 text-white"
-                    : "bg-neutral-200 text-neutral-500"
+                    ? "bg-accent text-accent-on"
+                    : "bg-hairline text-ink-muted"
               }`}
             >
               {isDone ? <Check size={15} aria-hidden /> : index + 1}
@@ -41,7 +41,7 @@ export function Stepper({ steps, current }: StepperProps) {
               <span
                 aria-hidden
                 className={`mx-1.5 h-px w-10 transition ${
-                  step.satisfied ? "bg-emerald-500" : "bg-neutral-200"
+                  step.satisfied ? "bg-accent" : "bg-hairline"
                 }`}
               />
             )}

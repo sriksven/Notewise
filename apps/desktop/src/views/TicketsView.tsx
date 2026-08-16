@@ -85,13 +85,13 @@ export function TicketsView() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
-        <h2 className="text-[13px] font-semibold text-neutral-800">Tickets</h2>
+        <h2 className="text-[13px] font-semibold text-ink">Tickets</h2>
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="flex items-center gap-1 rounded-md border border-hairline bg-white px-2
-                     py-1 text-[11.5px] font-medium text-neutral-600 transition
-                     hover:bg-neutral-50"
+          className="flex items-center gap-1 rounded-md border border-hairline bg-surface px-2
+                     py-1 text-[11.5px] font-medium text-ink-muted transition
+                     hover:bg-overlay"
         >
           <Plus size={11} aria-hidden />
           New ticket
@@ -121,38 +121,38 @@ export function TicketsView() {
             }}
             placeholder="What needs doing?"
             aria-label="New ticket title"
-            className="w-full rounded-md border border-hairline bg-white px-2 py-1.5
-                       text-[13px] text-neutral-800 outline-none
-                       placeholder:text-neutral-300 focus:border-neutral-300"
+            className="w-full rounded-md border border-hairline bg-surface px-2 py-1.5
+                       text-[13px] text-ink outline-none
+                       placeholder:text-ink-faint focus:border-hairline"
           />
         </form>
       )}
 
       {error && (
-        <p role="status" className="px-5 py-2 text-[12px] text-red-600">
+        <p role="status" className="px-5 py-2 text-[12px] text-danger-text">
           {error}
         </p>
       )}
 
       {loading && tickets.length === 0 ? (
-        <p className="px-5 py-4 text-[12.5px] text-neutral-400">Loading…</p>
+        <p className="px-5 py-4 text-[12.5px] text-ink-faint">Loading…</p>
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-3 gap-4 overflow-y-auto px-5 py-4">
           {COLUMNS.map((column) => {
             const inColumn = tickets.filter((t) => t.status === column.status);
             return (
               <section key={column.status} className="min-w-0">
-                <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
                   {column.label}
                   {inColumn.length > 0 && (
-                    <span className="rounded-full bg-neutral-100 px-1.5 py-px text-[10px] tabular-nums text-neutral-500">
+                    <span className="rounded-full bg-overlay px-1.5 py-px text-[10px] tabular-nums text-ink-muted">
                       {inColumn.length}
                     </span>
                   )}
                 </h3>
 
                 {inColumn.length === 0 ? (
-                  <p className="text-[11.5px] text-neutral-300">Nothing here.</p>
+                  <p className="text-[11.5px] text-ink-faint">Nothing here.</p>
                 ) : (
                   <ul className="space-y-1.5">
                     {inColumn.map((ticket) => (
@@ -163,21 +163,21 @@ export function TicketsView() {
                           title={`Move to ${
                             COLUMNS.find((c) => c.status === advance(ticket.status))?.label
                           }`}
-                          className="w-full rounded-lg border border-hairline bg-white p-2.5
-                                     text-left transition hover:border-neutral-300"
+                          className="w-full rounded-lg border border-hairline bg-surface p-2.5
+                                     text-left transition hover:border-hairline"
                         >
                           <p
                             className={`text-[12.5px] leading-snug ${
                               ticket.status === "done"
-                                ? "text-neutral-400 line-through"
-                                : "text-neutral-800"
+                                ? "text-ink-faint line-through"
+                                : "text-ink"
                             }`}
                           >
                             {ticket.title}
                           </p>
                           <span
                             className={`mt-1 inline-flex items-center gap-0.5 text-[11px] ${
-                              ticket.owner ? "text-neutral-500" : "text-amber-700"
+                              ticket.owner ? "text-ink-muted" : "text-warn-text"
                             }`}
                           >
                             <User size={10} aria-hidden />

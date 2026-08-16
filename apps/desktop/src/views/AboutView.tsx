@@ -55,7 +55,7 @@ export function AboutView({ health }: Props) {
           </div>
           <div>
             <h1 className="text-[20px] font-semibold tracking-tight">Notewise</h1>
-            <p className="text-[12px] text-neutral-500">
+            <p className="text-[12px] text-ink-muted">
               Local-first meeting intelligence
             </p>
           </div>
@@ -63,16 +63,16 @@ export function AboutView({ health }: Props) {
 
         <section className="rounded-lg border border-hairline bg-rail px-4 py-3">
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12px]">
-            <dt className="text-neutral-500">Engine</dt>
-            <dd className="text-neutral-800">
+            <dt className="text-ink-muted">Engine</dt>
+            <dd className="text-ink">
               {health ? `reachable, schema v${health.schema_version}` : "not reachable"}
             </dd>
 
-            <dt className="text-neutral-500">AI backend</dt>
-            <dd className="text-neutral-800">{health?.ai_model ?? "—"}</dd>
+            <dt className="text-ink-muted">AI backend</dt>
+            <dd className="text-ink">{health?.ai_model ?? "—"}</dd>
 
-            <dt className="text-neutral-500">Recording</dt>
-            <dd className={health?.can_record ? "text-emerald-700" : "text-neutral-500"}>
+            <dt className="text-ink-muted">Recording</dt>
+            <dd className={health?.can_record ? "text-ok-text" : "text-ink-muted"}>
               {health
                 ? health.can_record
                   ? "microphone capture available"
@@ -80,8 +80,8 @@ export function AboutView({ health }: Props) {
                 : "—"}
             </dd>
 
-            <dt className="text-neutral-500">Transcripts</dt>
-            <dd className={health?.ai_local ? "text-emerald-700" : "text-amber-700"}>
+            <dt className="text-ink-muted">Transcripts</dt>
+            <dd className={health?.ai_local ? "text-ok-text" : "text-warn-text"}>
               {health
                 ? health.ai_local
                   ? "processed on this machine"
@@ -92,19 +92,19 @@ export function AboutView({ health }: Props) {
         </section>
 
         <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-neutral-900">What works today</h2>
+          <h2 className="mb-2 text-[13px] font-semibold text-ink">What works today</h2>
           <ul className="space-y-1.5">
             {CAPABILITIES.map((capability) => (
               <li key={capability.label} className="flex items-start gap-2 text-[13px]">
                 {capability.done ? (
-                  <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden />
+                  <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-ok-text" aria-hidden />
                 ) : (
-                  <CircleDashed size={15} className="mt-0.5 shrink-0 text-neutral-300" aria-hidden />
+                  <CircleDashed size={15} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
                 )}
-                <span className={capability.done ? "text-neutral-800" : "text-neutral-400"}>
+                <span className={capability.done ? "text-ink" : "text-ink-faint"}>
                   {capability.label}
                   {capability.note && (
-                    <span className="text-neutral-400"> — {capability.note}</span>
+                    <span className="text-ink-faint"> — {capability.note}</span>
                   )}
                 </span>
               </li>
@@ -113,8 +113,8 @@ export function AboutView({ health }: Props) {
         </section>
 
         <section>
-          <h2 className="mb-1 text-[13px] font-semibold text-neutral-900">Licensing</h2>
-          <p className="text-[12px] leading-relaxed text-neutral-500">
+          <h2 className="mb-1 text-[13px] font-semibold text-ink">Licensing</h2>
+          <p className="text-[12px] leading-relaxed text-ink-muted">
             The engine and apps are MIT licensed. Hosted cloud services are under a separate
             source-available licence. Everything needed to run Notewise entirely on your own
             machine is MIT.

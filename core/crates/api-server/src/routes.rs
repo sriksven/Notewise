@@ -59,6 +59,14 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/meetings/:id/chat", post(chat_about_meeting))
         .route("/v1/backends", get(list_backends))
         .route("/v1/backends/:kind/models", get(list_backend_models))
+        .route(
+            "/v1/backends/:kind/key",
+            post(set_api_key).delete(delete_api_key),
+        )
+        .route(
+            "/v1/preferences",
+            get(get_preferences).post(set_preferences),
+        )
         .route("/v1/models", get(list_models))
         .route(
             "/v1/models/:name/download",
@@ -316,6 +324,118 @@ async fn switch_backend(
         "model": ai.model_id(),
         "is_local": ai.is_local(),
     })))
+}
+
+/// The key under which the window's own settings live.
+const PREFERENCES_KEY: &str = "ui_preferences";
+
+/// Read the interface preferences.
+///
+/// These live in the engine rather than in `localStorage`, which is not an available option:
+/// the desktop shell binds port 0, so the window's origin changes on every launch and anything
+/// kept per-origin is gone by the next one. A theme that resets every time you open the app is
+/// not a theme.
+async fn get_preferences(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
+    let db = state.db().await;
+    let stored = SettingsRepository::new(&db).get(PREFERENCES_KEY)?;
+
+    Ok(Json(match stored {
+        Some(raw) => serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({})),
+        None => serde_json::json!({}),
+    }))
+}
+
+/// Replace the interface preferences.
+///
+/// Stored opaquely. What a theme consists of is the window's business, and a schema here would
+/// have to be migrated every time the interface grew a setting.
+async fn set_preferences(
+    State(state): State<Shared>,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if !body.is_object() {
+        return Err(ApiError::BadRequest("preferences must be an object".into()));
+    }
+
+    let db = state.db().await;
+    SettingsRepository::new(&db).set(PREFERENCES_KEY, &body.to_string())?;
+    Ok(Json(body))
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiKeyBody {
+    key: String,
+}
+
+/// Save a provider API key.
+///
+/// The key goes to the OS keychain, not the database and not a log. The database is a plain
+/// SQLite file that ends up in backups and support bundles; the keychain is the one place on
+/// each platform designed to hold this.
+///
+/// This is a deliberate relaxation of an earlier rule that keys could only come from the
+/// engine's environment. That rule protected against a key crossing HTTP — but it also meant
+/// the only way to use a provider was to edit a shell profile and restart, which is not a thing
+/// a desktop app can ask of someone. The request is loopback-only, the value is never written to
+/// a log, and it is never readable back through the API.
+async fn set_api_key(
+    State(state): State<Shared>,
+    Path(kind): Path<String>,
+    Json(body): Json<ApiKeyBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    use notewise_connectors::{CredentialStore, KeychainStore, Secret};
+
+    let kind = BackendKind::parse(kind.trim())
+        .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
+
+    if !kind.requires_api_key() {
+        return Err(ApiError::BadRequest(format!(
+            "{} does not use an API key",
+            kind.label()
+        )));
+    }
+
+    let key = body.key.trim();
+    if key.is_empty() {
+        return Err(ApiError::BadRequest("the key must not be empty".into()));
+    }
+
+    KeychainStore::new()
+        .set(
+            &crate::state::key_entry(kind),
+            crate::state::API_KEY_FIELD,
+            &Secret::new(key),
+        )
+        .map_err(|e| ApiError::Internal(format!("could not save the key: {e}")))?;
+
+    // Switch to it immediately. Saving a key and then having to find the provider in a menu is
+    // two steps for one intention, and the failure mode of the second being forgotten is a user
+    // who believes their key does not work.
+    state.switch_backend(kind, None, None).await.map_err(|e| {
+        ApiError::BadRequest(format!("the key was saved, but {kind:?} rejected it: {e}"))
+    })?;
+
+    tracing::info!(backend = kind.as_str(), "api key saved to the keychain");
+    Ok(Json(serde_json::json!({
+        "kind": kind.as_str(),
+        "has_key": true,
+        "model": state.ai().model_id(),
+    })))
+}
+
+/// Forget a saved key. Removing one that is not there succeeds.
+async fn delete_api_key(Path(kind): Path<String>) -> ApiResult<axum::http::StatusCode> {
+    use notewise_connectors::{CredentialStore, KeychainStore};
+
+    let kind = BackendKind::parse(kind.trim())
+        .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
+
+    KeychainStore::new()
+        .delete(&crate::state::key_entry(kind), crate::state::API_KEY_FIELD)
+        .map_err(|e| ApiError::Internal(format!("could not remove the key: {e}")))?;
+
+    tracing::info!(backend = kind.as_str(), "api key removed");
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// What a local backend can actually run.
@@ -1195,6 +1315,10 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 "requires_api_key": kind.requires_api_key(),
                 "requires_endpoint": kind.requires_endpoint(),
                 "lists_models": kind.lists_models(),
+                // Whether a key is available, from the keychain or the environment. The key
+                // itself is never sent — only the fact that there is one, which is what the
+                // UI needs to tell "add a key" apart from "ready to use".
+                "has_key": !kind.requires_api_key() || crate::state::api_key_for(*kind).is_some(),
             })
         })
         .collect();
@@ -2670,6 +2794,78 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// The key must never come back out through the API.
+    ///
+    /// It is accepted over loopback so a user can add a provider without editing a shell
+    /// profile — but a readable key is a key in every screenshot, log and support bundle, so
+    /// the listing reports only whether one exists.
+    #[tokio::test]
+    async fn a_saved_api_key_is_never_readable() {
+        let app = app();
+
+        let (status, body) = call(&app, get("/v1/backends")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        for backend in body["backends"].as_array().unwrap() {
+            assert!(
+                backend["has_key"].is_boolean(),
+                "presence must be reported as a bool, never as the value: {backend}"
+            );
+            // No field anywhere in an entry may carry a secret. Checked by shape rather than by
+            // name, so a future field cannot smuggle one past a substring match.
+            for (name, value) in backend.as_object().unwrap() {
+                if name.contains("key") {
+                    assert!(
+                        value.is_boolean(),
+                        "{name} must be a boolean, not something that could hold a secret: {value}"
+                    );
+                }
+            }
+        }
+
+        // And there is no route that returns one.
+        for path in ["/v1/backends/anthropic/key", "/v1/backends/groq/key"] {
+            let (status, _) = call(&app, get(path)).await;
+            assert!(
+                status == StatusCode::METHOD_NOT_ALLOWED || status == StatusCode::NOT_FOUND,
+                "GET {path} must not exist, got {status}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_key_is_refused_for_a_backend_that_does_not_use_one() {
+        let (status, body) = call(
+            &app(),
+            post("/v1/backends/ollama/key", serde_json::json!({"key": "x"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    /// The window binds a new origin every launch, so anything kept in `localStorage` is gone
+    /// by the next one. Preferences have to round-trip through the engine or a theme resets
+    /// every time the app opens.
+    #[tokio::test]
+    async fn preferences_round_trip() {
+        let app = app();
+
+        let (status, empty) = call(&app, get("/v1/preferences")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            empty,
+            serde_json::json!({}),
+            "absent preferences are an empty object"
+        );
+
+        let wanted = serde_json::json!({"mode": "dark", "accent": "amber"});
+        let (status, _) = call(&app, post("/v1/preferences", wanted.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, read_back) = call(&app, get("/v1/preferences")).await;
+        assert_eq!(read_back, wanted);
     }
 
     /// A backend chosen in the app has to outlive the process.

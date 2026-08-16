@@ -9,7 +9,7 @@ interface Props {
 function spans(parts: Span[]) {
   return parts.map((part, index) =>
     part.bold ? (
-      <strong key={index} className="font-semibold text-neutral-900">
+      <strong key={index} className="font-semibold text-ink">
         {part.text}
       </strong>
     ) : (
@@ -35,7 +35,7 @@ export function Markdown({ source }: Props) {
           return (
             <h3
               key={index}
-              className="pt-1 text-[13px] font-semibold tracking-tight text-neutral-900"
+              className="pt-1 text-[13px] font-semibold tracking-tight text-ink"
             >
               {spans(block.spans)}
             </h3>
@@ -47,8 +47,8 @@ export function Markdown({ source }: Props) {
             <ul key={index} className="space-y-1.5">
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex} className="flex items-start gap-2">
-                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-neutral-300" />
-                  <span className="text-[14px] leading-relaxed text-neutral-700">
+                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
+                  <span className="text-[14px] leading-relaxed text-ink">
                     {spans(item)}
                   </span>
                 </li>
@@ -58,7 +58,7 @@ export function Markdown({ source }: Props) {
         }
 
         return (
-          <p key={index} className="text-[14px] leading-relaxed text-neutral-700">
+          <p key={index} className="text-[14px] leading-relaxed text-ink">
             {spans(block.spans)}
           </p>
         );

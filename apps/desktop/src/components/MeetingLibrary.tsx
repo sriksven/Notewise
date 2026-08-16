@@ -67,25 +67,25 @@ function Row({
         onClick={onSelect}
         aria-current={selected ? "true" : undefined}
         className={`w-full rounded-lg px-2.5 py-2 text-left transition ${
-          selected ? "bg-neutral-900/[0.06]" : "hover:bg-neutral-900/[0.03]"
+          selected ? "bg-accent/[0.06]" : "hover:bg-accent/[0.03]"
         }`}
       >
         <div className="flex items-center gap-1.5">
           {live && (
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-record" aria-hidden />
           )}
-          <span className="truncate text-[13px] font-medium text-neutral-800">
+          <span className="truncate text-[13px] font-medium text-ink">
             {meeting.title}
           </span>
         </div>
 
-        <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] text-neutral-400">
+        <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] text-ink-faint">
           <span>{live ? "Recording" : timeLabel(meeting.started_at)}</span>
         </div>
 
         {snippet && (
           // The matched text, so a search result explains itself without being opened.
-          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-neutral-500">
+          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-ink-muted">
             {snippet}
           </p>
         )}
@@ -187,7 +187,7 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
         <div className="relative">
           <Search
             size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint"
             aria-hidden
           />
           <input
@@ -196,9 +196,9 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search what was said"
             aria-label="Search meetings"
-            className="w-full rounded-lg border border-hairline bg-white py-1.5 pl-8 pr-7
-                       text-[13px] text-neutral-800 outline-none transition
-                       placeholder:text-neutral-400 focus:border-neutral-300"
+            className="w-full rounded-lg border border-hairline bg-surface py-1.5 pl-8 pr-7
+                       text-[13px] text-ink outline-none transition
+                       placeholder:text-ink-faint focus:border-hairline"
           />
           {query && (
             <button
@@ -206,7 +206,7 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
               onClick={() => setQuery("")}
               aria-label="Clear search"
               className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center
-                         justify-center rounded text-neutral-400 transition hover:text-neutral-700"
+                         justify-center rounded text-ink-faint transition hover:text-ink"
             >
               <X size={13} aria-hidden />
             </button>
@@ -217,12 +217,12 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {results ? (
           results.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] text-neutral-400">
+            <p className="px-2.5 py-2 text-[12px] text-ink-faint">
               Nothing matched “{trimmed}”.
             </p>
           ) : (
             <>
-              <h2 className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+              <h2 className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
                 {results.length} result{results.length === 1 ? "" : "s"}
               </h2>
               <ul className="space-y-0.5">
@@ -239,13 +239,13 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
             </>
           )
         ) : meetings.length === 0 ? (
-          <p className="px-2.5 py-2 text-[12px] leading-relaxed text-neutral-400">
+          <p className="px-2.5 py-2 text-[12px] leading-relaxed text-ink-faint">
             Nothing recorded yet. Press the red button to start.
           </p>
         ) : (
           groups.map(([label, group]) => (
             <section key={label}>
-              <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+              <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
                 {label}
               </h2>
               <ul className="space-y-0.5">

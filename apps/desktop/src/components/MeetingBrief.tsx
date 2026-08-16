@@ -72,13 +72,13 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
   }
 
   if (loading) {
-    return <p className="text-[12px] leading-relaxed text-neutral-400">Loading…</p>;
+    return <p className="text-[12px] leading-relaxed text-ink-faint">Loading…</p>;
   }
 
   if (!brief?.series) {
     return (
       <div>
-        <p className="text-[12px] leading-relaxed text-neutral-400">
+        <p className="text-[12px] leading-relaxed text-ink-faint">
           Not part of a recurring meeting. Link it to carry unfinished work forward from
           earlier instances.
         </p>
@@ -86,13 +86,13 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
           type="button"
           onClick={() => void thread()}
           disabled={linking}
-          className="mt-2 flex items-center gap-1 text-[11.5px] text-neutral-400
-                     transition hover:text-neutral-700 disabled:opacity-50"
+          className="mt-2 flex items-center gap-1 text-[11.5px] text-ink-faint
+                     transition hover:text-ink disabled:opacity-50"
         >
           <Link2 size={11} aria-hidden />
           {linking ? "Linking…" : "This meeting recurs"}
         </button>
-        {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-[11px] text-danger-text">{error}</p>}
       </div>
     );
   }
@@ -102,8 +102,8 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
   return (
     <div>
       <div className="mb-2 flex items-center gap-1.5">
-        <Repeat size={11} className="shrink-0 text-neutral-400" aria-hidden />
-        <span className="min-w-0 truncate text-[11.5px] text-neutral-500">
+        <Repeat size={11} className="shrink-0 text-ink-faint" aria-hidden />
+        <span className="min-w-0 truncate text-[11.5px] text-ink-muted">
           {brief.series.title}
         </span>
         <button
@@ -111,15 +111,15 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
           onClick={() => void unthread()}
           disabled={linking}
           title="Stop treating this as a recurring meeting"
-          className="ml-auto shrink-0 text-[10.5px] text-neutral-300 transition
-                     hover:text-neutral-600 disabled:opacity-50"
+          className="ml-auto shrink-0 text-[10.5px] text-ink-faint transition
+                     hover:text-ink disabled:opacity-50"
         >
           unlink
         </button>
       </div>
 
       {carried.length === 0 ? (
-        <p className="text-[12px] leading-relaxed text-neutral-400">
+        <p className="text-[12px] leading-relaxed text-ink-faint">
           {brief.previous_meeting_id
             ? "Nothing outstanding from last time."
             : "First meeting in this series — nothing to carry forward yet."}
@@ -130,12 +130,12 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
             <li key={item.id} className="flex items-start gap-2">
               <span className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
               <span className="min-w-0">
-                <span className="text-[12.5px] leading-snug text-neutral-800">
+                <span className="text-[12.5px] leading-snug text-ink">
                   {item.text}
                 </span>{" "}
                 <span
                   className={`whitespace-nowrap text-[11px] ${
-                    item.owner ? "text-neutral-500" : "text-amber-700"
+                    item.owner ? "text-ink-muted" : "text-warn-text"
                   }`}
                 >
                   {item.owner ?? "unassigned"}
@@ -150,15 +150,15 @@ export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
         <button
           type="button"
           onClick={() => onOpenMeeting(brief.previous_meeting_id as string)}
-          className="mt-2 flex items-center gap-1 text-[11.5px] text-neutral-400
-                     transition hover:text-neutral-700"
+          className="mt-2 flex items-center gap-1 text-[11.5px] text-ink-faint
+                     transition hover:text-ink"
         >
           <History size={11} aria-hidden />
           Open the previous one
         </button>
       )}
 
-      {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-[11px] text-danger-text">{error}</p>}
     </div>
   );
 }

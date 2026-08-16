@@ -21,7 +21,6 @@ reqwest.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 hex.workspace = true
-keyring.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
@@ -29,3 +28,22 @@ tokio = { workspace = true, features = ["fs"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tempfile.workspace = true
 axum.workspace = true
+
+# The platform backends, per target.
+#
+# keyring 3.x ships no backend unless one is asked for: without a feature it compiles to a mock
+# store where `set` succeeds and `get` returns nothing. Every credential the app said it had put
+# in the keychain was silently discarded, which a round-trip test caught only because it is
+# `#[ignore]`d and nobody had run it.
+#
+# `linux-native` rather than the secret-service backends on purpose — those need libdbus at build
+# time, which CI does not install and which would turn a missing system package into a failed
+# engine build.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { workspace = true, features = ["linux-native"] }

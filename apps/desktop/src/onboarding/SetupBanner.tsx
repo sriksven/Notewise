@@ -31,7 +31,7 @@ export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBa
   return (
     <div
       role="status"
-      className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900"
+      className="flex items-center gap-2 border-b border-warn-line bg-warn px-4 py-2 text-[13px] text-warn-text"
     >
       <AlertCircle size={15} className="shrink-0" aria-hidden />
       <span className="flex-1">{sentence}.</span>
@@ -41,8 +41,8 @@ export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBa
       <button
         type="button"
         onClick={onOpenSettings}
-        className="shrink-0 rounded-full border border-amber-300 px-2.5 py-0.5 text-[12px]
-                   font-medium transition hover:bg-amber-100"
+        className="shrink-0 rounded-full border border-warn-line px-2.5 py-0.5 text-[12px]
+                   font-medium transition hover:bg-warn"
       >
         Fix in Settings
       </button>
@@ -51,7 +51,7 @@ export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBa
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="shrink-0 rounded p-0.5 transition hover:bg-amber-100"
+        className="shrink-0 rounded p-0.5 transition hover:bg-warn"
       >
         <X size={14} aria-hidden />
       </button>

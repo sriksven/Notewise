@@ -48,8 +48,8 @@ export function SetupGate({ children }: SetupGateProps) {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-neutral-50">
-        <Loader2 size={20} className="animate-spin text-neutral-400" aria-label="Loading" />
+      <div className="flex h-full items-center justify-center bg-overlay">
+        <Loader2 size={20} className="animate-spin text-ink-faint" aria-label="Loading" />
       </div>
     );
   }

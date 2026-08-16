@@ -137,21 +137,21 @@ export function NotesView() {
     <div className="flex h-full min-h-0">
       <aside className="flex w-[240px] shrink-0 flex-col border-r border-hairline">
         <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
-          <h2 className="text-[13px] font-semibold text-neutral-800">Notes</h2>
+          <h2 className="text-[13px] font-semibold text-ink">Notes</h2>
           <button
             type="button"
             onClick={() => void create()}
             aria-label="New note"
             title="New note"
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400
-                       transition hover:bg-neutral-100 hover:text-neutral-700"
+            className="flex h-6 w-6 items-center justify-center rounded text-ink-faint
+                       transition hover:bg-overlay hover:text-ink"
           >
             <Plus size={14} aria-hidden />
           </button>
         </div>
 
         {notes.length === 0 ? (
-          <p className="px-4 py-3 text-[12px] leading-relaxed text-neutral-400">
+          <p className="px-4 py-3 text-[12px] leading-relaxed text-ink-faint">
             No notes yet. A note is a place to think — meeting pages will land here too.
           </p>
         ) : (
@@ -160,7 +160,7 @@ export function NotesView() {
               <li key={note.id}>
                 <div
                   className={`group flex items-center gap-1 px-2 ${
-                    selectedId === note.id ? "bg-neutral-100" : ""
+                    selectedId === note.id ? "bg-overlay" : ""
                   }`}
                 >
                   <button
@@ -168,10 +168,10 @@ export function NotesView() {
                     onClick={() => void open(note)}
                     className="min-w-0 flex-1 rounded px-2 py-1.5 text-left"
                   >
-                    <span className="block truncate text-[12.5px] text-neutral-800">
+                    <span className="block truncate text-[12.5px] text-ink">
                       {note.title || "Untitled"}
                     </span>
-                    <span className="block text-[10.5px] text-neutral-400">
+                    <span className="block text-[10.5px] text-ink-faint">
                       {new Date(note.updated_at).toLocaleDateString([], {
                         month: "short",
                         day: "numeric",
@@ -182,8 +182,8 @@ export function NotesView() {
                     type="button"
                     onClick={() => void remove(note)}
                     aria-label={`Delete ${note.title || "Untitled"}`}
-                    className="shrink-0 p-1 text-neutral-300 opacity-0 transition
-                               hover:text-red-600 group-hover:opacity-100"
+                    className="shrink-0 p-1 text-ink-faint opacity-0 transition
+                               hover:text-danger-text group-hover:opacity-100"
                   >
                     <Trash2 size={12} aria-hidden />
                   </button>
@@ -196,7 +196,7 @@ export function NotesView() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!selectedId ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-neutral-300">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-ink-faint">
             <FileText size={28} strokeWidth={1.5} aria-hidden />
             <p className="text-[12.5px]">Select a note, or make a new one.</p>
           </div>
@@ -210,7 +210,7 @@ export function NotesView() {
                 placeholder="Untitled"
                 aria-label="Note title"
                 className="min-w-0 flex-1 bg-transparent text-[14px] font-semibold
-                           text-neutral-900 outline-none placeholder:text-neutral-300"
+                           text-ink outline-none placeholder:text-ink-faint"
               />
               {/* Saving state is stated rather than implied. A pane that autosaves silently
                   gives a user no way to know whether their work is safe, and the failed case
@@ -218,7 +218,7 @@ export function NotesView() {
               <span
                 role="status"
                 className={`shrink-0 text-[11px] ${
-                  save === "failed" ? "text-red-600" : "text-neutral-400"
+                  save === "failed" ? "text-danger-text" : "text-ink-faint"
                 }`}
               >
                 {save === "saving"
@@ -238,14 +238,14 @@ export function NotesView() {
               placeholder="Markdown."
               aria-label="Note body"
               className="min-h-0 flex-1 resize-none bg-transparent px-5 py-4 text-[13px]
-                         leading-relaxed text-neutral-800 outline-none
-                         placeholder:text-neutral-300"
+                         leading-relaxed text-ink outline-none
+                         placeholder:text-ink-faint"
             />
           </>
         )}
 
         {error && (
-          <p role="status" className="border-t border-hairline px-5 py-2 text-[12px] text-red-600">
+          <p role="status" className="border-t border-hairline px-5 py-2 text-[12px] text-danger-text">
             {error}
           </p>
         )}

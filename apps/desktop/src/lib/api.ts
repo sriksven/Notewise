@@ -164,6 +164,8 @@ export interface BackendInfo {
   requires_endpoint: boolean;
   /** Whether this backend can be asked which models it currently holds. */
   lists_models: boolean;
+  /** Whether a key is available — from the keychain or the environment. Never the key. */
+  has_key: boolean;
 }
 
 export type AmbiguityKind =
@@ -434,6 +436,35 @@ export const api = {
     ),
 
   languages: () => request<{ languages: LanguageOption[] }>("/v1/languages"),
+
+  /**
+   * Interface preferences, kept by the engine.
+   *
+   * Not `localStorage`: the shell binds port 0, so the window's origin changes every launch
+   * and anything stored per-origin is gone by the next one.
+   */
+  preferences: () => request<Record<string, unknown>>("/v1/preferences"),
+
+  setPreferences: (prefs: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/v1/preferences", {
+      method: "POST",
+      body: JSON.stringify(prefs),
+    }),
+
+  /**
+   * Save a provider API key.
+   *
+   * Goes to the OS keychain and is never readable back — the listing reports only whether a
+   * key exists. Switches to the backend on success, so adding a key is one action.
+   */
+  setApiKey: (kind: string, key: string) =>
+    request<{ kind: string; has_key: boolean; model: string }>(
+      `/v1/backends/${encodeURIComponent(kind)}/key`,
+      { method: "POST", body: JSON.stringify({ key }) },
+    ),
+
+  deleteApiKey: (kind: string) =>
+    request<void>(`/v1/backends/${encodeURIComponent(kind)}/key`, { method: "DELETE" }),
 
   /**
    * Switch the active AI backend.

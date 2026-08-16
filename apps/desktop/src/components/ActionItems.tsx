@@ -103,13 +103,13 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
   }
 
   if (loading && items.length === 0) {
-    return <p className="text-[12px] leading-relaxed text-neutral-400">Loading…</p>;
+    return <p className="text-[12px] leading-relaxed text-ink-faint">Loading…</p>;
   }
 
   return (
     <div>
       {items.length === 0 && !adding ? (
-        <p className="text-[12px] leading-relaxed text-neutral-400">
+        <p className="text-[12px] leading-relaxed text-ink-faint">
           Nothing captured yet. Summarize the meeting, or add a commitment by hand.
         </p>
       ) : (
@@ -124,12 +124,12 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                   onChange={() => void toggle(item)}
                   aria-label={done ? `Reopen: ${item.text}` : `Complete: ${item.text}`}
                   className="mt-[3px] h-3.5 w-3.5 shrink-0 cursor-pointer rounded
-                             border-neutral-300 accent-neutral-800"
+                             border-hairline accent-neutral-800"
                 />
                 <span className="min-w-0 flex-1">
                   <span
                     className={`text-[12.5px] leading-snug ${
-                      done ? "text-neutral-400 line-through" : "text-neutral-800"
+                      done ? "text-ink-faint line-through" : "text-ink"
                     }`}
                   >
                     {item.text}
@@ -139,14 +139,14 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                       nobody picked it up. */}
                   <span
                     className={`inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] ${
-                      item.owner ? "text-neutral-500" : "text-amber-700"
+                      item.owner ? "text-ink-muted" : "text-warn-text"
                     }`}
                   >
                     <User size={10} aria-hidden />
                     {item.owner ?? "unassigned"}
                   </span>
                   {item.due_at && (
-                    <span className="ml-1.5 inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] text-neutral-500">
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] text-ink-muted">
                       <CalendarClock size={10} aria-hidden />
                       {new Date(item.due_at).toLocaleDateString([], {
                         month: "short",
@@ -159,7 +159,7 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                 {promoted.has(item.id) ? (
                   <span
                     title="A ticket already exists for this"
-                    className="mt-[2px] shrink-0 text-[10px] font-medium text-neutral-400"
+                    className="mt-[2px] shrink-0 text-[10px] font-medium text-ink-faint"
                   >
                     ticketed
                   </span>
@@ -170,8 +170,8 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                     disabled={promoting === item.id}
                     title="Track this as a ticket. The action item stays — it is the record that this meeting produced the work."
                     aria-label={`Make a ticket from: ${item.text}`}
-                    className="mt-[1px] shrink-0 text-neutral-300 opacity-0 transition
-                               hover:text-neutral-700 group-hover:opacity-100
+                    className="mt-[1px] shrink-0 text-ink-faint opacity-0 transition
+                               hover:text-ink group-hover:opacity-100
                                disabled:opacity-50"
                   >
                     <TicketCheck size={13} aria-hidden />
@@ -206,17 +206,17 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
             }}
             placeholder="What needs doing?"
             aria-label="New action item"
-            className="w-full rounded-md border border-hairline bg-white px-2 py-1
-                       text-[12.5px] text-neutral-800 outline-none
-                       placeholder:text-neutral-300 focus:border-neutral-300"
+            className="w-full rounded-md border border-hairline bg-surface px-2 py-1
+                       text-[12.5px] text-ink outline-none
+                       placeholder:text-ink-faint focus:border-hairline"
           />
         </form>
       ) : (
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="mt-2 flex items-center gap-1 text-[11.5px] text-neutral-400
-                     transition hover:text-neutral-700"
+          className="mt-2 flex items-center gap-1 text-[11.5px] text-ink-faint
+                     transition hover:text-ink"
         >
           <Plus size={11} aria-hidden />
           Add item
@@ -224,7 +224,7 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
       )}
 
       {error && (
-        <p role="status" className="mt-2 text-[11px] leading-snug text-red-600">
+        <p role="status" className="mt-2 text-[11px] leading-snug text-danger-text">
           {error}
         </p>
       )}

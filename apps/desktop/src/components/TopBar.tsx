@@ -74,7 +74,7 @@ function Pill({
         <div
           role="menu"
           className="absolute left-1/2 top-full z-20 mt-1.5 max-h-80 w-60 -translate-x-1/2
-                     overflow-y-auto rounded-xl border border-hairline bg-white py-1 shadow-dock"
+                     overflow-y-auto rounded-xl border border-hairline bg-surface py-1 shadow-dock"
         >
           {children(() => setOpen(false))}
         </div>
@@ -104,8 +104,8 @@ function Item({
       disabled={disabled}
       onClick={onClick}
       className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-[13px]
-                 text-neutral-700 transition hover:bg-neutral-50
-                 disabled:cursor-not-allowed disabled:text-neutral-300"
+                 text-ink transition hover:bg-overlay
+                 disabled:cursor-not-allowed disabled:text-ink-faint"
     >
       <span className="mt-0.5 w-3.5 shrink-0">
         {selected && <Check size={13} className="text-record" aria-hidden />}
@@ -113,7 +113,7 @@ function Item({
       <span className="min-w-0">
         <span className="block truncate">{title}</span>
         {subtitle && (
-          <span className="block truncate text-[11px] text-neutral-400">{subtitle}</span>
+          <span className="block truncate text-[11px] text-ink-faint">{subtitle}</span>
         )}
       </span>
     </button>
@@ -211,11 +211,11 @@ export function TopBar({
         >
           {(close) => (
             <>
-              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
                 AI backend
               </p>
               {backends.length === 0 && (
-                <p className="px-3 py-2 text-[12px] text-neutral-400">
+                <p className="px-3 py-2 text-[12px] text-ink-faint">
                   Could not reach the engine.
                 </p>
               )}
@@ -250,7 +250,7 @@ export function TopBar({
               {installed.length > 0 && (
                 <>
                   <div className="my-1 border-t border-hairline" />
-                  <p className="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                  <p className="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
                     Installed models
                   </p>
                   {installed.map((model) => {
@@ -278,7 +278,7 @@ export function TopBar({
         >
           {(close) => (
             <>
-              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
                 Input device
               </p>
               <Item
@@ -305,7 +305,7 @@ export function TopBar({
                 />
               ))}
               {devices.length === 0 && (
-                <p className="px-3 py-2 text-[12px] text-neutral-400">
+                <p className="px-3 py-2 text-[12px] text-ink-faint">
                   No input devices found.
                 </p>
               )}
@@ -321,7 +321,7 @@ export function TopBar({
         >
           {(close) => (
             <>
-              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
                 Spoken language
               </p>
               <Item
@@ -345,7 +345,7 @@ export function TopBar({
                   subtitle={l.code}
                 />
               ))}
-              <p className="px-3 pb-1.5 pt-1 text-[11px] leading-snug text-neutral-400">
+              <p className="px-3 pb-1.5 pt-1 text-[11px] leading-snug text-ink-faint">
                 English-only models ignore this.
               </p>
             </>
@@ -357,7 +357,7 @@ export function TopBar({
           in the chrome rather than left in a settings screen to be trusted. */}
       {health && (
         <div
-          className="absolute right-3 flex items-center gap-1.5 text-[12px] text-neutral-500"
+          className="absolute right-3 flex items-center gap-1.5 text-[12px] text-ink-muted"
           title={
             health.ai_local
               ? "Transcripts are processed on this machine"
@@ -365,9 +365,9 @@ export function TopBar({
           }
         >
           {health.ai_local ? (
-            <ShieldCheck size={14} className="text-emerald-600" aria-hidden />
+            <ShieldCheck size={14} className="text-ok-text" aria-hidden />
           ) : (
-            <ShieldAlert size={14} className="text-amber-600" aria-hidden />
+            <ShieldAlert size={14} className="text-warn-text" aria-hidden />
           )}
           <span className="hidden sm:inline">{health.ai_local ? "Local" : "Cloud"}</span>
         </div>

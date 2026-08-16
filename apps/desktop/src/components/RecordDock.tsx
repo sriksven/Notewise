@@ -78,8 +78,13 @@ export function RecordDock({
     <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
       <div
         className="pointer-events-auto relative flex items-center gap-1 rounded-full
-                   border border-hairline bg-white px-2 py-2 shadow-dock"
+                   border border-hairline bg-surface px-2 py-2 shadow-dock"
       >
+        {/* Labelled, not a bare dot.
+            Starting a recording is the one irreversible thing in the app — it opens a
+            microphone — and a circle with an icon in it asks the user to remember which state
+            they are in. The word says it, the colour reinforces it, and the shape changes so
+            it reads at a glance and without colour. */}
         <button
           type="button"
           onClick={onToggle}
@@ -87,29 +92,34 @@ export function RecordDock({
           aria-label={label}
           aria-pressed={isRecording}
           title={label}
-          className={`flex h-11 w-11 items-center justify-center rounded-full text-white
-                      transition disabled:opacity-60
+          className={`flex h-11 items-center gap-2.5 rounded-full pl-3.5 pr-4 text-[13px]
+                      font-medium transition disabled:opacity-60
                       ${
                         isRecording
-                          ? "bg-record recording-pulse"
+                          ? "bg-record text-white recording-pulse hover:bg-record-hover"
                           : canRecord
-                            ? "bg-record hover:bg-record-hover"
-                            : "bg-neutral-400 hover:bg-neutral-500"
+                            ? "bg-record text-white hover:bg-record-hover"
+                            : "bg-ink-faint text-white hover:bg-ink-muted"
                       }`}
         >
-          {isRecording ? (
-            <Square size={16} fill="currentColor" aria-hidden />
-          ) : canRecord ? (
-            <Mic size={19} strokeWidth={2} aria-hidden />
-          ) : (
-            <MicOff size={19} strokeWidth={2} aria-hidden />
-          )}
+          <span className="flex h-5 w-5 items-center justify-center">
+            {isRecording ? (
+              // A square reads as stop without needing the colour, which matters for anyone
+              // who cannot separate the red from the surface behind it.
+              <Square size={13} fill="currentColor" aria-hidden />
+            ) : canRecord ? (
+              <Mic size={17} strokeWidth={2} aria-hidden />
+            ) : (
+              <MicOff size={17} strokeWidth={2} aria-hidden />
+            )}
+          </span>
+          {busy ? "Working" : isRecording ? "Stop" : "Record"}
         </button>
 
         {isRecording && startedAt !== null && (
           <span className="flex flex-col justify-center px-2 leading-tight">
             <span
-              className="font-mono text-[13px] tabular-nums text-neutral-700"
+              className="font-mono text-[13px] tabular-nums text-ink"
               aria-live="off"
             >
               {elapsed(startedAt)}
@@ -117,7 +127,7 @@ export function RecordDock({
             {device && (
               // Which input is live matters: the usual recording failure is capturing the
               // wrong device and finding out afterwards.
-              <span className="max-w-[13ch] truncate text-[10px] text-neutral-400" title={device}>
+              <span className="max-w-[13ch] truncate text-[10px] text-ink-faint" title={device}>
                 {device}
               </span>
             )}
@@ -134,8 +144,8 @@ export function RecordDock({
           aria-label="More options"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400
-                     transition hover:bg-neutral-100 hover:text-neutral-700"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink-faint
+                     transition hover:bg-overlay hover:text-ink"
         >
           <MoreHorizontal size={18} aria-hidden />
         </button>
@@ -144,7 +154,7 @@ export function RecordDock({
           <div
             role="menu"
             className="absolute bottom-full right-0 mb-2 w-52 overflow-hidden rounded-xl
-                       border border-hairline bg-white py-1 shadow-dock"
+                       border border-hairline bg-surface py-1 shadow-dock"
           >
             <button
               type="button"
@@ -154,12 +164,12 @@ export function RecordDock({
                 setMenuOpen(false);
                 onImport();
               }}
-              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
-                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+              className="w-full px-3 py-2 text-left text-[13px] text-ink
+                         transition hover:bg-overlay disabled:cursor-not-allowed disabled:text-ink-faint"
             >
               Import an audio file
             </button>
-            <p className="px-3 pb-1 pt-1 text-[11px] leading-snug text-neutral-400">
+            <p className="px-3 pb-1 pt-1 text-[11px] leading-snug text-ink-faint">
               {canImport
                 ? "Transcribes a WAV already on this machine."
                 : "Needs a build that can transcribe."}
@@ -175,8 +185,8 @@ export function RecordDock({
                 setMenuOpen(false);
                 onExport("full");
               }}
-              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
-                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+              className="w-full px-3 py-2 text-left text-[13px] text-ink
+                         transition hover:bg-overlay disabled:cursor-not-allowed disabled:text-ink-faint"
             >
               Export as Markdown
             </button>
@@ -189,8 +199,8 @@ export function RecordDock({
                 setMenuOpen(false);
                 onExport("brief");
               }}
-              className="w-full px-3 py-2 text-left text-[13px] text-neutral-700
-                         transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-300"
+              className="w-full px-3 py-2 text-left text-[13px] text-ink
+                         transition hover:bg-overlay disabled:cursor-not-allowed disabled:text-ink-faint"
             >
               Export summary only
             </button>

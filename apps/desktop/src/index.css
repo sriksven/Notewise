@@ -3,6 +3,35 @@
 @tailwind utilities;
 
 @layer base {
+  /* Fallbacks only. `lib/theme.ts` overwrites all of these on the first paint; these exist so
+     the window is never unstyled in the moment before it runs, and so a stylesheet opened on
+     its own is readable. */
+  :root {
+    --bg: #141416;
+    --surface: #1b1b1e;
+    --rail: #191a1c;
+    --text: #ededf0;
+    --muted: #a1a1aa;
+    --faint: #71717a;
+    --hairline: #2a2a2e;
+    --overlay: rgba(255, 255, 255, 0.07);
+    --accent: #3f3f46;
+    --accent-hover: #27272a;
+    --accent-on: #ffffff;
+    --record: #e2382e;
+    --record-hover: #c92f26;
+    --warn-bg: #2a2312;
+    --warn-text: #e8c877;
+    --warn-line: #4a3c1c;
+    --ok-bg: #152618;
+    --ok-text: #8fd39c;
+    --ok-line: #26412c;
+    --danger-bg: #2b1715;
+    --danger-text: #f0a49d;
+    --danger-line: #4d2622;
+    color-scheme: dark;
+  }
+
   html,
   body,
   #root {
@@ -10,14 +39,18 @@
   }
 
   body {
-    /* System stack rather than a webfont: a desktop app should look native on
-       first paint, and there is no flash of unstyled text to manage. */
+    /* System stack rather than a webfont: a desktop app should look native on first paint,
+       and there is no flash of unstyled text to manage. */
     font-family:
-      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-      Arial, sans-serif;
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
-    color: #1c1c1e;
-    background: #ffffff;
+    color: var(--text);
+    background: var(--bg);
+    /* Switching theme should feel like a light changing, not like a page reloading. Kept short
+       — anything slower reads as lag when clicking through the accent swatches. */
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
   }
 
   /* The window chrome is the OS's. Text selection is for transcripts, not the UI. */
@@ -25,33 +58,80 @@
   .chrome {
     user-select: none;
   }
+
+  /* Focus is drawn in the accent so keyboard navigation is visible in every theme. The default
+     ring is a fixed blue that disappears against the ocean and indigo accents. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Scrollbars, so a dark theme does not get a bright gutter down the side. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--overlay);
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--faint);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 @layer components {
   /* The pill controls along the top. */
   .pill {
     @apply inline-flex items-center gap-1.5 rounded-full border border-hairline
-           bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700
-           transition-colors hover:bg-neutral-50 active:bg-neutral-100;
-  }
-
-  .pill-active {
-    @apply border-neutral-300 bg-neutral-100 text-neutral-900;
+           bg-surface px-3 py-1.5 text-[13px] font-medium text-ink
+           transition-colors hover:bg-overlay;
   }
 
   /* Sidebar rail icon target. 32px keeps it comfortably clickable in a 52px rail. */
   .rail-icon {
-    @apply flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500
-           transition-colors hover:bg-neutral-100 hover:text-neutral-900;
+    @apply flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint
+           transition-colors hover:bg-overlay hover:text-ink;
   }
 
   .rail-icon-active {
-    @apply bg-neutral-100 text-neutral-900;
+    @apply bg-overlay text-ink;
+  }
+
+  /* A card: the one surface treatment, used for every grouped block. */
+  .card {
+    @apply rounded-xl border border-hairline bg-surface;
+  }
+
+  /* The primary action. */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2
+           text-[13px] font-medium text-accent-on transition-colors hover:bg-accent-hover
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Everything else. */
+  .btn-quiet {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-hairline
+           bg-surface px-3 py-2 text-[13px] text-ink transition-colors hover:bg-overlay
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-[13px]
+           text-ink outline-none transition placeholder:text-ink-faint focus:border-accent;
   }
 }
 
-/* Slow, low-amplitude pulse while recording. Fast or large movement in the
-   corner of the eye reads as an error state; this should read as "still on". */
+/* Slow, low-amplitude pulse while recording. Fast or large movement in the corner of the eye
+   reads as an error state; this should read as "still on". */
 @keyframes record-pulse {
   0%,
   100% {
@@ -67,7 +147,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recording-pulse {
+  .recording-pulse,
+  body {
     animation: none;
+    transition: none;
   }
 }

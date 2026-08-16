@@ -19,6 +19,14 @@ interface Props {
   summary: Summary | null;
   summaryLoading: boolean;
   questions: ClarifyingQuestion[];
+  /**
+   * Why there is nothing to show, from the engine.
+   *
+   * The suggester is gated — it needs a couple of hundred characters of recent transcript
+   * and holds a ninety-second cooldown — and an empty panel that does not say so is
+   * indistinguishable from a broken one.
+   */
+  questionsReason?: string | null;
   isRecording: boolean;
   /** Whether this meeting has anything to summarize yet. */
   hasTranscript: boolean;
@@ -54,8 +62,8 @@ const LABEL: Record<AmbiguityKind, string> = {
  * closed — which is the failure mode this whole feature has to avoid.
  */
 const TONE: Partial<Record<AmbiguityKind, string>> = {
-  contradiction: "bg-red-50 text-red-700 border-red-200",
-  unassigned_action: "bg-amber-50 text-amber-700 border-amber-200",
+  contradiction: "bg-danger text-danger-text border-danger-line",
+  unassigned_action: "bg-warn text-warn-text border-warn-line",
 };
 
 function Section({
@@ -71,11 +79,11 @@ function Section({
 }) {
   return (
     <section className="border-b border-hairline px-4 py-3 last:border-b-0">
-      <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+      <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
         {icon}
         {title}
         {count !== undefined && count > 0 && (
-          <span className="ml-auto rounded-full bg-neutral-100 px-1.5 py-px text-[10px] font-medium tabular-nums text-neutral-500">
+          <span className="ml-auto rounded-full bg-overlay px-1.5 py-px text-[10px] font-medium tabular-nums text-ink-muted">
             {count}
           </span>
         )}
@@ -86,7 +94,7 @@ function Section({
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-[12px] leading-relaxed text-neutral-400">{children}</p>;
+  return <p className="text-[12px] leading-relaxed text-ink-faint">{children}</p>;
 }
 
 /**
@@ -106,6 +114,7 @@ export function IntelPanel({
   summary,
   summaryLoading,
   questions,
+  questionsReason,
   isRecording,
   hasTranscript,
   summarizing,
@@ -121,21 +130,21 @@ export function IntelPanel({
       className="chrome flex w-[300px] shrink-0 flex-col border-l border-hairline bg-rail"
     >
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2.5">
-        <span className="text-[12px] font-semibold text-neutral-700">Intelligence</span>
+        <span className="text-[12px] font-semibold text-ink">Intelligence</span>
         <button
           type="button"
           onClick={onClose}
           aria-label="Hide the intelligence panel"
           title="Hide"
-          className="flex h-6 w-6 items-center justify-center rounded text-neutral-400
-                     transition hover:bg-neutral-100 hover:text-neutral-700"
+          className="flex h-6 w-6 items-center justify-center rounded text-ink-faint
+                     transition hover:bg-overlay hover:text-ink"
         >
           <PanelRightClose size={14} aria-hidden />
         </button>
       </div>
 
       {!meetingId ? (
-        <p className="px-4 py-3 text-[12px] leading-relaxed text-neutral-400">
+        <p className="px-4 py-3 text-[12px] leading-relaxed text-ink-faint">
           Select a meeting, or start recording, and what it means shows up here.
         </p>
       ) : (
@@ -147,22 +156,23 @@ export function IntelPanel({
           >
             {questions.length === 0 ? (
               <Empty>
-                {isRecording
-                  ? "Nothing to flag yet. Suggestions appear when something said is likely to be ambiguous later."
-                  : "Suggestions are made while a meeting is running, when there is still time to ask."}
+                {!isRecording
+                  ? "Suggestions are made while a meeting is running, when there is still time to ask."
+                  : (questionsReason ??
+                    "Listening. A suggestion appears when something said is likely to be ambiguous later.")}
               </Empty>
             ) : (
               <ul className="space-y-2">
                 {questions.map((question, index) => (
                   <li
                     key={`${question.at_ms}-${index}`}
-                    className="group rounded-lg border border-hairline bg-white p-2.5"
+                    className="group rounded-lg border border-hairline bg-surface p-2.5"
                   >
                     <div className="mb-1.5 flex items-start justify-between gap-2">
                       <span
                         className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
                           TONE[question.kind] ??
-                          "border-neutral-200 bg-neutral-50 text-neutral-500"
+                          "border-hairline bg-overlay text-ink-muted"
                         }`}
                       >
                         {LABEL[question.kind]}
@@ -171,19 +181,19 @@ export function IntelPanel({
                         type="button"
                         onClick={() => onDismissQuestion(question)}
                         aria-label="Dismiss this question"
-                        className="shrink-0 text-neutral-300 opacity-0 transition
-                                   hover:text-neutral-600 group-hover:opacity-100"
+                        className="shrink-0 text-ink-faint opacity-0 transition
+                                   hover:text-ink group-hover:opacity-100"
                       >
                         <X size={13} aria-hidden />
                       </button>
                     </div>
 
-                    <p className="text-[13px] font-medium leading-snug text-neutral-900">
+                    <p className="text-[13px] font-medium leading-snug text-ink">
                       {question.question}
                     </p>
 
                     {question.about && (
-                      <p className="mt-1.5 border-l-2 border-neutral-200 pl-2 text-[11px] italic leading-snug text-neutral-500">
+                      <p className="mt-1.5 border-l-2 border-hairline pl-2 text-[11px] italic leading-snug text-ink-muted">
                         “{question.about}”
                       </p>
                     )}
@@ -211,13 +221,13 @@ export function IntelPanel({
                 {summary.decisions.map((decision) => (
                   <li
                     key={decision.id}
-                    className="rounded-lg border border-hairline bg-white p-2.5"
+                    className="rounded-lg border border-hairline bg-surface p-2.5"
                   >
-                    <p className="text-[12.5px] leading-snug text-neutral-800">
+                    <p className="text-[12.5px] leading-snug text-ink">
                       {decision.text}
                     </p>
                     {decision.reasoning && (
-                      <p className="mt-1 text-[11px] leading-snug text-neutral-500">
+                      <p className="mt-1 text-[11px] leading-snug text-ink-muted">
                         {decision.reasoning}
                       </p>
                     )}
@@ -255,8 +265,8 @@ export function IntelPanel({
                     : "Needs a transcript first"
               }
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border
-                         border-hairline bg-white px-3 py-2 text-[12.5px] font-medium
-                         text-neutral-700 transition hover:bg-neutral-50
+                         border-hairline bg-surface px-3 py-2 text-[12.5px] font-medium
+                         text-ink transition hover:bg-overlay
                          disabled:cursor-not-allowed disabled:opacity-50"
             >
               {summarizing ? (

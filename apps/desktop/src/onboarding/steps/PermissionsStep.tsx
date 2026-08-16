@@ -38,8 +38,8 @@ export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) 
 
   return (
     <div className="flex flex-col items-center text-center">
-      <h1 className="text-[26px] font-semibold tracking-tight text-neutral-900">Permissions</h1>
-      <p className="mt-2 max-w-md text-[14px] text-neutral-500">
+      <h1 className="text-[26px] font-semibold tracking-tight text-ink">Permissions</h1>
+      <p className="mt-2 max-w-md text-[14px] text-ink-muted">
         Notewise needs the operating system's permission to hear a meeting. Nothing is recorded
         until you press record.
       </p>
@@ -47,7 +47,7 @@ export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) 
       {error && (
         <div
           role="alert"
-          className="mt-6 w-full max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[13px] text-amber-900"
+          className="mt-6 w-full max-w-md rounded-lg border border-warn-line bg-warn px-3 py-2 text-left text-[13px] text-warn-text"
         >
           {error}
         </div>

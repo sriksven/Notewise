@@ -63,7 +63,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
   if (!meetingId) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 text-center">
-        <p className="text-[13px] text-neutral-500">
+        <p className="text-[13px] text-ink-muted">
           Select a meeting to ask questions about it.
         </p>
       </div>
@@ -73,10 +73,10 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
   if (!hasTranscript) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-        <p className="text-[13px] text-neutral-500">
-          <strong className="text-neutral-700">{meetingTitle}</strong> has no transcript yet.
+        <p className="text-[13px] text-ink-muted">
+          <strong className="text-ink">{meetingTitle}</strong> has no transcript yet.
         </p>
-        <p className="mt-1 text-[12px] text-neutral-400">
+        <p className="mt-1 text-[12px] text-ink-faint">
           There is nothing to ground an answer in.
         </p>
       </div>
@@ -89,10 +89,10 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
         <div className="mx-auto max-w-2xl space-y-4">
           {turns.length === 0 && (
             <div className="text-center">
-              <p className="text-[13px] text-neutral-500">
-                Ask about <strong className="text-neutral-700">{meetingTitle}</strong>
+              <p className="text-[13px] text-ink-muted">
+                Ask about <strong className="text-ink">{meetingTitle}</strong>
               </p>
-              <p className="mt-1 text-[12px] text-neutral-400">
+              <p className="mt-1 text-[12px] text-ink-faint">
                 Answers come only from this meeting's transcript.
               </p>
             </div>
@@ -106,8 +106,8 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
               <div
                 className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed ${
                   turn.role === "user"
-                    ? "bg-neutral-900 text-white"
-                    : "border border-hairline bg-white text-neutral-800"
+                    ? "bg-accent text-accent-on"
+                    : "border border-hairline bg-surface text-ink"
                 }`}
               >
                 {turn.content}
@@ -117,7 +117,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
 
           {busy && (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-2xl border border-hairline bg-white px-3.5 py-2 text-[13px] text-neutral-400">
+              <div className="flex items-center gap-2 rounded-2xl border border-hairline bg-surface px-3.5 py-2 text-[13px] text-ink-faint">
                 <Loader2 size={13} className="animate-spin" aria-hidden />
                 Thinking
               </div>
@@ -125,7 +125,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
           )}
 
           {error && (
-            <p role="alert" className="text-center text-[12px] text-amber-700">
+            <p role="alert" className="text-center text-[12px] text-warn-text">
               {error}
             </p>
           )}
@@ -150,7 +150,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
             placeholder="Ask about this meeting…"
             aria-label="Your question"
             className="max-h-32 flex-1 resize-none rounded-xl border border-hairline px-3 py-2
-                       text-[14px] outline-none transition focus:border-neutral-300"
+                       text-[14px] outline-none transition focus:border-hairline"
           />
           <button
             type="button"
@@ -158,8 +158,8 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
             disabled={busy || draft.trim().length === 0}
             aria-label="Send"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full
-                       bg-neutral-900 text-white transition hover:bg-neutral-700
-                       disabled:bg-neutral-200 disabled:text-neutral-400"
+                       bg-accent text-accent-on transition hover:bg-accent
+                       disabled:bg-hairline disabled:text-ink-faint"
           >
             <Send size={15} aria-hidden />
           </button>

@@ -91,12 +91,12 @@ export function WorkspaceHeader({
                 aria-hidden
               />
             )}
-            <h1 className="truncate text-[17px] font-semibold tracking-tight text-neutral-900">
+            <h1 className="truncate text-[17px] font-semibold tracking-tight text-ink">
               {meeting?.title ?? "No meeting selected"}
             </h1>
           </div>
 
-          <p className="mt-0.5 h-[15px] text-[12px] text-neutral-400">
+          <p className="mt-0.5 h-[15px] text-[12px] text-ink-faint">
             {meeting ? meta.join(" · ") : "Pick one on the left, or press record."}
           </p>
         </div>
@@ -120,8 +120,8 @@ export function WorkspaceHeader({
             aria-label="Show the intelligence panel"
             title="Show decisions, action items and suggested questions"
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg
-                       border border-hairline bg-white text-neutral-500 transition
-                       hover:bg-neutral-50 hover:text-neutral-900"
+                       border border-hairline bg-surface text-ink-muted transition
+                       hover:bg-overlay hover:text-ink"
           >
             <PanelRightOpen size={14} aria-hidden />
           </button>
@@ -139,8 +139,8 @@ export function WorkspaceHeader({
               aria-current={active ? "page" : undefined}
               className={`border-b-2 pb-2 text-[13px] transition ${
                 active
-                  ? "border-neutral-900 font-medium text-neutral-900"
-                  : "border-transparent text-neutral-500 hover:text-neutral-800"
+                  ? "border-accent font-medium text-ink"
+                  : "border-transparent text-ink-muted hover:text-ink"
               }`}
             >
               {label}

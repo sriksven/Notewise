@@ -199,7 +199,17 @@ pub const BACKEND_KIND_KEY: &str = "ai_backend_kind";
 pub const BACKEND_MODEL_KEY: &str = "ai_backend_model";
 
 /// The API key for a backend, from the environment.
-fn api_key_for(kind: BackendKind) -> Option<String> {
+pub(crate) fn api_key_for(kind: BackendKind) -> Option<String> {
+    // The keychain first. A key the user typed into the app is a deliberate, current choice;
+    // a stale variable left in a shell profile should not silently win over it.
+    if let Some(secret) = keychain_key(kind) {
+        return Some(secret);
+    }
+    env_key(kind)
+}
+
+/// The environment variable each provider conventionally uses.
+pub(crate) fn env_key(kind: BackendKind) -> Option<String> {
     let name = match kind {
         BackendKind::Anthropic => "ANTHROPIC_API_KEY",
         BackendKind::Gemini => "GEMINI_API_KEY",
@@ -209,6 +219,32 @@ fn api_key_for(kind: BackendKind) -> Option<String> {
     };
     std::env::var(name).ok().filter(|k| !k.trim().is_empty())
 }
+
+/// The credential-store entry name for a backend's key.
+///
+/// Namespaced away from connector ids so a provider and a connector that happen to share a name
+/// cannot read each other's secrets.
+pub(crate) fn key_entry(kind: BackendKind) -> String {
+    format!("backend:{}", kind.as_str())
+}
+
+/// The key a user saved through the app, from the OS keychain.
+///
+/// The keychain, never the database: the database is a plain SQLite file that gets copied into
+/// backups and support bundles, and a provider key sitting in it would go with them.
+fn keychain_key(kind: BackendKind) -> Option<String> {
+    use notewise_connectors::CredentialStore;
+
+    notewise_connectors::KeychainStore::new()
+        .get(&key_entry(kind), API_KEY_FIELD)
+        .ok()
+        .flatten()
+        .map(|s| s.expose().to_string())
+        .filter(|k| !k.trim().is_empty())
+}
+
+/// The field name under which a provider key is stored.
+pub const API_KEY_FIELD: &str = "api_key";
 
 /// Where transcription models live by default.
 ///

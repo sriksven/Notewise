@@ -24,6 +24,8 @@ import {
   type Segment,
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
+import { useRoute, type Route } from "./lib/router";
+import { useTheme } from "./lib/useTheme";
 
 /** How often to ask the engine for clarifying questions while recording. */
 const QUESTION_POLL_MS = 30_000;
@@ -37,15 +39,28 @@ const QUESTION_POLL_MS = 30_000;
  * arrives, rather than behind a screen nobody visits until the meeting is over.
  */
 export default function App() {
-  const [view, setView] = useState<View>("meetings");
-  const [tab, setTab] = useState<Tab>("transcript");
+  // The address is the state. Which meeting is open and which tab is showing live in the
+  // URL, so Back works, a window reload lands where it was, and a meeting can be linked to.
+  const { route, navigate, replace } = useRoute();
   const [panelOpen, setPanelOpen] = useState(true);
+  const theme = useTheme();
+
+  const view: View =
+    route.name === "meeting" || route.name === "home" ? "meetings" : route.name;
+  const tab: Tab = route.name === "meeting" ? route.tab : "transcript";
+  const selectedId = route.name === "meeting" ? route.id : null;
 
   const [health, setHealth] = useState<Health | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
+  /**
+   * Why the engine had nothing to suggest, in its own words.
+   *
+   * It always returned this and the window always threw it away, so an empty panel looked
+   * identical whether the feature was thinking, gated, or broken.
+   */
+  const [questionsReason, setQuestionsReason] = useState<string | null>(null);
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -98,7 +113,7 @@ export default function App() {
         const live = nextMeetings.find((m) => m.id === liveId);
         setRecordingId(liveId);
         if (live) setStartedAt(new Date(live.started_at).getTime());
-        setSelectedId((current) => current ?? liveId);
+            if (route.name === "home") replace({ name: "meeting", id: liveId, tab: "transcript" });
 
         // Only asked for while something is actually recording, so an idle app makes two
         // requests per refresh rather than three.
@@ -124,7 +139,7 @@ export default function App() {
 
   // The setup banner lives above this tree and cannot navigate on its own.
   useEffect(() => {
-    const open = () => setView("settings");
+    const open = () => navigate({ name: "settings" });
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
@@ -168,14 +183,22 @@ export default function App() {
     const ask = async () => {
       try {
         const result = await api.questions(recordingId);
-        if (cancelled || result.questions.length === 0) return;
+        if (cancelled) return;
+        setQuestionsReason(result.reason ?? null);
+        if (result.questions.length === 0) return;
 
         setQuestions((current) => {
           const seen = new Set(current.map((q) => q.question));
           return [...current, ...result.questions.filter((q) => !seen.has(q.question))];
         });
-      } catch {
-        // Deliberately silent.
+      } catch (e) {
+        // Not an error banner over someone's meeting — but the panel should say something
+        // rather than sit blank as though nothing were wrong.
+        if (!cancelled) {
+          setQuestionsReason(
+            e instanceof ApiError ? e.message : "The engine could not be reached.",
+          );
+        }
       }
     };
 
@@ -231,7 +254,9 @@ export default function App() {
             language: language ?? undefined,
           });
           setRecordingId(started.meeting_id);
-          setSelectedId(started.meeting_id);
+          // The engine creates the meeting as part of starting, so this is set in
+          // practice; the type allows null because the same shape reports "not recording".
+          if (started.meeting_id) select(started.meeting_id);
           setStartedAt(Date.now());
           setDevice(started.device);
           setNotice(
@@ -242,7 +267,7 @@ export default function App() {
         } else {
           const meeting = await api.createMeeting(title);
           setRecordingId(meeting.id);
-          setSelectedId(meeting.id);
+          select(meeting.id);
           setStartedAt(new Date(meeting.started_at).getTime());
           setNotice(
             "This engine cannot capture audio, so the meeting was created without it. " +
@@ -250,8 +275,6 @@ export default function App() {
           );
         }
         setQuestions([]);
-        setView("meetings");
-        setTab("transcript");
       }
       await refresh();
     } catch (e) {
@@ -299,9 +322,7 @@ export default function App() {
         path: path.trim(),
         language: language ?? undefined,
       });
-      setSelectedId(result.meeting_id);
-      setView("meetings");
-      setTab("transcript");
+      select(result.meeting_id);
       setNotice(
         `Imported ${Math.round(result.audio_ms / 1000)}s of audio — ` +
           `${result.segments} segment(s), ${result.speakers} speaker(s).`,
@@ -322,10 +343,11 @@ export default function App() {
     window.location.href = api.exportUrl(selectedId, variant);
   };
 
-  const select = (id: string) => {
-    setSelectedId(id);
-    setView("meetings");
-  };
+  const select = (id: string) => navigate({ name: "meeting", id, tab: "transcript" });
+  const setTab = (next: Tab) =>
+    selectedId && navigate({ name: "meeting", id: selectedId, tab: next });
+  const setView = (next: View) =>
+    navigate(next === "meetings" ? { name: "home" } : ({ name: next } as Route));
 
   const inWorkspace = view === "meetings";
 
@@ -338,6 +360,7 @@ export default function App() {
         onGoLive={() => {
           if (recordingId) select(recordingId);
         }}
+        onHome={() => navigate({ name: "home" })}
       />
 
       {inWorkspace && (
@@ -361,7 +384,7 @@ export default function App() {
             {error && (
               <div
                 role="alert"
-                className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900"
+                className="flex items-center gap-2 border-b border-warn-line bg-warn px-4 py-2 text-[13px] text-warn-text"
               >
                 <AlertCircle size={15} className="shrink-0" aria-hidden />
                 {error}
@@ -369,7 +392,7 @@ export default function App() {
             )}
 
             {notice && (
-              <div className="border-b border-hairline bg-neutral-50 px-4 py-2 text-[13px] text-neutral-600">
+              <div className="border-b border-hairline bg-overlay px-4 py-2 text-[13px] text-ink-muted">
                 {notice}
               </div>
             )}
@@ -419,7 +442,13 @@ export default function App() {
 
             {view === "notes" && <NotesView />}
             {view === "tickets" && <TicketsView />}
-            {view === "settings" && <SettingsView />}
+            {view === "settings" && (
+              <SettingsView
+                theme={theme.theme}
+                onModeChange={theme.setMode}
+                onAccentChange={theme.setAccent}
+              />
+            )}
             {view === "about" && <AboutView health={health} />}
           </main>
 
@@ -429,8 +458,9 @@ export default function App() {
               summary={summaryState.summary}
               summaryLoading={summaryState.loading}
               actionItemsToken={actionItemsToken}
-              onOpenMeeting={setSelectedId}
+              onOpenMeeting={select}
               questions={selectedId === recordingId ? questions : []}
+              questionsReason={selectedId === recordingId ? questionsReason : null}
               isRecording={isRecording && selectedId === recordingId}
               hasTranscript={segments.length > 0}
               summarizing={summarizing}

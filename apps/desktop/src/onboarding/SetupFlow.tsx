@@ -54,7 +54,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-neutral-50">
+    <div className="flex h-full flex-col overflow-y-auto bg-overlay">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 py-12">
         {step !== "welcome" && (
           <div className="mb-10">
@@ -82,7 +82,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
         {error && (
           <div
             role="alert"
-            className="mx-auto mt-6 w-full max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
+            className="mx-auto mt-6 w-full max-w-md rounded-lg border border-warn-line bg-warn px-3 py-2 text-[13px] text-warn-text"
           >
             {error}
           </div>
@@ -95,7 +95,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
                 type="button"
                 onClick={() => setStep(order[Math.max(0, index - 1)])}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-3 text-[13px]
-                           text-neutral-500 transition hover:text-neutral-900"
+                           text-ink-muted transition hover:text-ink"
               >
                 <ArrowLeft size={14} aria-hidden />
                 Back
@@ -109,9 +109,9 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
                   type="button"
                   onClick={() => void finish()}
                   disabled={finishing}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-neutral-900
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent
                              px-6 py-3 text-[14px] font-medium text-white transition
-                             hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                             hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {finishing && <Loader2 size={15} className="animate-spin" aria-hidden />}
                   {ready ? "Finish setup" : "Continue anyway"}
@@ -120,8 +120,8 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
                 <button
                   type="button"
                   onClick={() => setStep(order[index + 1])}
-                  className="flex-1 rounded-lg bg-neutral-900 px-6 py-3 text-[14px] font-medium
-                             text-white transition hover:bg-neutral-800"
+                  className="flex-1 rounded-lg bg-accent px-6 py-3 text-[14px] font-medium
+                             text-white transition hover:bg-accent-hover"
                 >
                   Continue
                 </button>
@@ -129,7 +129,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
             </div>
 
             {isLast && skipping.length > 0 && (
-              <p className="mt-3 text-center text-[12px] leading-relaxed text-neutral-500">
+              <p className="mt-3 text-center text-[12px] leading-relaxed text-ink-muted">
                 You can go in without finishing — but {skipping.join(", and ")}. Everything else
                 works, and Settings can pick this up later.
               </p>

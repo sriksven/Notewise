@@ -48,10 +48,10 @@ export function TranscriptView({ segments, isRecording, hasMeeting }: Props) {
         <AudioLines
           size={26}
           strokeWidth={1.4}
-          className={isRecording ? "text-record" : "text-neutral-300"}
+          className={isRecording ? "text-record" : "text-ink-faint"}
           aria-hidden
         />
-        <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-neutral-500">{message}</p>
+        <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-ink-muted">{message}</p>
       </div>
     );
   }
@@ -70,15 +70,15 @@ export function TranscriptView({ segments, isRecording, hasMeeting }: Props) {
             <div key={segment.id} className={sameSpeaker ? "-mt-3.5" : ""}>
               {!sameSpeaker && (
                 <div className="mb-1 flex items-baseline gap-2">
-                  <span className="text-[13px] font-semibold text-neutral-900">
+                  <span className="text-[13px] font-semibold text-ink">
                     {segment.speaker ?? "Unattributed"}
                   </span>
-                  <span className="font-mono text-[11px] tabular-nums text-neutral-400">
+                  <span className="font-mono text-[11px] tabular-nums text-ink-faint">
                     {timestamp(segment.start_ms)}
                   </span>
                 </div>
               )}
-              <p className="text-[14px] leading-relaxed text-neutral-700">
+              <p className="text-[14px] leading-relaxed text-ink">
                 {segment.text}
               </p>
             </div>

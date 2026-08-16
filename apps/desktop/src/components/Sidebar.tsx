@@ -1,4 +1,6 @@
-import { FileText, Info, PenLine, Settings, TicketCheck, Waves } from "lucide-react";
+import { FileText, Info, Settings, TicketCheck, Waves } from "lucide-react";
+
+import { Logo } from "./Logo";
 
 export type View = "meetings" | "notes" | "tickets" | "settings" | "about";
 
@@ -9,6 +11,8 @@ interface Props {
   isRecording: boolean;
   /** Jump back to the meeting being recorded from anywhere in the app. */
   onGoLive: () => void;
+  /** The mark goes home, which is what a logo in the corner is for. */
+  onHome: () => void;
 }
 
 const ITEMS: Array<{ id: View; label: string; Icon: typeof Info }> = [
@@ -32,16 +36,22 @@ const ITEMS: Array<{ id: View; label: string; Icon: typeof Info }> = [
  * created them. Work filed on Monday is chased on Thursday, and reaching it should not
  * require remembering which meeting it came out of.
  */
-export function Sidebar({ view, onChange, isRecording, onGoLive }: Props) {
+export function Sidebar({ view, onChange, isRecording, onGoLive, onHome }: Props) {
   return (
     <nav
       aria-label="Main"
       className="chrome flex w-[52px] shrink-0 flex-col items-center gap-1 border-r border-hairline bg-rail py-3"
     >
-      <div className="mb-2 flex h-8 w-8 items-center justify-center text-record">
-        <PenLine size={18} strokeWidth={2.2} aria-hidden />
-        <span className="sr-only">Notewise</span>
-      </div>
+      <button
+        type="button"
+        onClick={onHome}
+        aria-label="Notewise — go to meetings"
+        title="Notewise"
+        className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg text-accent
+                   transition hover:bg-overlay"
+      >
+        <Logo size={19} />
+      </button>
 
       {ITEMS.map(({ id, label, Icon }) => {
         const active = view === id;
@@ -72,7 +82,7 @@ export function Sidebar({ view, onChange, isRecording, onGoLive }: Props) {
           className="mt-auto flex h-8 w-8 items-center justify-center rounded-full
                      bg-record text-white transition recording-pulse hover:bg-record-hover"
         >
-          <span className="h-2 w-2 rounded-full bg-white" aria-hidden />
+          <span className="h-2 w-2 rounded-full bg-surface" aria-hidden />
         </button>
       )}
     </nav>
