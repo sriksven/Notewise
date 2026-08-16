@@ -53,6 +53,51 @@ impl Config {
     pub fn ai_router(&self) -> Result<AiRouter> {
         Ok(AiRouter::from_config(self.backend.clone())?)
     }
+
+    /// The router, preferring a backend the user has already chosen in the app.
+    ///
+    /// A choice made in the UI used to last until the process exited, because startup only ever
+    /// read the environment. Someone who picked `llama3.1:8b` — because `llama3.1` is not what
+    /// their Ollama holds — got "model not found" again on the next launch, having already
+    /// fixed it once.
+    ///
+    /// `NOTEWISE_BACKEND` still wins. It is set deliberately for a single launch, and a stored
+    /// preference silently overriding it would make the variable look broken.
+    pub fn ai_router_with(&self, db: &notewise_storage::Database) -> Result<AiRouter> {
+        if std::env::var("NOTEWISE_BACKEND").is_ok() {
+            return self.ai_router();
+        }
+
+        let settings = notewise_storage::SettingsRepository::new(db);
+        let Some(kind) = settings
+            .get(notewise_api_server::BACKEND_KIND_KEY)?
+            .and_then(|k| BackendKind::parse(k.trim()))
+        else {
+            return self.ai_router();
+        };
+
+        let mut config = RouterConfig::new(kind);
+        if kind.requires_api_key() {
+            // Still from the environment. A stored preference records *which* provider, never
+            // the credential for it.
+            if let Some(key) = key_for(kind) {
+                config = config.with_api_key(key);
+            } else {
+                // The key has gone since the choice was made. Falling back beats starting with
+                // a backend that will reject every request.
+                tracing::warn!(
+                    backend = kind.as_str(),
+                    "stored backend has no key; ignoring it"
+                );
+                return self.ai_router();
+            }
+        }
+        if let Some(model) = settings.get(notewise_api_server::BACKEND_MODEL_KEY)? {
+            config = config.with_model(model);
+        }
+
+        Ok(AiRouter::from_config(config)?)
+    }
 }
 
 /// Choose a backend from the environment.

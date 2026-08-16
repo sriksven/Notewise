@@ -758,7 +758,10 @@ fn notes(config: &Config, limit: u32) -> Result<()> {
 
 async fn serve(config: &Config, port: u16, ui: Option<PathBuf>) -> Result<()> {
     let server = Server::bind(format!("127.0.0.1:{port}"))?;
-    let state = AppState::new(open(config)?, config.ai_router()?);
+    // Opened first so the backend the user last chose can be read out of it.
+    let db = open(config)?;
+    let router = config.ai_router_with(&db)?;
+    let state = AppState::new(db, router);
 
     match ui {
         Some(dir) => {

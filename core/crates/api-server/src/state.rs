@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use notewise_ai_router::{BackendKind, Router as AiRouter, RouterConfig};
-use notewise_storage::Database;
+use notewise_storage::{Database, SettingsRepository};
 use tokio::sync::Mutex;
 
 use crate::downloads::DownloadManager;
@@ -169,10 +169,34 @@ impl AppState {
         }
 
         let router = Arc::new(AiRouter::from_config(config)?);
+        let model_id = router.model_id().to_string();
         *self.ai.write().expect("ai router lock poisoned") = router;
+
+        // Remember it. Without this the choice lasts until the process exits, and the engine
+        // comes back on its inferred default — which is how a user who picked `llama3.1:8b`
+        // gets "model 'llama3.1' not found" on the next launch, having already fixed it once.
+        //
+        // Best effort: the switch itself has succeeded and the user is using the new backend.
+        // Failing the request because the preference could not be written would undo a change
+        // that already works.
+        {
+            let db = self.db().await;
+            let settings = SettingsRepository::new(&db);
+            if let Err(e) = settings
+                .set(BACKEND_KIND_KEY, kind.as_str())
+                .and_then(|()| settings.set(BACKEND_MODEL_KEY, &model_id))
+            {
+                tracing::warn!(error = %e, "could not persist the backend choice");
+            }
+        }
+
         Ok(())
     }
 }
+
+/// Where the chosen backend is remembered, alongside `onboarding_completed_at`.
+pub const BACKEND_KIND_KEY: &str = "ai_backend_kind";
+pub const BACKEND_MODEL_KEY: &str = "ai_backend_model";
 
 /// The API key for a backend, from the environment.
 fn api_key_for(kind: BackendKind) -> Option<String> {

@@ -2672,6 +2672,44 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
+    /// A backend chosen in the app has to outlive the process.
+    ///
+    /// Without this the engine came back on its inferred default every launch, so a user whose
+    /// Ollama holds `llama3.1:8b` — not the `llama3.1` the default guesses — fixed the same
+    /// "model not found" error every single time they opened the app.
+    #[tokio::test]
+    async fn switching_backend_is_remembered() {
+        let db = Database::open_in_memory().expect("db");
+        let state = std::sync::Arc::new(AppState::new(
+            db,
+            AiRouter::from_config(RouterConfig::mock()).expect("router"),
+        ));
+
+        state
+            .switch_backend(BackendKind::Ollama, Some("llama3.1:8b".into()), None)
+            .await
+            .expect("switch");
+
+        let db = state.db().await;
+        let settings = SettingsRepository::new(&db);
+        assert_eq!(
+            settings
+                .get(crate::state::BACKEND_KIND_KEY)
+                .unwrap()
+                .as_deref(),
+            Some("ollama"),
+            "the chosen provider must be written down"
+        );
+        assert_eq!(
+            settings
+                .get(crate::state::BACKEND_MODEL_KEY)
+                .unwrap()
+                .as_deref(),
+            Some("llama3.1:8b"),
+            "the exact model tag must be written down, not just the provider"
+        );
+    }
+
     /// The mock backend answers every request with fixed text. Offering it in a menu means a
     /// user can end up reading a fabricated summary of a real meeting, formatted exactly like a
     /// real one, with nothing on screen saying so.
