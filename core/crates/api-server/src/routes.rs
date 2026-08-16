@@ -220,29 +220,76 @@ struct DeviceBody {
 /// feature it may not even offer.
 async fn list_devices() -> Json<serde_json::Value> {
     #[cfg(feature = "record")]
-    match notewise_audio_capture::input_devices() {
-        Ok(devices) => {
-            let devices: Vec<DeviceBody> = devices
-                .into_iter()
-                .map(|d| DeviceBody {
-                    name: d.name,
-                    is_default: d.is_default,
-                    sample_rate: d.sample_rate,
-                    channels: d.channels,
-                })
-                .collect();
-            Json(serde_json::json!({ "devices": devices, "available": true }))
-        }
-        Err(e) => {
-            // Reported rather than swallowed: an empty picker and a broken audio subsystem
-            // look identical to a user otherwise.
-            tracing::warn!(error = %e, "could not enumerate input devices");
-            Json(serde_json::json!({
+    {
+        use notewise_audio_capture::{CaptureKind, PermissionStatus};
+
+        // Asked before enumerating, because enumerating without the grant does not fail — it
+        // *hangs*. CoreAudio waits on a TCC decision that never arrives, the request never
+        // answers, and the picker sits empty forever showing "no devices found" while the real
+        // answer is "macOS will not tell you until you allow the microphone".
+        let permission = tokio::task::spawn_blocking(|| {
+            notewise_audio_capture::permission_status(CaptureKind::Microphone)
+        })
+        .await
+        .unwrap_or(PermissionStatus::NotRequested);
+
+        if !matches!(permission, PermissionStatus::Granted) {
+            return Json(serde_json::json!({
                 "devices": [],
                 "available": true,
-                "error": e.to_string(),
-            }))
+                "error": "macOS does not list input devices until microphone access is allowed",
+            }));
         }
+
+        // On a blocking thread even so. This is a synchronous CoreAudio call that can take
+        // hundreds of milliseconds with a Bluetooth device waking up, and holding a runtime
+        // worker for that stalls every other request.
+        //
+        // Bounded as well, because "granted" is what TCC believes and a wedged audio daemon is
+        // still possible. A picker that says it could not read the list is recoverable; a
+        // request that never returns is not.
+        let enumerated = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(notewise_audio_capture::input_devices),
+        )
+        .await;
+
+        return match enumerated {
+            Ok(Ok(Ok(devices))) => {
+                let devices: Vec<DeviceBody> = devices
+                    .into_iter()
+                    .map(|d| DeviceBody {
+                        name: d.name,
+                        is_default: d.is_default,
+                        sample_rate: d.sample_rate,
+                        channels: d.channels,
+                    })
+                    .collect();
+                Json(serde_json::json!({ "devices": devices, "available": true }))
+            }
+            // Reported rather than swallowed: an empty picker and a broken audio subsystem
+            // look identical to a user otherwise.
+            Ok(Ok(Err(e))) => {
+                tracing::warn!(error = %e, "could not enumerate input devices");
+                Json(serde_json::json!({
+                    "devices": [], "available": true, "error": e.to_string(),
+                }))
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "the device enumeration thread failed");
+                Json(serde_json::json!({
+                    "devices": [], "available": true, "error": "the audio system did not respond",
+                }))
+            }
+            Err(_) => {
+                tracing::warn!("timed out enumerating input devices");
+                Json(serde_json::json!({
+                    "devices": [],
+                    "available": true,
+                    "error": "the audio system did not answer in time",
+                }))
+            }
+        };
     }
 
     #[cfg(not(feature = "record"))]

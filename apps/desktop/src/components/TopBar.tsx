@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Globe, Mic, Settings2, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { api, type BackendInfo, type DeviceInfo, type Health, type LanguageOption } from "../lib/api";
@@ -26,12 +26,15 @@ function Pill({
   label,
   disabled,
   disabledReason,
+  onOpen,
   children,
 }: {
   icon: React.ReactNode;
   label: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** Called each time the menu opens, for lists that go stale while the window is up. */
+  onOpen?: () => void;
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -59,7 +62,13 @@ function Pill({
     <div className="relative" ref={container}>
       <button
         type="button"
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => {
+          if (disabled) return;
+          setOpen((o) => {
+            if (!o) onOpen?.();
+            return !o;
+          });
+        }}
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -140,6 +149,8 @@ export function TopBar({
 }: Props) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  /** Why the list is empty, from the engine — a permission answer, not a hardware one. */
+  const [devicesError, setDevicesError] = useState<string | null>(null);
   const [languages, setLanguages] = useState<LanguageOption[]>([]);
   /** Exact model tags the active local backend holds. */
   const [installed, setInstalled] = useState<string[]>([]);
@@ -158,10 +169,27 @@ export function TopBar({
       .catch(() => setBackends([]));
   }, [health?.ai_model]);
 
-  useEffect(() => {
-    void api.devices().then((r) => setDevices(r.devices)).catch(() => setDevices([]));
-    void api.languages().then((r) => setLanguages(r.languages)).catch(() => setLanguages([]));
+  const loadDevices = useCallback(() => {
+    void api
+      .devices()
+      .then((r) => {
+        setDevices(r.devices);
+        setDevicesError(r.error ?? null);
+      })
+      .catch(() => {
+        setDevices([]);
+        setDevicesError("Could not reach the engine.");
+      });
   }, []);
+
+  // Languages are compiled in and never change. Devices are read on mount *and* every time the
+  // menu opens, because the list goes stale while the window is up in two ordinary ways: AirPods
+  // connected after launch, and microphone permission granted after launch — macOS enumerates
+  // nothing until it is, so the first read comes back empty and used to stay that way.
+  useEffect(() => {
+    loadDevices();
+    void api.languages().then((r) => setLanguages(r.languages)).catch(() => setLanguages([]));
+  }, [loadDevices]);
 
   // Which models the running backend actually has. Picking a provider was never enough: the
   // engine's default tag is a guess, and a machine holding `llama3.1:8b` answers `llama3.1`
@@ -275,6 +303,7 @@ export function TopBar({
           label={device ? device.split(" ")[0] : "Devices"}
           disabled={isRecording}
           disabledReason="Stop recording to change the input device"
+          onOpen={loadDevices}
         >
           {(close) => (
             <>
@@ -305,8 +334,11 @@ export function TopBar({
                 />
               ))}
               {devices.length === 0 && (
-                <p className="px-3 py-2 text-[12px] text-ink-faint">
-                  No input devices found.
+                // macOS enumerates no inputs at all until the microphone permission is granted,
+                // so "none found" is nearly always a permission answer rather than a hardware
+                // one — and sending someone to look for a broken cable is the wrong help.
+                <p className="px-3 py-2 text-[12px] leading-snug text-ink-faint">
+                  {devicesError ?? "No input devices found."}
                 </p>
               )}
             </>
