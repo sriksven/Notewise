@@ -37,6 +37,7 @@ mod routes;
 mod setup;
 pub mod speakers;
 mod state;
+mod voiceprints;
 mod workspace;
 
 pub use downloads::{DownloadManager, DownloadState, DownloadStatus};

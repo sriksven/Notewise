@@ -445,6 +445,20 @@ export const api = {
    */
   preferences: () => request<Record<string, unknown>>("/v1/preferences"),
 
+  /** Whether voices are remembered between meetings, and how many are stored. */
+  voiceprints: () =>
+    request<{ enabled: boolean; stored: number }>("/v1/voiceprints"),
+
+  /** Turning it off also erases what is stored — the engine does both. */
+  setVoiceprintsEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean; stored: number }>("/v1/voiceprints", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  forgetVoiceprints: () =>
+    request<{ erased: number }>("/v1/voiceprints", { method: "DELETE" }),
+
   setPreferences: (prefs: Record<string, unknown>) =>
     request<Record<string, unknown>>("/v1/preferences", {
       method: "POST",

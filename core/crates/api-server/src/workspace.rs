@@ -20,7 +20,7 @@ use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
     ActionItem, Decision, Id, MeetingSeries, MeetingSeriesRepository, NewActionItem, NewDecision,
     NewMeetingSeries, NewPerson, NewTicket, NoteRepository, Person, PersonRepository,
-    SummaryRepository, Ticket, TicketEdit, TicketRepository, WorkStatus,
+    SettingsRepository, SummaryRepository, Ticket, TicketEdit, TicketRepository, WorkStatus,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -59,6 +59,12 @@ pub(crate) fn router() -> AxumRouter<Shared> {
             get(get_person).patch(patch_person).delete(delete_person),
         )
         .route("/v1/people/:id/meetings", get(person_meetings))
+        .route(
+            "/v1/voiceprints",
+            get(voiceprint_status)
+                .post(set_voiceprints_enabled)
+                .delete(forget_voiceprints),
+        )
         .route("/v1/series", get(list_series).post(create_series))
         .route("/v1/meetings/:id/series", post(assign_series))
         .route("/v1/meetings/:id/brief", get(meeting_brief))
@@ -707,6 +713,74 @@ async fn meeting_brief(
     }))
 }
 
+// ---------------------------------------------------------------- voice prints
+
+/// Whether voice prints are being stored, and how many exist.
+async fn voiceprint_status(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<crate::voiceprints::VoiceprintStatus>> {
+    let db = state.db().await;
+    let settings = SettingsRepository::new(&db);
+
+    Ok(Json(crate::voiceprints::VoiceprintStatus {
+        enabled: crate::voiceprints::enabled(&settings),
+        stored: PersonRepository::new(&db).voice_prints()?.len(),
+    }))
+}
+
+/// Turn the storing of voice prints on or off.
+///
+/// Turning it *off* also erases what is already stored. A switch that stops future collection
+/// while keeping the existing identifiers would be the least honest reading of the word off, and
+/// is the behaviour people are right to be suspicious of.
+async fn set_voiceprints_enabled(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<crate::voiceprints::SetEnabled>,
+) -> ApiResult<Json<crate::voiceprints::VoiceprintStatus>> {
+    let db = state.db().await;
+    let settings = SettingsRepository::new(&db);
+    let people = PersonRepository::new(&db);
+
+    settings.set(
+        crate::voiceprints::ENABLED_KEY,
+        if body.enabled { "true" } else { "false" },
+    )?;
+
+    let mut stored = people.voice_prints()?.len();
+    if !body.enabled {
+        for print in people.voice_prints()? {
+            people.clear_voice_print(print.person_id)?;
+        }
+        stored = 0;
+        tracing::info!("voice prints disabled and erased");
+    }
+
+    Ok(Json(crate::voiceprints::VoiceprintStatus {
+        enabled: body.enabled,
+        stored,
+    }))
+}
+
+/// Erase every stored voice print, leaving the people and their names.
+///
+/// Separate from the switch so someone can clear what is held without also turning the feature
+/// off, and so there is a single obvious control for "forget what I sound like".
+async fn forget_voiceprints(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let db = state.db().await;
+    let people = PersonRepository::new(&db);
+
+    let prints = people.voice_prints()?;
+    let erased = prints.len();
+    for print in prints {
+        people.clear_voice_print(print.person_id)?;
+    }
+
+    tracing::info!(erased, "voice prints erased");
+    Ok(Json(serde_json::json!({ "erased": erased })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,5 +1224,116 @@ mod tests {
         let (app, _state) = app();
         let (status, body) = call(&app, get("/v1/tickets/not-a-real-id")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    // ------------------------------------------------------------------ voice prints
+
+    /// Off until switched on, and a missing setting is off.
+    ///
+    /// A voice print identifies the other people in a meeting, who never installed this app.
+    /// An upgrade that adds the key must not read its own absence as permission.
+    #[tokio::test]
+    async fn voiceprints_are_off_by_default() {
+        let (app, _) = app();
+        let (status, body) = call(&app, get("/v1/voiceprints")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["stored"], 0);
+    }
+
+    /// The behaviour the switch has to have to deserve the word off: turning it off erases
+    /// what was already collected. Stopping future collection while keeping the identifiers
+    /// already on disk is exactly what people are right to suspect.
+    #[tokio::test]
+    async fn turning_it_off_erases_what_was_stored() {
+        let (app, state) = app();
+
+        let (status, _) = call(
+            &app,
+            json_request(
+                "POST",
+                "/v1/voiceprints",
+                serde_json::json!({"enabled": true}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Two people with prints, written directly — enrolment runs in the capture pipeline.
+        {
+            let db = state.db().await;
+            let people = PersonRepository::new(&db);
+            for name in ["Ana", "Ravi"] {
+                let person = people.find_or_create_by_name(name).expect("person");
+                people
+                    .set_voice_print(person.id, &[0.1, 0.2, 0.3], "test-model")
+                    .expect("store");
+            }
+        }
+
+        let (_, body) = call(&app, get("/v1/voiceprints")).await;
+        assert_eq!(body["stored"], 2, "seeding failed: {body}");
+
+        let (status, body) = call(
+            &app,
+            json_request(
+                "POST",
+                "/v1/voiceprints",
+                serde_json::json!({"enabled": false}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(
+            body["stored"], 0,
+            "off must erase, not merely stop collecting"
+        );
+
+        // And the people themselves survive — this forgets a voice, not a colleague.
+        let db = state.db().await;
+        assert_eq!(PersonRepository::new(&db).list().expect("list").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn voiceprints_can_be_erased_without_switching_off() {
+        let (app, state) = app();
+        call(
+            &app,
+            json_request(
+                "POST",
+                "/v1/voiceprints",
+                serde_json::json!({"enabled": true}),
+            ),
+        )
+        .await;
+
+        {
+            let db = state.db().await;
+            let people = PersonRepository::new(&db);
+            let person = people.find_or_create_by_name("Mei").expect("person");
+            people
+                .set_voice_print(person.id, &[0.4, 0.5], "test-model")
+                .expect("store");
+        }
+
+        let (status, body) = call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/voiceprints")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["erased"], 1);
+
+        let (_, after) = call(&app, get("/v1/voiceprints")).await;
+        assert_eq!(after["stored"], 0);
+        assert_eq!(
+            after["enabled"], true,
+            "erasing is not the same as switching off"
+        );
     }
 }

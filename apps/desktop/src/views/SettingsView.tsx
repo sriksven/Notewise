@@ -18,6 +18,7 @@ import type { Mode, Theme } from "../lib/theme";
 import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { VoiceprintSettings } from "./VoiceprintSettings";
 
 /** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
 const PRIVACY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security";
@@ -177,6 +178,8 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
             </div>
           </section>
         )}
+
+        <VoiceprintSettings />
 
         {/* Where audio goes is the product's central claim, so it leads the rest. */}
         <section>
