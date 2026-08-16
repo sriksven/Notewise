@@ -75,6 +75,56 @@ pub async fn list_connectors(State(state): State<Arc<AppState>>) -> Json<Vec<Con
     Json(describe_connectors(&state.connectors()))
 }
 
+/// What this build could deliver to, connected or not.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct AvailableConnector {
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub is_local: bool,
+    /// What it needs in order to be turned on: a folder, a URL.
+    pub target_label: &'static str,
+    pub target_hint: &'static str,
+    pub description: &'static str,
+    pub connected: bool,
+}
+
+/// Everything this build can connect to.
+///
+/// Distinct from [`list_connectors`], which reports what is *configured* — that list is empty
+/// on a fresh install and so cannot answer "what could I connect?". Compiled in rather than
+/// fetched: this is the set of sinks the binary actually contains, and a catalogue served from
+/// elsewhere could offer something this build has no code for.
+pub async fn list_available_connectors(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<AvailableConnector>> {
+    let registry = state.connectors();
+    let connected = registry.sink_ids();
+    let is_connected = |id: &str| connected.iter().any(|got| got == id);
+
+    Json(vec![
+        AvailableConnector {
+            id: VaultSink::ID,
+            display_name: "Markdown vault",
+            is_local: true,
+            target_label: "Folder",
+            target_hint: "e.g. ~/Documents/Obsidian/Meetings",
+            description: "Writes each meeting to a folder as Markdown. Obsidian, Logseq, or \
+                          anything else that reads plain files picks them up.",
+            connected: is_connected(VaultSink::ID),
+        },
+        AvailableConnector {
+            id: WebhookSink::ID,
+            display_name: "Webhook",
+            is_local: false,
+            target_label: "URL",
+            target_hint: "https://…",
+            description: "POSTs each meeting as JSON, signed so the receiver can verify it \
+                          came from you. This one leaves your machine.",
+            connected: is_connected(WebhookSink::ID),
+        },
+    ])
+}
+
 pub async fn list_failed_deliveries(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<FailedDelivery>>> {
@@ -397,6 +447,7 @@ mod route_smoke {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use notewise_ai_router::{Router, RouterConfig};
+    use notewise_connectors::{VaultSink, WebhookSink};
     use notewise_storage::Database;
     use tower::ServiceExt;
 
@@ -426,5 +477,47 @@ mod route_smoke {
             get("/v1/connectors/failures").await,
             (StatusCode::OK, "[]".to_string())
         );
+    }
+
+    /// The list of what *could* be connected is not the list of what is. On a fresh install
+    /// the second is empty, which is exactly when a user needs the first.
+    #[tokio::test]
+    async fn available_lists_this_build_even_with_nothing_connected() {
+        let (status, body) = get("/v1/connectors/available").await;
+        assert_eq!(status, StatusCode::OK);
+
+        let available: Vec<serde_json::Value> = serde_json::from_str(&body).expect("json");
+        let ids: Vec<_> = available
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(ids, vec![VaultSink::ID, WebhookSink::ID]);
+        assert!(available.iter().all(|c| c["connected"] == false));
+    }
+
+    /// Whether a sink leaves the machine is the fact a user of a local-first tool needs
+    /// before switching it on, so every entry has to carry it.
+    #[tokio::test]
+    async fn available_says_which_connectors_leave_the_machine() {
+        let (_, body) = get("/v1/connectors/available").await;
+        let available: Vec<serde_json::Value> = serde_json::from_str(&body).expect("json");
+
+        let vault = available.iter().find(|c| c["id"] == VaultSink::ID).unwrap();
+        let webhook = available
+            .iter()
+            .find(|c| c["id"] == WebhookSink::ID)
+            .unwrap();
+
+        assert_eq!(vault["is_local"], true, "a folder is on this machine");
+        assert_eq!(webhook["is_local"], false, "a URL is not");
+    }
+
+    /// `/available` must not be swallowed by the `/:id` route registered alongside it.
+    #[tokio::test]
+    async fn available_is_not_shadowed_by_the_id_parameter() {
+        let (status, body) = get("/v1/connectors/available").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.starts_with('['), "expected the catalogue, got {body}");
     }
 }

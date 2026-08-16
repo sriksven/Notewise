@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Library, Mic, Search, Upload } from "lucide-react";
 
 import { relativeTime } from "../lib/format";
 import type { Meeting } from "../lib/api";
 import type { Route } from "../lib/router";
+import { useFocusOnSearch } from "../lib/shortcuts";
 
 interface Props {
   meetings: Meeting[];
@@ -48,6 +49,9 @@ export function LibraryView({
   onImport,
 }: Props) {
   const [filter, setFilter] = useState("");
+  const box = useRef<HTMLInputElement>(null);
+
+  useFocusOnSearch(box);
 
   const groups = useMemo(() => {
     const now = new Date();
@@ -87,6 +91,7 @@ export function LibraryView({
             aria-hidden
           />
           <input
+            ref={box}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter by title"

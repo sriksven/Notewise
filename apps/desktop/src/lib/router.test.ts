@@ -49,6 +49,7 @@ describe("parseRoute", () => {
     expect(parseRoute("#/tickets")).toEqual({ name: "tickets" });
     expect(parseRoute("#/trash")).toEqual({ name: "trash" });
     expect(parseRoute("#/agent")).toEqual({ name: "agent" });
+    expect(parseRoute("#/connectors")).toEqual({ name: "connectors" });
     expect(parseRoute("#/about")).toEqual({ name: "about" });
   });
 
@@ -92,6 +93,7 @@ describe("routeToHash", () => {
       { name: "tickets" },
       { name: "trash" },
       { name: "agent" },
+      { name: "connectors" },
       { name: "help", section: undefined },
       { name: "help", section: "whats-new" },
       { name: "about" },

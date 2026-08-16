@@ -6,6 +6,7 @@ import {
   Info,
   Library,
   Mic,
+  Plug,
   Settings,
   SquareCheckBig,
   TicketCheck,
@@ -68,6 +69,7 @@ const GROUPS: Array<{ label: string | null; items: Item[] }> = [
       { route: { name: "tasks" }, label: "My Tasks", Icon: SquareCheckBig },
       { route: { name: "tickets" }, label: "Tickets", Icon: TicketCheck },
       { route: { name: "agent" }, label: "Agent", Icon: Bot },
+      { route: { name: "connectors" }, label: "Connectors", Icon: Plug },
     ],
   },
   {

@@ -181,20 +181,26 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
   );
 }
 
+/**
+ * The keyboard.
+ *
+ * This list and `lib/shortcuts.ts` have to agree. A help page describing keys that do nothing
+ * is worse than no help page — it sends someone looking for a fault in their keyboard.
+ */
 function Shortcuts() {
   const rows: Array<[string, string]> = [
-    ["⌘K", "Search everything"],
+    ["⌘K", "Jump to the search box"],
     ["⌘N", "New note"],
     ["⌘⇧R", "Start or stop recording"],
     ["Enter", "Send a question"],
     ["⇧Enter", "New line in a question"],
-    ["Esc", "Close a panel or dialog"],
+    ["Esc", "Close an open menu"],
   ];
 
   return (
     <>
       <Topic title="Keyboard">
-        <p>The few that are worth the muscle memory.</p>
+        <p>The few that are worth the muscle memory. Ctrl works in place of ⌘.</p>
       </Topic>
       <dl className="card divide-y divide-hairline overflow-hidden">
         {rows.map(([keys, what]) => (
@@ -208,6 +214,10 @@ function Shortcuts() {
           </div>
         ))}
       </dl>
+      <p className="mt-3 text-[12px] leading-relaxed text-ink-faint">
+        Recording is on ⌘⇧R rather than ⌘R because an unshifted ⌘R reloads the window, and
+        taking that away removes the way out of one that has wedged.
+      </p>
     </>
   );
 }

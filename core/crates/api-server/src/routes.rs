@@ -105,6 +105,11 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         )
         // Connector status and configuration.
         .route("/v1/connectors", get(crate::connectors::list_connectors))
+        // Registered before `:id`, for the same reason as `failures` below.
+        .route(
+            "/v1/connectors/available",
+            get(crate::connectors::list_available_connectors),
+        )
         // Registered *before* `:id`, or axum matches the literal `failures` against the
         // parameter and this endpoint disappears behind a connector named "failures".
         .route(

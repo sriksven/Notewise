@@ -92,6 +92,27 @@ export interface GroundedAnswer {
   grounded: boolean;
 }
 
+/** A sink this build contains, whether or not it has been turned on. */
+export interface AvailableConnector {
+  id: string;
+  display_name: string;
+  /** Whether it keeps data on this machine. The fact worth showing before it is enabled. */
+  is_local: boolean;
+  target_label: string;
+  target_hint: string;
+  description: string;
+  connected: boolean;
+}
+
+export interface FailedDelivery {
+  id: string;
+  connector_id: string;
+  node_kind: string;
+  node_id: string;
+  attempts: number;
+  last_error: string | null;
+}
+
 export interface AgentStep {
   n: number;
   /** The tool it used, or `think` when it produced no usable action. */
@@ -778,6 +799,28 @@ export const api = {
   agentRun: (id: string) => request<AgentRun>(`/v1/agent/runs/${id}`),
 
   agentRuns: () => request<AgentRun[]>("/v1/agent/runs"),
+
+  /** Everything this build can deliver to, connected or not. */
+  availableConnectors: () =>
+    request<AvailableConnector[]>("/v1/connectors/available"),
+
+  /**
+   * Turn a connector on, or point an existing one somewhere else.
+   *
+   * `signing_secret` comes back exactly once, at first connect. The engine keeps it in the
+   * keychain and cannot show it again.
+   */
+  connectConnector: (id: string, target: string) =>
+    request<{ id: string; signing_secret: string | null }>(
+      `/v1/connectors/${encodeURIComponent(id)}`,
+      { method: "POST", body: JSON.stringify({ target }) },
+    ),
+
+  disconnectConnector: (id: string) =>
+    request<void>(`/v1/connectors/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** Deliveries that failed. Surfaced, because an invisible queue failure loses work silently. */
+  connectorFailures: () => request<FailedDelivery[]>("/v1/connectors/failures"),
 
   people: () => request<Person[]>("/v1/people"),
 

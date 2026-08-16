@@ -13,6 +13,7 @@ import { OPEN_SETTINGS_EVENT } from "./onboarding/SetupGate";
 import { AboutView } from "./views/AboutView";
 import { AgentView } from "./views/AgentView";
 import { ChatView } from "./views/ChatView";
+import { ConnectorsView } from "./views/ConnectorsView";
 import { HelpView } from "./views/HelpView";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
@@ -33,6 +34,7 @@ import {
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
 import { useRoute } from "./lib/router";
+import { requestSearchFocus, useShortcuts } from "./lib/shortcuts";
 import { useTheme } from "./lib/useTheme";
 
 /** How often to ask the engine for clarifying questions while recording. */
@@ -413,6 +415,50 @@ export default function App() {
   const setTab = (next: Tab) =>
     selectedId && navigate({ name: "meeting", id: selectedId, tab: next });
 
+  // Kept current every render so a keyboard handler bound once still sees today's state.
+  const latest = useRef({ busy, toggle: toggleRecording });
+  latest.current = { busy, toggle: toggleRecording };
+
+  useShortcuts({
+    /**
+     * Go to a search field, wherever one is.
+     *
+     * The meeting library's box searches what was *said*, which is the useful one, so ⌘K goes
+     * there when a meeting is open. Otherwise it lands on the library page, whose box filters
+     * titles. Both are dispatched the same event; whichever is mounted answers it.
+     */
+    onSearch: useCallback(() => {
+      if (route.name !== "meeting" && route.name !== "library") {
+        navigate({ name: "library" });
+      }
+      // The request stands for a moment, so the field picks it up whether it is already on
+      // screen or arrives with the screen the line above just navigated to.
+      requestSearchFocus();
+    }, [route.name, navigate]),
+
+    onNewNote: useCallback(async () => {
+      try {
+        const note = await api.createNote({ title: "Untitled", body: "" });
+        navigate({ name: "notes", id: note.id });
+      } catch (e) {
+        report(e);
+      }
+    }, [navigate, report]),
+
+    /**
+     * Start or stop, through a ref rather than a captured function.
+     *
+     * `toggleRecording` closes over health, the active meeting and the chosen device, and is
+     * rebuilt every render. Capturing it in a `useCallback` would freeze whichever version
+     * existed when the dependencies last changed, and the shortcut would then act on state
+     * that had since moved — the same stale-closure fault that made the app redirect away
+     * from home based on a route it had read minutes earlier.
+     */
+    onToggleRecording: useCallback(() => {
+      if (!latest.current.busy) void latest.current.toggle();
+    }, []),
+  });
+
   /** Only a meeting page gets the library column and the intelligence panel beside it. */
   const inWorkspace = route.name === "meeting";
 
@@ -582,6 +628,7 @@ export default function App() {
             {route.name === "tickets" && <TicketsView />}
             {route.name === "trash" && <TrashView />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
+            {route.name === "connectors" && <ConnectorsView />}
             {route.name === "help" && (
               <HelpView section={route.section ?? "docs"} onNavigate={navigate} />
             )}

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import { api, type Meeting } from "../lib/api";
+import { useFocusOnSearch } from "../lib/shortcuts";
 
 interface Props {
   meetings: Meeting[];
@@ -117,6 +118,9 @@ function Row({
 export function MeetingLibrary({ meetings, selectedId, recordingId, onSelect }: Props) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
+  const box = useRef<HTMLInputElement>(null);
+
+  useFocusOnSearch(box);
 
   const trimmed = query.trim();
 
@@ -201,6 +205,7 @@ export function MeetingLibrary({ meetings, selectedId, recordingId, onSelect }: 
             aria-hidden
           />
           <input
+            ref={box}
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}

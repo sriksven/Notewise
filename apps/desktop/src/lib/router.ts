@@ -22,6 +22,7 @@ export type Route =
   | { name: "tickets" }
   | { name: "trash" }
   | { name: "agent" }
+  | { name: "connectors" }
   | { name: "help"; section?: HelpSection }
   | { name: "settings"; section?: string }
   | { name: "about" };
@@ -65,6 +66,8 @@ export function parseRoute(hash: string): Route {
       return { name: "trash" };
     case "agent":
       return { name: "agent" };
+    case "connectors":
+      return { name: "connectors" };
     case "help":
       return {
         name: "help",
