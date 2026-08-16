@@ -159,9 +159,16 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
           of it. Answers cite what they were drawn from, and clicking a citation opens it.
         </p>
         <p>
-          Retrieval matches <em>words</em>, not meaning. Asking about "pricing" will not find a
-          meeting that only ever said "cost structure". If an answer says it found nothing, try
-          the words that would actually have been spoken.
+          By default retrieval matches <em>words</em>: asking about "pricing" will not find a
+          meeting that only ever said "cost structure". Building the search index in{" "}
+          <Link onClick={() => onNavigate({ name: "settings" })}>Settings</Link> fixes that —
+          it embeds your workspace locally, through Ollama, and never through your chat
+          provider.
+        </p>
+        <p>
+          Even with it on, a small workspace can surface the nearest thing rather than nothing.
+          Read the citations: an answer citing something irrelevant is telling you it did not
+          find what you asked for.
         </p>
       </Topic>
 

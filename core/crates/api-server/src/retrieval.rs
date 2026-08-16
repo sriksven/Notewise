@@ -7,28 +7,35 @@
 //! the relevant three sentences are drowned by a hundred irrelevant pages. So the question is
 //! used to select material first, and only the selection reaches the model.
 //!
-//! # Why the full-text index rather than embeddings
+//! # Two retrievers, not one
 //!
-//! The obvious design is a vector store: chunk everything, embed the chunks, embed the
-//! question, take the nearest neighbours. It is also the design that stops working the moment
-//! anything is unavailable. Embeddings need a model, and that model has to be the *same* model
-//! that produced the stored vectors — swap it and every distance is quietly meaningless. Users
-//! on a cloud backend would be shipping their whole workspace to a provider one chunk at a
-//! time, which is the opposite of what this product promises. And it is a second index to
-//! build, migrate and keep consistent.
+//! **Lexical**, over SQLite's FTS5 index. Already here, already populated by triggers, needs
+//! no model, and never unavailable. BM25 floats documents matching more of the question's
+//! terms to the top. What it cannot do is synonyms: ask about "pricing" and it will not find a
+//! meeting that only ever said "cost structure".
 //!
-//! Meanwhile SQLite's FTS5 index is already here, already populated by triggers, already
-//! consistent, and needs no model at all. Transcript segments are indexed individually, which
-//! means the corpus arrives pre-chunked at exactly the granularity a speaker turn provides.
-//! BM25 ranking floats documents matching more of the question's terms to the top.
+//! **Semantic**, over locally-computed embeddings ([`crate::indexing`]). This is what closes
+//! that gap. It needs Ollama and an indexing pass, so it is not always available — and when it
+//! is not, everything still works, less well.
 //!
-//! The honest trade-off: this is lexical, so it finds "pricing" and not "cost structure".
-//! Synonyms are the thing it misses. That is a real limitation and it is stated in the UI
-//! rather than hidden — but a retriever that always works beats a better one that needs a
-//! download, a daemon, and a migration before it answers anything.
+//! Neither subsumes the other, which is why both run. Lexical wins on names, identifiers,
+//! quoted phrases and rare words — the things an embedding smooths away. Semantic wins on
+//! paraphrase. A question usually contains both.
 //!
-//! When embeddings do arrive, they belong *beside* this rather than instead of it: hybrid
-//! retrieval, with this as the floor.
+//! # How the two are combined
+//!
+//! Reciprocal Rank Fusion: each retriever produces a ranking, and an entity's score is the sum
+//! of `1 / (k + rank)` over the rankings it appears in.
+//!
+//! The alternative — normalising BM25 scores and cosine similarities onto a common scale and
+//! adding them — requires the two to be comparable, and they are not. BM25 is unbounded and
+//! corpus-dependent; cosine is bounded and says nothing about how good the *best* match is.
+//! Tuning a weight between them means tuning it per workspace. RRF discards the magnitudes and
+//! keeps only the order, which is the part both retrievers agree means something, and it needs
+//! no tuning: an entity both retrievers rank highly beats one that either ranks alone.
+
+use notewise_ai_router::cosine;
+use notewise_storage::EmbeddingRepository;
 
 use std::collections::BTreeMap;
 
@@ -124,12 +131,217 @@ pub fn terms(query: &str) -> Vec<String> {
     seen
 }
 
-/// Material from the workspace relevant to `query`.
+/// The constant in Reciprocal Rank Fusion's `1 / (k + rank)`.
 ///
-/// Returns an empty list when nothing matches, which callers must handle explicitly — a model
-/// given no material and asked a question will answer from its own weights, and that answer
-/// will look exactly like a grounded one.
-pub fn gather(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
+/// 60 is the value from the original paper and the de-facto default. Its effect is to flatten
+/// the difference between the top few ranks, so a result that both retrievers place in their
+/// top handful outranks one that a single retriever placed first — which is the behaviour the
+/// fusion exists to produce.
+const RRF_K: f32 = 60.0;
+
+/// How many semantic neighbours to consider.
+const VECTOR_LIMIT: usize = 40;
+
+/// How close to the best match a neighbour must score to be kept.
+///
+/// **This is relative on purpose, and the absolute threshold it replaced was a bug.**
+///
+/// Measured against a real workspace with `nomic-embed-text`: the question "what did we decide
+/// about pricing tiers?" scored 0.607 against the meeting that answered it, 0.435 against an
+/// unrelated meeting about a broken coffee machine, and 0.292 against a note containing the
+/// words "typing here". A fixed floor low enough to admit the first admits all three.
+///
+/// The baseline differs per model — some compress everything into a narrow high band, others
+/// spread out — so any absolute number is calibrated for one embedder and wrong for the next.
+/// A ratio to the best match is not: 0.607 × 0.85 keeps only the meeting that answered it.
+const RELATIVE_KEEP: f32 = 0.85;
+
+/// How far the best match must stand above a typical one for anything to count as a match.
+///
+/// The relative rule alone cannot tell "one good match and some noise" from "nothing here is
+/// relevant" — in both cases something scores highest. What separates them is whether the best
+/// score *stands out*. When every chunk scores about the same, the top one is not an answer,
+/// it is an accident of ordering, and the refusal path should run.
+///
+/// Also a ratio rather than an absolute gap, for the same reason as above.
+const MIN_SEPARATION: f32 = 1.15;
+
+/// Below this many chunks there is no distribution to compare against, so the separation test
+/// is skipped and the relative rule stands alone. A workspace with two notes in it should
+/// still be searchable.
+const MIN_CHUNKS_FOR_SEPARATION: usize = 4;
+
+/// A sanity bound. Cosine similarity below this is not a weak match, it is an unrelated
+/// document — no embedding model puts genuinely related text here.
+const ABSOLUTE_FLOOR: f32 = 0.2;
+
+/// A match this strong needs no corroboration from the rest of the distribution.
+///
+/// The counterpart to [`ABSOLUTE_FLOOR`], and safe for the opposite reason: no embedding model
+/// scores unrelated text this high, so admitting on it alone risks little. It exists because a
+/// relative test cannot handle a corpus with no spread — if every chunk scores identically,
+/// nothing "stands out" and every relative rule rejects everything, including a perfect match.
+const STRONG_MATCH: f32 = 0.75;
+
+/// Material matching `query` by word alone.
+///
+/// What [`gather_hybrid`] falls back to whenever the semantic half cannot contribute. Returns
+/// an empty list when nothing matches, which callers must handle explicitly — a model given no
+/// material and asked a question will answer from its own weights, and that answer looks
+/// exactly like a grounded one.
+fn lexical_only(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
+    let ranked = lexical_ranking(db, query)?;
+    Ok(assemble(db, ranked, &BTreeMap::new()))
+}
+
+/// Lexical and semantic together, fused by rank.
+///
+/// Falls back to lexical-only whenever the semantic half cannot contribute — no embedder, no
+/// vectors for this model, a stopped daemon. That is not an error path; it is the ordinary
+/// state of a workspace that has never been indexed, and it must return results rather than
+/// complain.
+///
+/// Takes the state rather than a `&Database` on purpose. Embedding the question is an
+/// `.await`, and `Database` is `Send` but not `Sync` — a lock guard held across that await
+/// makes the whole future non-`Send`, which axum rejects at the route. So the lock is taken
+/// three times, briefly, and never spans the model call.
+pub async fn gather_hybrid(
+    state: &std::sync::Arc<crate::state::AppState>,
+    query: &str,
+) -> ApiResult<Vec<Passage>> {
+    let embedder = state.embedder();
+
+    // Is there anything to fuse? A count is cheap, and asking first avoids spending a model
+    // call embedding the question for a workspace that has never been indexed.
+    let (lexical, vector_count) = {
+        let db = state.db().await;
+        let count = EmbeddingRepository::new(&db)
+            .count(embedder.model())
+            .unwrap_or(0);
+        (lexical_ranking(&db, query)?, count)
+    };
+
+    if vector_count == 0 {
+        let db = state.db().await;
+        return lexical_only(&db, query);
+    }
+
+    // No lock held here. `embed_query` rather than `embed_documents`: the two use different
+    // task prefixes, and using the document form for a question is the standard way to get
+    // quietly worse retrieval.
+    let embedded = match embedder.embed_query(query).await {
+        Ok(vector) => Some(vector),
+        // A daemon that stopped between indexing and asking. Lexical still works.
+        Err(error) => {
+            tracing::debug!(%error, "semantic retrieval unavailable; falling back to lexical");
+            None
+        }
+    };
+
+    let db = state.db().await;
+    let Some(question) = embedded else {
+        return lexical_only(&db, query);
+    };
+
+    let stored = EmbeddingRepository::new(&db)
+        .all_for_model(embedder.model())
+        .unwrap_or_default();
+
+    let (semantic, best_chunks) = rank_by_similarity(&question, &stored);
+    Ok(assemble(&db, fuse(&[lexical, semantic]), &best_chunks))
+}
+
+/// Score every chunk against the question and reduce to a ranking of entities.
+///
+/// Also returns the chunks that matched, per entity: that text is better grounding than the
+/// whole entity, and becomes the passage.
+#[allow(clippy::type_complexity)]
+fn rank_by_similarity(
+    question: &[f32],
+    stored: &[notewise_storage::Embedding],
+) -> (
+    Vec<(&'static str, Id)>,
+    BTreeMap<(&'static str, Id), Vec<String>>,
+) {
+    let mut scored: Vec<(f32, &notewise_storage::Embedding)> = stored
+        .iter()
+        .map(|row| (cosine(question, &row.vector), row))
+        .collect();
+    // `total_cmp` rather than `partial_cmp().unwrap()`: a NaN would panic the second and sort
+    // arbitrarily under the first, and `cosine` is written to never produce one anyway.
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    let Some(cutoff) = cutoff(&scored) else {
+        return (Vec::new(), BTreeMap::new());
+    };
+
+    let mut ranking: Vec<(&'static str, Id)> = Vec::new();
+    let mut best_chunks: BTreeMap<(&'static str, Id), Vec<String>> = BTreeMap::new();
+
+    for (score, row) in scored.into_iter().take(VECTOR_LIMIT) {
+        if score < cutoff {
+            break;
+        }
+        let Some(kind) = static_kind(&row.entity_kind) else {
+            continue;
+        };
+
+        let key = (kind, row.entity_id);
+        push_unique(&mut ranking, key);
+        let chunks = best_chunks.entry(key).or_default();
+        // At most two chunks per entity: enough for a decision and its context, not so many
+        // that one long meeting fills the budget.
+        if chunks.len() < 2 {
+            chunks.push(row.text.clone());
+        }
+    }
+
+    (ranking, best_chunks)
+}
+
+/// The score a chunk must reach to count as a match, or `None` if nothing does.
+///
+/// Takes the scores already sorted descending. See [`RELATIVE_KEEP`] and [`MIN_SEPARATION`]
+/// for why both rules exist and why neither is an absolute similarity threshold.
+fn cutoff<T>(scored: &[(f32, T)]) -> Option<f32> {
+    let best = scored.first()?.0;
+    if best < ABSOLUTE_FLOOR {
+        return None;
+    }
+
+    // A very strong match needs no corroboration. This is the one absolute number here, and
+    // it is a ceiling rather than a floor — no embedding model scores unrelated text this
+    // high, so being wrong about it costs far less than the floor it replaces. It also covers
+    // the degenerate case the separation test cannot: a corpus where everything matches
+    // perfectly has no spread to measure, and rejecting all of it would be absurd.
+    if best >= STRONG_MATCH {
+        return Some(best * RELATIVE_KEEP);
+    }
+
+    // Does the best score stand out from the background? With too few chunks there is no
+    // background to compare against, and the question is unanswerable rather than answered no.
+    if scored.len() >= MIN_CHUNKS_FOR_SEPARATION {
+        // The background is the median of the *lower half*, not of everything. A plain median
+        // lands inside the relevant cluster whenever several documents genuinely match, and
+        // then rejects the very case retrieval exists for — measured: scores of
+        // [0.61, 0.59, 0.55, 0.30, 0.29] have a median of 0.55, which suppresses all three
+        // real matches. The lower half estimates what an *irrelevant* document scores.
+        let tail = &scored[scored.len() / 2..];
+        let background = tail[tail.len() / 2].0;
+
+        // A background at or below zero means most of the corpus is orthogonal to the
+        // question — the easy case, where anything positive stands out. Multiplying by it
+        // would also invert the comparison.
+        if background > 0.0 && best < background * MIN_SEPARATION {
+            return None;
+        }
+    }
+
+    Some(best * RELATIVE_KEEP)
+}
+
+/// Entities matching `query` by word, best first.
+fn lexical_ranking(db: &Database, query: &str) -> ApiResult<Vec<(&'static str, Id)>> {
     let terms = terms(query);
     if terms.is_empty() {
         return Ok(Vec::new());
@@ -166,10 +378,50 @@ pub fn gather(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
         }
     }
 
+    Ok(ordered)
+}
+
+/// Reciprocal Rank Fusion over any number of rankings.
+///
+/// Ties are broken by the earliest ranking an entity appeared in, so the result is
+/// deterministic — an unstable order here would make the same question return different
+/// citations on consecutive asks.
+pub fn fuse(rankings: &[Vec<(&'static str, Id)>]) -> Vec<(&'static str, Id)> {
+    let mut scores: BTreeMap<(&'static str, Id), (f32, usize)> = BTreeMap::new();
+
+    for ranking in rankings {
+        for (rank, entity) in ranking.iter().enumerate() {
+            let entry = scores.entry(*entity).or_insert((0.0, usize::MAX));
+            entry.0 += 1.0 / (RRF_K + rank as f32);
+            entry.1 = entry.1.min(rank);
+        }
+    }
+
+    let mut fused: Vec<_> = scores.into_iter().collect();
+    fused.sort_by(|a, b| {
+        b.1 .0
+            .total_cmp(&a.1 .0)
+            .then_with(|| a.1 .1.cmp(&b.1 .1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    fused.into_iter().map(|(entity, _)| entity).collect()
+}
+
+/// Turn a ranked list of entities into passages inside the context budget.
+///
+/// `preferred` holds the specific chunks semantic search matched. Where they exist they are
+/// used instead of the whole entity: two paragraphs that actually answer the question ground
+/// an answer better than the first three thousand characters of an hour-long transcript.
+fn assemble(
+    db: &Database,
+    ranked: Vec<(&'static str, Id)>,
+    preferred: &BTreeMap<(&'static str, Id), Vec<String>>,
+) -> Vec<Passage> {
     let mut passages = Vec::new();
     let mut budget = MAX_CONTEXT_CHARS;
 
-    for (kind, id) in ordered {
+    for (kind, id) in ranked {
         if passages.len() == MAX_PASSAGES || budget == 0 {
             break;
         }
@@ -178,8 +430,13 @@ pub fn gather(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
             continue;
         };
 
+        let source = match preferred.get(&(kind, id)) {
+            Some(chunks) if !chunks.is_empty() => chunks.join("\n\n…\n\n"),
+            _ => passage.text,
+        };
+
         let allowance = budget.min(MAX_PASSAGE_CHARS);
-        let text = truncate(&passage.text, allowance);
+        let text = truncate(&source, allowance);
         if text.trim().is_empty() {
             continue;
         }
@@ -188,7 +445,17 @@ pub fn gather(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
         passages.push(Passage { text, ..passage });
     }
 
-    Ok(passages)
+    passages
+}
+
+/// The `'static` name for a stored kind, or `None` for one this build does not render.
+fn static_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "meeting" => Some("meeting"),
+        "note" => Some("note"),
+        "ticket" => Some("ticket"),
+        _ => None,
+    }
 }
 
 fn push_unique(ordered: &mut Vec<(&'static str, Id)>, entry: (&'static str, Id)) {
@@ -308,6 +575,7 @@ pub fn citations(passages: &[Passage]) -> Vec<serde_json::Value> {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+    use notewise_storage::Embedding;
     use notewise_storage::{MeetingSource, NewMeeting, NewNote, NewTicket, NewTranscriptSegment};
 
     fn db() -> Database {
@@ -370,7 +638,9 @@ mod tests {
     fn a_question_with_no_searchable_terms_retrieves_nothing() {
         let db = db();
         meeting_with(&db, "Pricing", &["We agreed to raise prices."]);
-        assert!(gather(&db, "what is it?").expect("gather").is_empty());
+        assert!(lexical_only(&db, "what is it?")
+            .expect("retrieve")
+            .is_empty());
     }
 
     #[test]
@@ -386,7 +656,8 @@ mod tests {
         );
         meeting_with(&db, "Unrelated", &["The office coffee machine is broken."]);
 
-        let passages = gather(&db, "what did we decide about pricing tiers?").expect("gather");
+        let passages =
+            lexical_only(&db, "what did we decide about pricing tiers?").expect("retrieve");
 
         assert_eq!(passages.len(), 1, "got {passages:?}");
         assert_eq!(passages[0].kind, "meeting");
@@ -410,7 +681,7 @@ mod tests {
             ],
         );
 
-        let passages = gather(&db, "pricing").expect("gather");
+        let passages = lexical_only(&db, "pricing").expect("retrieve");
         assert_eq!(passages.len(), 1);
         // All four lines survive into the single passage.
         assert!(passages[0].text.contains("Dana"), "{}", passages[0].text);
@@ -437,8 +708,8 @@ mod tests {
             })
             .expect("ticket");
 
-        let kinds: Vec<_> = gather(&db, "what is our latency budget?")
-            .expect("gather")
+        let kinds: Vec<_> = lexical_only(&db, "what is our latency budget?")
+            .expect("retrieve")
             .into_iter()
             .map(|p| p.kind)
             .collect();
@@ -460,10 +731,15 @@ mod tests {
             })
             .expect("note");
 
-        assert_eq!(gather(&db, "when is the launch date?").unwrap().len(), 1);
+        assert_eq!(
+            lexical_only(&db, "when is the launch date?").unwrap().len(),
+            1
+        );
 
         notes.trash(note.id).expect("trash");
-        assert!(gather(&db, "when is the launch date?").unwrap().is_empty());
+        assert!(lexical_only(&db, "when is the launch date?")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -479,7 +755,7 @@ mod tests {
             .expect("note");
         meeting_with(&db, "Short", &["pricing was discussed briefly"]);
 
-        let passages = gather(&db, "pricing").expect("gather");
+        let passages = lexical_only(&db, "pricing").expect("retrieve");
         assert_eq!(passages.len(), 2, "the short source must still fit");
         // The cap, plus the ellipsis truncation appends.
         let ceiling = MAX_PASSAGE_CHARS + '…'.len_utf8();
@@ -503,7 +779,7 @@ mod tests {
     fn context_is_numbered_so_citations_can_refer_to_it() {
         let db = db();
         meeting_with(&db, "Pricing review", &["Three tiers."]);
-        let passages = gather(&db, "pricing tiers").expect("gather");
+        let passages = lexical_only(&db, "pricing tiers").expect("retrieve");
 
         let context = as_context(&passages);
         assert!(
@@ -522,7 +798,259 @@ mod tests {
         meeting_with(&db, "Sync", &["pricing was discussed"]);
 
         // Quotes and FTS5 operators arriving as user input.
-        let passages = gather(&db, "\"pricing\" OR NEAR(x) AND * pricing").expect("gather");
+        let passages = lexical_only(&db, "\"pricing\" OR NEAR(x) AND * pricing").expect("retrieve");
         assert_eq!(passages.len(), 1);
+    }
+
+    // ------------------------------------------------------------ fusion
+
+    /// Distinct ids, generated once per test. `Id::new` is random, which is fine here — the
+    /// assertions compare against the values captured, never against a literal.
+    fn entity(kind: &'static str) -> (&'static str, Id) {
+        (kind, Id::new())
+    }
+
+    #[test]
+    fn fusing_one_ranking_preserves_its_order() {
+        let a = entity("note");
+        let b = entity("note");
+        let c = entity("note");
+
+        assert_eq!(fuse(&[vec![a, b, c]]), vec![a, b, c]);
+    }
+
+    /// The behaviour the whole design rests on: something both retrievers like beats something
+    /// only one of them put first.
+    #[test]
+    fn agreement_between_retrievers_outranks_a_single_first_place() {
+        let agreed = entity("meeting");
+        let lexical_favourite = entity("meeting");
+        let semantic_favourite = entity("meeting");
+
+        // Each retriever ranks its own favourite first and the agreed one second.
+        let lexical = vec![lexical_favourite, agreed];
+        let semantic = vec![semantic_favourite, agreed];
+
+        let fused = fuse(&[lexical, semantic]);
+        assert_eq!(
+            fused[0], agreed,
+            "the entity both retrievers ranked highly should win: {fused:?}"
+        );
+    }
+
+    #[test]
+    fn an_entity_only_one_retriever_found_still_appears() {
+        let shared = entity("note");
+        let lexical_only_hit = entity("note");
+        let semantic_only_hit = entity("meeting");
+
+        let fused = fuse(&[
+            vec![shared, lexical_only_hit],
+            vec![shared, semantic_only_hit],
+        ]);
+
+        assert!(fused.contains(&lexical_only_hit), "{fused:?}");
+        assert!(fused.contains(&semantic_only_hit), "{fused:?}");
+    }
+
+    #[test]
+    fn fusing_nothing_yields_nothing() {
+        assert!(fuse(&[]).is_empty());
+        assert!(fuse(&[Vec::new(), Vec::new()]).is_empty());
+    }
+
+    /// An unstable order would make the same question return different citations on
+    /// consecutive asks, which is indistinguishable from the model being inconsistent.
+    #[test]
+    fn fusion_is_deterministic_for_tied_scores() {
+        let a = entity("note");
+        let b = entity("note");
+
+        // Both appear once, at the same rank, in different rankings — a perfect tie.
+        let first = fuse(&[vec![a], vec![b]]);
+        for _ in 0..20 {
+            assert_eq!(fuse(&[vec![a], vec![b]]), first);
+        }
+    }
+
+    #[test]
+    fn a_duplicate_within_one_ranking_does_not_double_count() {
+        let a = entity("note");
+        let b = entity("note");
+
+        // `push_unique` prevents this upstream; the fusion should not depend on that.
+        let fused = fuse(&[vec![a, b]]);
+        assert_eq!(fused.len(), 2);
+    }
+
+    // ------------------------------------------------------------ similarity ranking
+
+    fn embedding(kind: &str, id: Id, index: i64, text: &str, vector: Vec<f32>) -> Embedding {
+        Embedding {
+            id: Id::new(),
+            entity_kind: kind.to_string(),
+            entity_id: id,
+            chunk_index: index,
+            text: text.to_string(),
+            vector,
+            model: "test".into(),
+            source_updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn similarity_ranks_the_nearest_chunk_first() {
+        let near = Id::new();
+        let far = Id::new();
+        let question = vec![1.0, 0.0];
+
+        let stored = vec![
+            embedding("note", far, 0, "unrelated", vec![0.0, 1.0]),
+            embedding("note", near, 0, "on point", vec![0.99, 0.14]),
+        ];
+
+        let (ranking, chunks) = rank_by_similarity(&question, &stored);
+        assert_eq!(ranking.first(), Some(&("note", near)), "{ranking:?}");
+        assert_eq!(chunks[&("note", near)], vec!["on point".to_string()]);
+    }
+
+    /// Without a floor, every question retrieves *something* — and the refusal path that
+    /// stops a confident answer with no basis never runs.
+    #[test]
+    fn distant_neighbours_are_not_treated_as_matches() {
+        let id = Id::new();
+        // Orthogonal: cosine 0, well under the floor.
+        let stored = vec![embedding(
+            "note",
+            id,
+            0,
+            "nothing to do with it",
+            vec![0.0, 1.0],
+        )];
+
+        let (ranking, _) = rank_by_similarity(&[1.0, 0.0], &stored);
+        assert!(ranking.is_empty(), "{ranking:?}");
+    }
+
+    #[test]
+    fn at_most_two_chunks_are_kept_per_entity() {
+        let id = Id::new();
+        let stored: Vec<_> = (0..5)
+            .map(|n| embedding("meeting", id, n, &format!("chunk {n}"), vec![1.0, 0.0]))
+            .collect();
+
+        let (ranking, chunks) = rank_by_similarity(&[1.0, 0.0], &stored);
+        assert_eq!(ranking, vec![("meeting", id)], "one entity, once");
+        assert_eq!(
+            chunks[&("meeting", id)].len(),
+            2,
+            "one long meeting must not fill the budget"
+        );
+    }
+
+    #[test]
+    fn an_unknown_stored_kind_is_skipped_rather_than_breaking_the_ranking() {
+        let known = Id::new();
+        let stored = vec![
+            embedding("something_new", Id::new(), 0, "future kind", vec![1.0, 0.0]),
+            embedding("note", known, 0, "known kind", vec![1.0, 0.0]),
+        ];
+
+        let (ranking, _) = rank_by_similarity(&[1.0, 0.0], &stored);
+        assert_eq!(ranking, vec![("note", known)]);
+    }
+
+    #[test]
+    fn similarity_over_nothing_ranks_nothing() {
+        let (ranking, chunks) = rank_by_similarity(&[1.0, 0.0], &[]);
+        assert!(ranking.is_empty());
+        assert!(chunks.is_empty());
+    }
+
+    // ------------------------------------------------------------ the cutoff
+
+    /// Scores as they came out of a real workspace, embedded with `nomic-embed-text`, for the
+    /// question "what did we decide about pricing tiers?".
+    ///
+    /// These are the numbers that showed the original absolute threshold was wrong: it was set
+    /// at 0.25, and the *irrelevant* entries here score 0.292 and 0.435.
+    const MEASURED: &[f32] = &[
+        0.607, // the meeting that answered it — and never used the word "pricing"
+        0.435, // an unrelated meeting about a broken coffee machine
+        0.292, // a note whose entire content is "typing here"
+        0.292, // ditto
+    ];
+
+    fn scores(values: &[f32]) -> Vec<(f32, ())> {
+        values.iter().map(|v| (*v, ())).collect()
+    }
+
+    #[test]
+    fn the_cutoff_admits_only_the_relevant_match_on_measured_scores() {
+        let cut = cutoff(&scores(MEASURED)).expect("something matched");
+
+        assert!(cut > 0.435, "the coffee-machine meeting must not qualify");
+        assert!(cut <= 0.607, "the meeting that answered it must qualify");
+
+        let kept = MEASURED.iter().filter(|s| **s >= cut).count();
+        assert_eq!(kept, 1, "cutoff {cut} kept {kept} of {MEASURED:?}");
+    }
+
+    /// Two genuinely relevant documents must both survive — the rule trims noise, not results.
+    #[test]
+    fn several_close_matches_are_all_kept() {
+        let close = scores(&[0.61, 0.59, 0.55, 0.30, 0.29]);
+        let cut = cutoff(&close).expect("something matched");
+
+        let kept = close.iter().filter(|(s, _)| *s >= cut).count();
+        assert_eq!(kept, 3, "cutoff {cut}");
+    }
+
+    /// When nothing stands out, nothing is a match — this is what makes the refusal path run
+    /// rather than dressing up the least-distant document as an answer.
+    #[test]
+    fn a_flat_distribution_matches_nothing() {
+        assert!(cutoff(&scores(&[0.31, 0.30, 0.30, 0.29, 0.29])).is_none());
+    }
+
+    #[test]
+    fn a_uniformly_low_distribution_matches_nothing() {
+        assert!(cutoff(&scores(&[0.11, 0.10, 0.09, 0.08])).is_none());
+    }
+
+    /// A small workspace has no distribution to compare against. It must still be searchable.
+    #[test]
+    fn a_tiny_corpus_skips_the_separation_test() {
+        // Two chunks, close together: with the separation rule applied this would match
+        // nothing, leaving a two-note workspace unsearchable.
+        let cut = cutoff(&scores(&[0.52, 0.50])).expect("a small workspace is still searchable");
+        assert!(cut <= 0.52);
+    }
+
+    #[test]
+    fn an_empty_corpus_has_no_cutoff() {
+        assert!(cutoff::<()>(&[]).is_none());
+    }
+
+    /// A corpus with no spread has nothing to measure standing-out against. Every relative
+    /// rule rejects all of it, including a perfect match, so a strong score is exempt.
+    #[test]
+    fn a_uniformly_perfect_corpus_still_matches() {
+        let cut = cutoff(&scores(&[1.0, 1.0, 1.0, 1.0, 1.0])).expect("a perfect match matches");
+        assert!(cut <= 1.0);
+    }
+
+    /// The exemption is a ceiling, not a licence: a merely-decent score still has to stand out.
+    #[test]
+    fn a_middling_score_is_not_exempt_from_the_separation_test() {
+        assert!(cutoff(&scores(&[0.60, 0.59, 0.58, 0.57, 0.56])).is_none());
+    }
+
+    #[test]
+    fn a_negative_or_zero_median_does_not_break_the_separation_test() {
+        // Most of the corpus orthogonal or opposed to the question: the easy case, and a
+        // multiplication against a non-positive median would invert the comparison.
+        let cut = cutoff(&scores(&[0.62, 0.10, -0.05, -0.20, -0.30])).expect("should match");
+        assert!(cut > 0.10);
     }
 }

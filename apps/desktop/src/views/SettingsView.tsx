@@ -18,6 +18,7 @@ import type { Mode, Theme } from "../lib/theme";
 import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { SearchIndexSettings } from "./SearchIndexSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
 
 /** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
@@ -178,6 +179,8 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
             </div>
           </section>
         )}
+
+        <SearchIndexSettings />
 
         <VoiceprintSettings />
 

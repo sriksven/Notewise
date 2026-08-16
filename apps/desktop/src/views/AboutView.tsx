@@ -45,7 +45,11 @@ function capabilities(health: Health | null): Array<{
   },
   { label: "Recoverable delete", done: true, note: "notes only" },
   { label: "System audio capture", done: false, note: "needs a signed app and screen-audio permission" },
-  { label: "Semantic search", done: false, note: "retrieval matches words, not meaning" },
+  {
+    label: "Semantic search",
+    done: true,
+    note: "opt-in; embeds locally through Ollama, never through your chat provider",
+  },
   { label: "Cloud sync", done: false, note: "opt-in, a later phase" },
   ];
 }

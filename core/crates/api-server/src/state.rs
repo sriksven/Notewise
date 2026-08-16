@@ -41,6 +41,8 @@ pub struct AppState {
     downloads: DownloadManager,
     /// Agent runs, in memory. See [`crate::agent`] for why they are not persisted.
     agents: crate::agent::AgentRegistry,
+    /// The semantic indexing pass, if one is going.
+    indexing: crate::indexing::IndexManager,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -64,6 +66,7 @@ impl AppState {
             recording: RecordingManager::new(),
             downloads: DownloadManager::new(),
             agents: crate::agent::AgentRegistry::new(),
+            indexing: crate::indexing::IndexManager::new(),
             speaker_timelines: Default::default(),
         }
     }
@@ -99,6 +102,34 @@ impl AppState {
     /// Agent runs, running and finished.
     pub fn agents(&self) -> &crate::agent::AgentRegistry {
         &self.agents
+    }
+
+    /// The semantic index's build state.
+    pub fn indexing(&self) -> &crate::indexing::IndexManager {
+        &self.indexing
+    }
+
+    /// The local embedder.
+    ///
+    /// Always Ollama, never the configured chat backend — see [`notewise_ai_router::Embedder`]
+    /// for why embedding a whole workspace must not follow the chat provider. Which model is
+    /// a stored setting so a user who prefers `bge-m3` keeps it across restarts.
+    pub fn embedder(&self) -> notewise_ai_router::Embedder {
+        notewise_ai_router::Embedder::new(self.embedding_model())
+    }
+
+    /// The configured embedding model, or the default.
+    pub fn embedding_model(&self) -> String {
+        self.db
+            .try_lock()
+            .ok()
+            .and_then(|db| {
+                SettingsRepository::new(&db)
+                    .get(EMBEDDING_MODEL_KEY)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or_else(|| notewise_ai_router::DEFAULT_EMBEDDING_MODEL.to_string())
     }
 
     /// Speaker events accumulated for meetings still in progress.
@@ -204,6 +235,9 @@ impl AppState {
 
 /// Where the chosen backend is remembered, alongside `onboarding_completed_at`.
 pub const BACKEND_KIND_KEY: &str = "ai_backend_kind";
+
+/// Which local model produces embeddings. Stored so a preference survives a restart.
+pub const EMBEDDING_MODEL_KEY: &str = "embedding_model";
 pub const BACKEND_MODEL_KEY: &str = "ai_backend_model";
 
 /// The API key for a backend, from the environment.

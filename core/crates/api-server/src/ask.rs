@@ -115,25 +115,27 @@ async fn chat_about_note(
             ));
         }
 
-        let mut passages = vec![Passage {
+        vec![Passage {
             kind: "note",
             id: note.id,
             title: note.title,
             text: note.body,
-        }];
-
-        if wide {
-            // The note is already passage 1; drop it if retrieval finds it again, or the
-            // model is shown the same text twice under two numbers.
-            passages.extend(
-                retrieval::gather(&db, &question)?
-                    .into_iter()
-                    .filter(|p| !(p.kind == "note" && p.id == note_id)),
-            );
-        }
-
-        passages
+        }]
     }; // lock released before the model call
+
+    let mut passages = passages;
+    if wide {
+        // Hybrid, so a note can be asked what the meetings said about it even when they said
+        // it in different words. The database lock is taken and released inside.
+        let found = retrieval::gather_hybrid(&state, &question).await?;
+        // The note is already passage 1; drop it if retrieval finds it again, or the model is
+        // shown the same text twice under two numbers.
+        passages.extend(
+            found
+                .into_iter()
+                .filter(|p| !(p.kind == "note" && p.id == note_id)),
+        );
+    }
 
     answer(&state, body.messages, passages).await
 }
@@ -154,10 +156,7 @@ async fn ask_workspace(
         .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
         .to_string();
 
-    let passages = {
-        let db = state.db().await;
-        retrieval::gather(&db, &question)?
-    };
+    let passages = retrieval::gather_hybrid(&state, &question).await?;
 
     // Answered here rather than by the model. Handing a model an empty context block and
     // asking it to "answer only from the material" is asking it to notice an absence, which

@@ -113,6 +113,23 @@ export interface FailedDelivery {
   last_error: string | null;
 }
 
+/** The semantic index's state. */
+export interface IndexStatus {
+  state: "idle" | "running" | "done" | "failed";
+  /** The embedding model these vectors belong to. */
+  model: string;
+  /** Whether the local embedder answered when last asked. */
+  available: boolean;
+  total: number;
+  done: number;
+  chunks: number;
+  /** Vectors from another model, which can never be compared against the current one. */
+  stale_from_other_models: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface AgentStep {
   n: number;
   /** The tool it used, or `think` when it produced no usable action. */
@@ -799,6 +816,15 @@ export const api = {
   agentRun: (id: string) => request<AgentRun>(`/v1/agent/runs/${id}`),
 
   agentRuns: () => request<AgentRun[]>("/v1/agent/runs"),
+
+  /** What the semantic index holds, and whether it can be built. */
+  indexStatus: () => request<IndexStatus>("/v1/index"),
+
+  /** Start an indexing pass. Returns immediately; poll {@link indexStatus}. */
+  buildIndex: () => request<IndexStatus>("/v1/index", { method: "POST" }),
+
+  /** Throw the index away. Mainly for vectors left by a model no longer in use. */
+  clearIndex: () => request<{ removed: number }>("/v1/index", { method: "DELETE" }),
 
   /** Everything this build can deliver to, connected or not. */
   availableConnectors: () =>

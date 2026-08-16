@@ -128,6 +128,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::ask::router())
         // The agent: multi-step research across the workspace, ending in a note.
         .merge(crate::agent::router())
+        // Building and inspecting the semantic index.
+        .merge(crate::indexing::router())
         .with_state(state)
 }
 

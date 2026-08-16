@@ -1,0 +1,424 @@
+//! Turning text into vectors, locally.
+//!
+//! # Why this is not an `AiBackend` method
+//!
+//! The obvious design is `AiBackend::embed`, so whichever provider is answering questions also
+//! produces the vectors. It is the wrong design here, for one reason: embedding a workspace
+//! means sending **every meeting, every note, and every ticket** to whatever is on the other
+//! end. A user who picked Anthropic to summarize one meeting has consented to that meeting
+//! leaving their machine. They have not consented to their entire history leaving it, in the
+//! background, because a search index needed building.
+//!
+//! So embedding is its own thing and it is local-only. There is no hosted embedder and no
+//! configuration that would produce one. If Ollama is not running, the workspace is not
+//! embedded and search stays lexical — a degradation, not a prompt to send data somewhere.
+//!
+//! # Why the model name travels with every vector
+//!
+//! Cosine distance between vectors from two different models is not a small error, it is
+//! meaningless — and the bytes do not say which model produced them. Without recording it, a
+//! user switching from `nomic-embed-text` to `bge-m3` gets confident nonsense rather than an
+//! obvious failure. [`Embedder::model`] is stored alongside every vector and checked before
+//! anything is compared.
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{AiError, Result};
+
+const BACKEND: &str = "ollama";
+
+/// Ollama's batch embedding endpoint. `/api/embeddings` is the older single-input form.
+const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/embed";
+
+/// The default embedding model.
+///
+/// `nomic-embed-text` rather than something larger: it is 274 MB, produces 768 dimensions, and
+/// is the model most people running Ollama already have. A better default that nobody has
+/// pulled is not a default, it is a failure with an extra step.
+pub const DEFAULT_MODEL: &str = "nomic-embed-text";
+
+/// Models known to produce embeddings rather than conversation.
+///
+/// Used to filter what the daemon reports so a settings screen does not offer `llama3.1` as an
+/// embedder. Matched as a prefix, because tags carry a suffix (`bge-m3:latest`).
+const KNOWN_EMBEDDERS: &[&str] = &[
+    "nomic-embed-text",
+    "bge-m3",
+    "bge-large",
+    "bge-small",
+    "bge-base",
+    "mxbai-embed-large",
+    "all-minilm",
+    "snowflake-arctic-embed",
+    "paraphrase-multilingual",
+    "granite-embedding",
+];
+
+/// Whether a model tag names an embedding model.
+pub fn is_embedding_model(tag: &str) -> bool {
+    let name = tag.split(':').next().unwrap_or(tag).to_lowercase();
+    KNOWN_EMBEDDERS.iter().any(|known| name.starts_with(known))
+}
+
+/// The task prefixes a model expects, as `(query, document)`.
+///
+/// Several embedding models are trained with an instruction prefix that tells them whether the
+/// text is a search query or a document being indexed, and they are *asymmetric* — the two get
+/// different prefixes on purpose, because a question and the passage answering it do not look
+/// alike. Omitting them does not fail; it just uses the model off-distribution and returns
+/// worse-calibrated similarities.
+///
+/// Empty for models that were not trained this way. Adding a prefix a model does not expect is
+/// as wrong as omitting one it does.
+fn prefixes(model: &str) -> (&'static str, &'static str) {
+    let name = model.split(':').next().unwrap_or(model).to_lowercase();
+
+    if name.starts_with("nomic-embed-text") {
+        ("search_query: ", "search_document: ")
+    } else {
+        // bge-m3 and the E5-style models in this list are trained symmetric, or their
+        // instruction is optional and helps only on specific benchmarks.
+        ("", "")
+    }
+}
+
+/// A local embedding model, reached through Ollama.
+#[derive(Debug, Clone)]
+pub struct Embedder {
+    endpoint: String,
+    model: String,
+    http: reqwest::Client,
+}
+
+impl Embedder {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            endpoint: DEFAULT_ENDPOINT.to_string(),
+            model: model.into(),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    /// Point at a daemon somewhere other than localhost.
+    ///
+    /// Takes the `/api/embed` URL, matching how the chat backend is configured, so the two
+    /// cannot disagree about what "the endpoint" means.
+    pub fn with_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
+    }
+
+    /// Which model produces these vectors. Recorded with every one that is stored.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn base(&self) -> &str {
+        self.endpoint
+            .strip_suffix("/api/embed")
+            .unwrap_or(&self.endpoint)
+    }
+
+    /// Embed material being indexed.
+    ///
+    /// Batched rather than one call per chunk: a workspace is thousands of chunks and the
+    /// per-request overhead dominates at that size. Ollama holds the model in memory across
+    /// the batch, so this is also where most of the speed comes from.
+    ///
+    /// Returns vectors in the same order as `texts`, and errors if the daemon returns a
+    /// different number than were asked for — a mismatched batch would silently attach each
+    /// vector to the wrong chunk, which is worse than failing.
+    pub async fn embed_documents(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        let (_, prefix) = prefixes(&self.model);
+        self.embed_with(prefix, texts).await
+    }
+
+    /// Embed a question.
+    ///
+    /// Deliberately separate from [`Self::embed_documents`]: the two get different task
+    /// prefixes, and using the document form for a query is the most common way to get quietly
+    /// worse retrieval from a model that supports them.
+    pub async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
+        let (prefix, _) = prefixes(&self.model);
+        let mut vectors = self.embed_with(prefix, &[text.to_string()]).await?;
+        vectors.pop().ok_or_else(|| AiError::MalformedResponse {
+            backend: BACKEND,
+            reason: "no embedding for the query".into(),
+        })
+    }
+
+    async fn embed_with(&self, prefix: &str, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let prefixed: Vec<String> = if prefix.is_empty() {
+            texts.to_vec()
+        } else {
+            texts.iter().map(|text| format!("{prefix}{text}")).collect()
+        };
+        let texts = &prefixed;
+
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .json(&EmbedRequest {
+                model: &self.model,
+                input: texts,
+            })
+            // Generous: a cold model has to be loaded from disk first, and a large batch of
+            // long chunks is real work. Still bounded, so a wedged daemon does not hang an
+            // indexing run forever.
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|source| AiError::Transport {
+                backend: BACKEND,
+                source,
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let message = response.text().await.unwrap_or_default();
+            return Err(AiError::Provider {
+                backend: BACKEND,
+                status: status.as_u16(),
+                message,
+            });
+        }
+
+        let body: EmbedResponse =
+            response
+                .json()
+                .await
+                .map_err(|source| AiError::MalformedResponse {
+                    backend: BACKEND,
+                    reason: source.to_string(),
+                })?;
+
+        if body.embeddings.len() != texts.len() {
+            return Err(AiError::MalformedResponse {
+                backend: BACKEND,
+                reason: format!(
+                    "asked for {} embeddings and got {}",
+                    texts.len(),
+                    body.embeddings.len()
+                ),
+            });
+        }
+
+        // A zero-width vector would sail through every later check and make every cosine
+        // similarity NaN. Reject it here, where the cause is still visible.
+        if let Some(empty) = body.embeddings.iter().position(Vec::is_empty) {
+            return Err(AiError::MalformedResponse {
+                backend: BACKEND,
+                reason: format!("embedding {empty} came back empty"),
+            });
+        }
+
+        Ok(body.embeddings)
+    }
+
+    /// Whether the daemon is up and holds this model.
+    ///
+    /// Cheap: `/api/tags` loads nothing. Used to decide whether semantic search is available
+    /// at all, so it must answer quickly rather than block a settings screen.
+    pub async fn available(&self) -> bool {
+        self.installed().await.is_ok_and(|models| {
+            models
+                .iter()
+                .any(|tag| tag == &self.model || tag.starts_with(&format!("{}:", self.model)))
+        })
+    }
+
+    /// Embedding models this daemon holds.
+    pub async fn installed(&self) -> Result<Vec<String>> {
+        let response = self
+            .http
+            .get(format!("{}/api/tags", self.base()))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|source| AiError::Transport {
+                backend: BACKEND,
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(AiError::Provider {
+                backend: BACKEND,
+                status: response.status().as_u16(),
+                message: "could not list models".into(),
+            });
+        }
+
+        let body: TagsResponse =
+            response
+                .json()
+                .await
+                .map_err(|source| AiError::MalformedResponse {
+                    backend: BACKEND,
+                    reason: source.to_string(),
+                })?;
+
+        Ok(body
+            .models
+            .into_iter()
+            .map(|model| model.name)
+            .filter(|name| is_embedding_model(name))
+            .collect())
+    }
+}
+
+#[derive(Serialize)]
+struct EmbedRequest<'a> {
+    model: &'a str,
+    input: &'a [String],
+}
+
+#[derive(Deserialize)]
+struct EmbedResponse {
+    embeddings: Vec<Vec<f32>>,
+}
+
+#[derive(Deserialize)]
+struct TagsResponse {
+    models: Vec<TagEntry>,
+}
+
+#[derive(Deserialize)]
+struct TagEntry {
+    name: String,
+}
+
+/// Cosine similarity, in `[-1, 1]`.
+///
+/// Returns 0 for a length mismatch or a zero vector rather than `NaN`. Both are real
+/// possibilities — the first when vectors from two models are compared despite the model
+/// check, the second from a degenerate embedding — and a `NaN` propagates silently through a
+/// sort into an arbitrary ranking, while a 0 simply ranks last.
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
+
+    for (x, y) in a.iter().zip(b) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+
+    let denominator = norm_a.sqrt() * norm_b.sqrt();
+    if denominator == 0.0 {
+        return 0.0;
+    }
+
+    dot / denominator
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_vectors_are_maximally_similar() {
+        let v = vec![0.1, 0.2, 0.3];
+        assert!((cosine(&v, &v) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn orthogonal_vectors_score_zero() {
+        assert!(cosine(&[1.0, 0.0], &[0.0, 1.0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn opposite_vectors_score_minus_one() {
+        assert!((cosine(&[1.0, 0.0], &[-1.0, 0.0]) + 1.0).abs() < 1e-6);
+    }
+
+    /// The failure this prevents: a `NaN` sorts unpredictably and silently scrambles a
+    /// ranking, where a zero simply comes last.
+    #[test]
+    fn degenerate_inputs_score_zero_rather_than_nan() {
+        assert_eq!(cosine(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
+        assert_eq!(cosine(&[], &[]), 0.0);
+        assert_eq!(cosine(&[1.0, 2.0], &[1.0]), 0.0, "length mismatch");
+    }
+
+    #[test]
+    fn magnitude_does_not_change_direction() {
+        // Cosine is scale-invariant, which is why vectors do not need normalizing on the way in.
+        let a = [1.0, 2.0, 3.0];
+        let scaled = [10.0, 20.0, 30.0];
+        assert!((cosine(&a, &scaled) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn embedding_models_are_recognised_with_and_without_a_tag() {
+        assert!(is_embedding_model("nomic-embed-text"));
+        assert!(is_embedding_model("nomic-embed-text:latest"));
+        assert!(is_embedding_model("bge-m3:567m"));
+        assert!(is_embedding_model("mxbai-embed-large"));
+    }
+
+    #[test]
+    fn chat_models_are_not_offered_as_embedders() {
+        assert!(!is_embedding_model("llama3.1:8b"));
+        assert!(!is_embedding_model("llama3:latest"));
+        assert!(!is_embedding_model("qwen2.5-coder"));
+        assert!(!is_embedding_model(""));
+    }
+
+    /// Getting these backwards is silent — retrieval simply gets worse — so they are asserted
+    /// rather than trusted.
+    #[test]
+    fn nomic_gets_its_asymmetric_task_prefixes() {
+        let (query, document) = prefixes("nomic-embed-text");
+        assert_eq!(query, "search_query: ");
+        assert_eq!(document, "search_document: ");
+        assert_ne!(query, document, "the two must not be the same");
+
+        // Tags carry a suffix.
+        assert_eq!(prefixes("nomic-embed-text:latest").0, "search_query: ");
+        assert_eq!(prefixes("nomic-embed-text:v1.5").0, "search_query: ");
+    }
+
+    /// Adding a prefix a model was not trained with is as wrong as omitting one it was.
+    #[test]
+    fn models_without_task_prefixes_get_none() {
+        for model in ["bge-m3", "bge-m3:567m", "mxbai-embed-large", "all-minilm"] {
+            assert_eq!(prefixes(model), ("", ""), "{model} should get no prefix");
+        }
+    }
+
+    #[test]
+    fn the_base_url_is_recovered_from_the_endpoint() {
+        let embedder = Embedder::new("x");
+        assert_eq!(embedder.base(), "http://localhost:11434");
+
+        let remote = Embedder::new("x").with_endpoint("http://192.168.1.10:11434/api/embed");
+        assert_eq!(remote.base(), "http://192.168.1.10:11434");
+    }
+
+    #[tokio::test]
+    async fn an_empty_batch_makes_no_request() {
+        // Pointed at a closed port: if this tried to connect it would error rather than
+        // return an empty vector.
+        let embedder = Embedder::new("x").with_endpoint("http://127.0.0.1:1/api/embed");
+        assert_eq!(
+            embedder.embed_documents(&[]).await.unwrap(),
+            Vec::<Vec<f32>>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_daemon_is_not_available_rather_than_an_error() {
+        let embedder =
+            Embedder::new("nomic-embed-text").with_endpoint("http://127.0.0.1:1/api/embed");
+        assert!(!embedder.available().await);
+    }
+}

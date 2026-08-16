@@ -40,6 +40,7 @@
 mod backends;
 mod clarify;
 mod email;
+mod embed;
 mod error;
 mod redact;
 mod router;
@@ -55,6 +56,7 @@ pub use clarify::{
 pub use email::{
     generate_email_draft, generate_email_variants, EmailContext, EmailTone, GeneratedEmail,
 };
+pub use embed::{cosine, is_embedding_model, Embedder, DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL};
 pub use error::{AiError, Result};
 pub use redact::{redact, Category, RedactionPolicy, RedactionReport};
 pub use router::{BackendKind, Router, RouterConfig};

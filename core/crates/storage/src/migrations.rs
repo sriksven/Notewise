@@ -424,6 +424,47 @@ const MIGRATIONS: &[&str] = &[
         SELECT 'note', new.id, new.title, new.body WHERE new.deleted_at IS NULL;
     END;
     "#,
+    // v8 — vectors, so search can find "cost structure" when you asked about "pricing".
+    //
+    // Derived data, entirely. Every row here can be rebuilt from the entity it points at, and
+    // deleting the whole table costs an indexing run and nothing else. That is why there are
+    // no foreign keys: the referenced kinds are heterogeneous, exactly as in `edges`, and a
+    // stale row is discarded on read rather than being a corruption.
+    //
+    // `model` is the column that matters. Cosine distance between vectors from two different
+    // models is not a small error — it is meaningless — and the bytes do not say which model
+    // produced them. Without this, switching from nomic-embed-text to bge-m3 yields confident
+    // nonsense instead of an obvious miss. `dims` does not cover it: two models can share a
+    // width.
+    //
+    // `source_updated_at` is how staleness is detected. An entity edited after its chunk was
+    // embedded needs re-embedding, and comparing timestamps is cheaper than hashing every
+    // transcript on every indexing pass.
+    //
+    // No vector index. There is no ANN structure here and no sqlite-vec extension, because
+    // `rusqlite` is `bundled` on purpose — loading an extension would break the reproducible
+    // build across platforms that decision buys. Similarity is a linear scan in Rust, which
+    // is microseconds for the thousands of chunks a personal workspace holds and would need
+    // revisiting at a scale this product does not target.
+    r#"
+    CREATE TABLE embeddings (
+        id                TEXT PRIMARY KEY NOT NULL,
+        entity_kind       TEXT NOT NULL,
+        entity_id         TEXT NOT NULL,
+        chunk_index       INTEGER NOT NULL,
+        text              TEXT NOT NULL,
+        -- Raw little-endian f32s. A BLOB rather than JSON: 768 floats are 3 KB packed and
+        -- about 12 KB as text, and the whole table is read on every query.
+        vector            BLOB NOT NULL,
+        dims              INTEGER NOT NULL,
+        model             TEXT NOT NULL,
+        source_updated_at TEXT NOT NULL,
+        created_at        TEXT NOT NULL,
+        UNIQUE (entity_kind, entity_id, chunk_index, model)
+    );
+    CREATE INDEX idx_embeddings_entity ON embeddings(entity_kind, entity_id);
+    CREATE INDEX idx_embeddings_model  ON embeddings(model);
+    "#,
 ];
 
 /// Schema version this build understands.

@@ -41,9 +41,7 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use notewise_ai_router::{AiBackend, ChatMessage, ChatRequest, Role};
-use notewise_storage::{
-    Id, MeetingRepository, NewNote, NoteRepository, SearchRepository, TicketRepository,
-};
+use notewise_storage::{Id, MeetingRepository, NewNote, NoteRepository, TicketRepository};
 
 use crate::retrieval;
 
@@ -477,61 +475,44 @@ async fn execute(
 ) -> (&'static str, String, Option<String>) {
     match action {
         Action::Search { query } => {
-            let db = state.db().await;
-            let terms = retrieval::terms(query);
-            if terms.is_empty() {
-                return (
-                    "search",
-                    "That query has no searchable words in it. Use concrete terms.".into(),
-                    None,
-                );
-            }
-
-            let hits = match SearchRepository::new(&db).search_any(&terms, 12) {
-                Ok(hits) => hits,
+            // Hybrid, so the agent finds a meeting that discussed "cost structure" when it
+            // searched for "pricing". Falls back to lexical on its own when the workspace has
+            // no embeddings — the agent should never have to know which is running.
+            let found = match retrieval::gather_hybrid(state, query).await {
+                Ok(found) => found,
                 Err(e) => return ("search", format!("Search failed: {e}"), None),
             };
 
-            if hits.is_empty() {
+            if found.is_empty() {
+                let terms = retrieval::terms(query);
                 return (
                     "search",
-                    format!(
-                        "No matches for {terms:?}. Matching is by word — try wording that \
-                         would literally appear in a transcript."
-                    ),
+                    if terms.is_empty() {
+                        "That query has no searchable words in it. Use concrete terms.".into()
+                    } else {
+                        format!(
+                            "No matches for {terms:?}. Try wording closer to what would \
+                             actually have been said."
+                        )
+                    },
                     None,
                 );
             }
 
-            // Segments are reported as their meeting, because `read meeting` is the only
-            // useful follow-up: reading one four-second utterance tells the agent nothing.
-            let mut lines = Vec::new();
-            let meetings = MeetingRepository::new(&db);
-            for hit in hits {
-                let (kind, id, title) = match hit.entity_kind.as_str() {
-                    "transcript_segment" => match meetings.segment_meetings(&[hit.entity_id]) {
-                        Ok(pairs) => match pairs.first() {
-                            Some((_, meeting_id)) => {
-                                let title = meetings
-                                    .get(*meeting_id)
-                                    .map(|m| m.title)
-                                    .unwrap_or_else(|_| "(untitled)".into());
-                                ("meeting", *meeting_id, title)
-                            }
-                            None => continue,
-                        },
-                        Err(_) => continue,
-                    },
-                    "note" => ("note", hit.entity_id, hit.title.clone()),
-                    "ticket" => ("ticket", hit.entity_id, hit.title.clone()),
-                    _ => continue,
-                };
-
-                let line = format!("- {kind} {id} \"{title}\": {}", hit.snippet);
-                if !lines.contains(&line) {
-                    lines.push(line);
-                }
-            }
+            // Ids and titles, with an excerpt short enough that a dozen results still leave
+            // room for the agent to think. Reading in full is a separate action.
+            let lines: Vec<String> = found
+                .iter()
+                .map(|passage| {
+                    format!(
+                        "- {} {} \"{}\": {}",
+                        passage.kind,
+                        passage.id,
+                        passage.title,
+                        excerpt(&passage.text)
+                    )
+                })
+                .collect();
 
             ("search", lines.join("\n"), None)
         }
@@ -660,6 +641,17 @@ async fn execute(
             None,
         ),
     }
+}
+
+/// A one-line excerpt of a passage, for a search listing.
+fn excerpt(text: &str) -> String {
+    const WIDTH: usize = 220;
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= WIDTH {
+        return flat;
+    }
+    let cut: String = flat.chars().take(WIDTH).collect();
+    format!("{cut}…")
 }
 
 fn truncate_for_model(text: &str) -> String {
