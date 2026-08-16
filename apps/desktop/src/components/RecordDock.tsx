@@ -3,6 +3,14 @@ import { Mic, MicOff, MoreHorizontal, Square } from "lucide-react";
 
 interface Props {
   isRecording: boolean;
+  /**
+   * A meeting exists and has not been ended, but nothing is being captured into it.
+   *
+   * Only reachable on an engine that cannot record, where pressing record creates a meeting
+   * to import a transcript into. The button has to say "End" there — labelling it "Record"
+   * while the press would close the meeting is the worst of both.
+   */
+  openMeeting: boolean;
   startedAt: number | null;
   busy: boolean;
   /**
@@ -41,6 +49,7 @@ function elapsed(sinceMs: number): string {
  */
 export function RecordDock({
   isRecording,
+  openMeeting,
   startedAt,
   busy,
   canRecord,
@@ -70,9 +79,13 @@ export function RecordDock({
 
   const label = isRecording
     ? "Stop recording"
-    : canRecord
-      ? "Start recording"
-      : "Start a meeting (this engine cannot capture audio)";
+    : openMeeting
+      ? "End this meeting"
+      : canRecord
+        ? "Start recording"
+        : "Start a meeting (this engine cannot capture audio)";
+
+  const word = busy ? "Working" : isRecording ? "Stop" : openMeeting ? "End" : "Record";
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
@@ -97,13 +110,13 @@ export function RecordDock({
                       ${
                         isRecording
                           ? "bg-record text-white recording-pulse hover:bg-record-hover"
-                          : canRecord
-                            ? "bg-record text-white hover:bg-record-hover"
-                            : "bg-ink-faint text-white hover:bg-ink-muted"
+                          : openMeeting || !canRecord
+                            ? "bg-ink-faint text-white hover:bg-ink-muted"
+                            : "bg-record text-white hover:bg-record-hover"
                       }`}
         >
           <span className="flex h-5 w-5 items-center justify-center">
-            {isRecording ? (
+            {isRecording || openMeeting ? (
               // A square reads as stop without needing the colour, which matters for anyone
               // who cannot separate the red from the surface behind it.
               <Square size={13} fill="currentColor" aria-hidden />
@@ -113,7 +126,7 @@ export function RecordDock({
               <MicOff size={17} strokeWidth={2} aria-hidden />
             )}
           </span>
-          {busy ? "Working" : isRecording ? "Stop" : "Record"}
+          {word}
         </button>
 
         {isRecording && startedAt !== null && (

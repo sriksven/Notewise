@@ -37,8 +37,15 @@ function capabilities(health: Health | null): Array<{
   { label: "Markdown export", done: true },
   { label: "Full-text search across the workspace", done: true },
   { label: "Agent access over MCP", done: true, note: "read-only" },
+  { label: "Notes, attached to meetings and asked questions", done: true },
+  {
+    label: "An agent that researches across the workspace",
+    done: true,
+    note: "writes a note; changes nothing else",
+  },
+  { label: "Recoverable delete", done: true, note: "notes only" },
   { label: "System audio capture", done: false, note: "needs a signed app and screen-audio permission" },
-  { label: "Notes editor and tickets", done: false },
+  { label: "Semantic search", done: false, note: "retrieval matches words, not meaning" },
   { label: "Cloud sync", done: false, note: "opt-in, a later phase" },
   ];
 }
@@ -57,6 +64,7 @@ export function AboutView({ health }: Props) {
             <h1 className="text-[20px] font-semibold tracking-tight">Notewise</h1>
             <p className="text-[12px] text-ink-muted">
               Local-first meeting intelligence
+              {health && <> · version {health.version}</>}
             </p>
           </div>
         </header>
@@ -65,7 +73,9 @@ export function AboutView({ health }: Props) {
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12px]">
             <dt className="text-ink-muted">Engine</dt>
             <dd className="text-ink">
-              {health ? `reachable, schema v${health.schema_version}` : "not reachable"}
+              {health
+                ? `v${health.version}, schema v${health.schema_version}`
+                : "not reachable"}
             </dd>
 
             <dt className="text-ink-muted">AI backend</dt>
@@ -110,6 +120,19 @@ export function AboutView({ health }: Props) {
               </li>
             ))}
           </ul>
+        </section>
+
+        <section>
+          <h2 className="mb-1 text-[13px] font-semibold text-ink">Updates</h2>
+          {/* No "Check for updates" button. There is no release channel to check against yet,
+              and a button that always reports "up to date" is worse than the sentence that
+              says why there is nothing to check. */}
+          <p className="text-[12px] leading-relaxed text-ink-muted">
+            There is no release channel yet, so nothing checks for updates and nothing installs
+            them. This build was compiled from source on this machine; pulling and rebuilding is
+            the upgrade path. The database migrates itself forward and refuses to open a file
+            written by a newer build than the one running.
+          </p>
         </section>
 
         <section>

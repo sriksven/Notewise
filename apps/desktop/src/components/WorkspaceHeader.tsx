@@ -2,7 +2,9 @@ import { PanelRightOpen, Square } from "lucide-react";
 
 import type { Meeting, Segment } from "../lib/api";
 
-export type Tab = "transcript" | "summary" | "ask";
+import type { MeetingTab } from "../lib/router";
+
+export type Tab = MeetingTab;
 
 interface Props {
   meeting: Meeting | null;
@@ -26,6 +28,9 @@ interface Props {
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "transcript", label: "Transcript" },
   { id: "summary", label: "Summary" },
+  // Between the machine's record of the meeting and questions about it sits the user's own
+  // account of it, which is the one thing a transcript can never contain.
+  { id: "notes", label: "Notes" },
   { id: "ask", label: "Ask" },
 ];
 

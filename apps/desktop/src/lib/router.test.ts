@@ -34,13 +34,33 @@ describe("parseRoute", () => {
 
   it("never returns a blank screen for junk", () => {
     expect(parseRoute("#/does-not-exist/at-all")).toEqual({ name: "home" });
-    expect(parseRoute("#/meetings")).toEqual({ name: "home" });
+  });
+
+  // `#/meetings` reads as the library rather than home: it is the plural of a meeting page,
+  // and a user who trims the id off a link means "show me all of them".
+  it("reads a bare meetings path as the library", () => {
+    expect(parseRoute("#/meetings")).toEqual({ name: "library" });
   });
 
   it("reads the flat destinations", () => {
-    expect(parseRoute("#/notes")).toEqual({ name: "notes" });
+    expect(parseRoute("#/record")).toEqual({ name: "record" });
+    expect(parseRoute("#/library")).toEqual({ name: "library" });
+    expect(parseRoute("#/tasks")).toEqual({ name: "tasks" });
     expect(parseRoute("#/tickets")).toEqual({ name: "tickets" });
+    expect(parseRoute("#/trash")).toEqual({ name: "trash" });
+    expect(parseRoute("#/agent")).toEqual({ name: "agent" });
     expect(parseRoute("#/about")).toEqual({ name: "about" });
+  });
+
+  it("reads a note id when one is present", () => {
+    expect(parseRoute("#/notes")).toEqual({ name: "notes", id: undefined });
+    expect(parseRoute("#/notes/note-42")).toEqual({ name: "notes", id: "note-42" });
+  });
+
+  it("reads a help section, ignoring one it does not have", () => {
+    expect(parseRoute("#/help")).toEqual({ name: "help", section: undefined });
+    expect(parseRoute("#/help/support")).toEqual({ name: "help", section: "support" });
+    expect(parseRoute("#/help/nonsense")).toEqual({ name: "help", section: undefined });
   });
 
   it("reads a settings section", () => {
@@ -52,7 +72,7 @@ describe("parseRoute", () => {
   });
 
   it("ignores a query string", () => {
-    expect(parseRoute("#/notes?from=search")).toEqual({ name: "notes" });
+    expect(parseRoute("#/notes?from=search")).toEqual({ name: "notes", id: undefined });
   });
 });
 
@@ -61,10 +81,19 @@ describe("routeToHash", () => {
   it("round-trips every route", () => {
     const routes: Route[] = [
       { name: "home" },
+      { name: "record" },
+      { name: "library" },
       { name: "meeting", id: "abc-123", tab: "transcript" },
+      { name: "meeting", id: "abc-123", tab: "notes" },
       { name: "meeting", id: "abc-123", tab: "ask" },
-      { name: "notes" },
+      { name: "notes", id: undefined },
+      { name: "notes", id: "note-42" },
+      { name: "tasks" },
       { name: "tickets" },
+      { name: "trash" },
+      { name: "agent" },
+      { name: "help", section: undefined },
+      { name: "help", section: "whats-new" },
       { name: "about" },
       { name: "settings", section: "appearance" },
     ];

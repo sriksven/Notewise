@@ -137,6 +137,12 @@ fn parse_id(raw: &str) -> ApiResult<Id> {
 #[derive(Debug, Serialize)]
 struct Health {
     status: &'static str,
+    /// The engine's own version, from its crate metadata.
+    ///
+    /// Reported by the engine rather than read from the frontend's `package.json`: the two are
+    /// separately versioned and can be running from different builds, and the one that matters
+    /// when something misbehaves is whichever is actually serving the request.
+    version: &'static str,
     schema_version: u32,
     /// Whether the configured AI backend keeps data on this machine. Surfaced so a client
     /// can show the user where their transcripts are going.
@@ -155,6 +161,7 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
     let schema_version = state.db().await.schema_version()?;
     Ok(Json(Health {
         status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
         schema_version,
         ai_local: state.ai().is_local(),
         ai_model: state.ai().model_id().to_string(),

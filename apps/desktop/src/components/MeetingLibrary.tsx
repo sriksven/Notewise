@@ -6,6 +6,8 @@ import { api, type Meeting } from "../lib/api";
 interface Props {
   meetings: Meeting[];
   selectedId: string | null;
+  /** The meeting the engine is capturing into, or null. The only source of the red dot. */
+  recordingId: string | null;
   onSelect: (id: string) => void;
 }
 
@@ -50,15 +52,21 @@ function timeLabel(iso: string): string {
 function Row({
   meeting,
   selected,
+  recording,
   snippet,
   onSelect,
 }: {
   meeting: Meeting;
   selected: boolean;
+  /** Whether the engine is capturing into this meeting right now. */
+  recording: boolean;
   snippet?: string;
   onSelect: () => void;
 }) {
-  const live = meeting.ended_at === null;
+  // A meeting with no `ended_at` is open, which is not the same as being recorded — one
+  // created for an import, or left dangling by a crash, has no microphone behind it. Only the
+  // engine's own answer earns the red dot.
+  const open = meeting.ended_at === null;
 
   return (
     <li>
@@ -71,7 +79,7 @@ function Row({
         }`}
       >
         <div className="flex items-center gap-1.5">
-          {live && (
+          {recording && (
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-record" aria-hidden />
           )}
           <span className="truncate text-[13px] font-medium text-ink">
@@ -80,7 +88,9 @@ function Row({
         </div>
 
         <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] text-ink-faint">
-          <span>{live ? "Recording" : timeLabel(meeting.started_at)}</span>
+          <span>
+            {recording ? "Recording" : open ? "Still open" : timeLabel(meeting.started_at)}
+          </span>
         </div>
 
         {snippet && (
@@ -104,7 +114,7 @@ function Row({
  * The search box asks the engine rather than filtering titles here: what a person remembers
  * about a meeting is usually something that was said in it, not what it was called.
  */
-export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
+export function MeetingLibrary({ meetings, selectedId, recordingId, onSelect }: Props) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
 
@@ -231,6 +241,7 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
                     key={hit.id}
                     meeting={meeting}
                     selected={hit.id === selectedId}
+                    recording={meeting.id === recordingId}
                     snippet={hit.snippet}
                     onSelect={() => onSelect(hit.id)}
                   />
@@ -254,6 +265,7 @@ export function MeetingLibrary({ meetings, selectedId, onSelect }: Props) {
                     key={meeting.id}
                     meeting={meeting}
                     selected={meeting.id === selectedId}
+                    recording={meeting.id === recordingId}
                     onSelect={() => onSelect(meeting.id)}
                   />
                 ))}

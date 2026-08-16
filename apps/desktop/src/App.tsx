@@ -3,18 +3,26 @@ import { AlertCircle } from "lucide-react";
 
 import { IntelPanel } from "./components/IntelPanel";
 import { MeetingLibrary } from "./components/MeetingLibrary";
+import { MeetingNotes } from "./components/MeetingNotes";
 import { RecordDock } from "./components/RecordDock";
-import { Sidebar, type View } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { TranscriptView } from "./components/TranscriptView";
 import { WorkspaceHeader, type Tab } from "./components/WorkspaceHeader";
 import { OPEN_SETTINGS_EVENT } from "./onboarding/SetupGate";
 import { AboutView } from "./views/AboutView";
+import { AgentView } from "./views/AgentView";
 import { ChatView } from "./views/ChatView";
+import { HelpView } from "./views/HelpView";
+import { HomeView } from "./views/HomeView";
+import { LibraryView } from "./views/LibraryView";
+import { RecordView } from "./views/RecordView";
 import { SettingsView } from "./views/SettingsView";
 import { NotesView } from "./views/NotesView";
 import { SummaryView } from "./views/SummaryView";
+import { TasksView } from "./views/TasksView";
 import { TicketsView } from "./views/TicketsView";
+import { TrashView } from "./views/TrashView";
 import {
   api,
   ApiError,
@@ -24,29 +32,41 @@ import {
   type Segment,
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
-import { useRoute, type Route } from "./lib/router";
+import { useRoute } from "./lib/router";
 import { useTheme } from "./lib/useTheme";
 
 /** How often to ask the engine for clarifying questions while recording. */
 const QUESTION_POLL_MS = 30_000;
 
 /**
+ * Tabs whose own text field sits where the floating record dock does.
+ *
+ * The dock is hidden on these and the stop button moves into the header instead, so recording
+ * stays stoppable in one press without a button overlapping a place people type.
+ */
+const DOCKLESS_TABS: Tab[] = ["ask", "notes"];
+
+/** The most recent meeting that was never ended, if there is one. */
+function meetingsStillOpen(meetings: Meeting[]): string | null {
+  return meetings.find((meeting) => meeting.ended_at === null)?.id ?? null;
+}
+
+/**
  * The window.
  *
- * One meeting at a time, in four columns: what the app is (rail), which meeting (library), the
- * meeting itself (workspace), and what it means (intelligence). The last of those is the point —
- * decisions, commitments and the questions still worth asking sit beside the transcript as it
- * arrives, rather than behind a screen nobody visits until the meeting is over.
+ * A sidebar and one destination at a time. On a meeting, that destination is itself four
+ * columns: which meeting (library), the meeting (workspace), and what it means (intelligence).
+ * The last of those is the point — decisions, commitments and the questions still worth asking
+ * sit beside the transcript as it arrives, rather than behind a screen nobody visits until the
+ * meeting is over.
  */
 export default function App() {
   // The address is the state. Which meeting is open and which tab is showing live in the
   // URL, so Back works, a window reload lands where it was, and a meeting can be linked to.
-  const { route, navigate, replace } = useRoute();
+  const { route, navigate } = useRoute();
   const [panelOpen, setPanelOpen] = useState(true);
   const theme = useTheme();
 
-  const view: View =
-    route.name === "meeting" || route.name === "home" ? "meetings" : route.name;
   const tab: Tab = route.name === "meeting" ? route.tab : "transcript";
   const selectedId = route.name === "meeting" ? route.id : null;
 
@@ -62,7 +82,22 @@ export default function App() {
    */
   const [questionsReason, setQuestionsReason] = useState<string | null>(null);
 
+  /**
+   * The meeting the engine is actually capturing audio into.
+   *
+   * Only ever set from `health.recording_meeting_id`. Deliberately not inferred from a meeting
+   * with no `ended_at`: an engine that cannot record still has open meetings — one created
+   * through the API, or one a crash left dangling — and calling those "recording" put a red
+   * indicator on screen claiming a microphone was live on a build with no capture compiled in.
+   */
   const [recordingId, setRecordingId] = useState<string | null>(null);
+  /**
+   * A meeting that has not been ended, on an engine that cannot record.
+   *
+   * Distinct from the above and never shown as capture. It exists so such a meeting can still
+   * be closed — it is a meeting in progress, not a recording in progress.
+   */
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   /** Which input the engine is capturing from, shown so a wrong device is caught early. */
   const [device, setDevice] = useState<string | null>(null);
@@ -83,6 +118,8 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const isRecording = recordingId !== null;
+  /** The meeting the record button acts on — capturing, or merely still open. */
+  const activeMeetingId = recordingId ?? openMeetingId;
   const selectedMeeting = meetings.find((m) => m.id === selectedId) ?? null;
   const summaryState = useSummary(selectedId);
 
@@ -100,32 +137,36 @@ export default function App() {
       // Recording state comes from the engine, not local state: the window can be
       // reloaded while a meeting is still running.
       //
-      // `recording_meeting_id` is authoritative when the engine can capture. The open-meeting
-      // fallback is only a guess — a meeting left open by a crash has no `ended_at` either, and
-      // treating that as live would leave the UI stuck showing a recording that is not running.
-      const liveId =
-        nextHealth.recording_meeting_id ??
-        (nextHealth.can_record
-          ? null
-          : (nextMeetings.find((m) => m.ended_at === null)?.id ?? null));
+      // `recording_meeting_id` is the only thing that means "a microphone is open". A meeting
+      // with no `ended_at` means something weaker — created through the API, or left dangling
+      // by a crash — and is tracked separately so it can be closed without the UI announcing a
+      // recording that is not happening.
+      const live = nextHealth.recording_meeting_id;
+      const open = live ?? meetingsStillOpen(nextMeetings);
 
-      if (liveId) {
-        const live = nextMeetings.find((m) => m.id === liveId);
-        setRecordingId(liveId);
-        if (live) setStartedAt(new Date(live.started_at).getTime());
-            if (route.name === "home") replace({ name: "meeting", id: liveId, tab: "transcript" });
+      setRecordingId(live);
+      setOpenMeetingId(live ? null : open);
 
+      if (open) {
+        const meeting = nextMeetings.find((m) => m.id === open);
+        if (meeting) setStartedAt(new Date(meeting.started_at).getTime());
+      } else {
+        setStartedAt(null);
+      }
+
+      // Deliberately no redirect to the live meeting. That used to fire whenever the app was
+      // on home, which meant home could not be visited during a recording — and it read the
+      // route from a stale closure to decide. The sidebar carries a permanent "go live"
+      // control instead, which is a way back rather than a hijack.
+
+      if (live) {
         // Only asked for while something is actually recording, so an idle app makes two
         // requests per refresh rather than three.
-        if (nextHealth.recording_meeting_id) {
-          api
-            .recordingStatus()
-            .then((status) => setDevice(status.device))
-            .catch(() => setDevice(null));
-        }
+        api
+          .recordingStatus()
+          .then((status) => setDevice(status.device))
+          .catch(() => setDevice(null));
       } else {
-        setRecordingId(null);
-        setStartedAt(null);
         setDevice(null);
       }
     } catch (e) {
@@ -144,9 +185,15 @@ export default function App() {
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
 
-  // Load the selected transcript, polling while that meeting records.
+  // Load the open transcript, polling while that meeting records.
+  //
+  // The record page has no meeting in the address bar but does want the live one — that is the
+  // whole point of the screen, watching words arrive. So the id being read is the selected
+  // meeting, falling back to whatever is recording while that page is showing.
+  const transcriptId = selectedId ?? (route.name === "record" ? activeMeetingId : null);
+
   useEffect(() => {
-    if (!selectedId) {
+    if (!transcriptId) {
       setSegments([]);
       return;
     }
@@ -154,7 +201,7 @@ export default function App() {
     let cancelled = false;
     const load = async () => {
       try {
-        const next = await api.transcript(selectedId);
+        const next = await api.transcript(transcriptId);
         if (!cancelled) setSegments(next);
       } catch (e) {
         if (!cancelled) report(e);
@@ -162,14 +209,14 @@ export default function App() {
     };
 
     void load();
-    if (selectedId !== recordingId) return;
+    if (transcriptId !== recordingId) return;
 
     const id = setInterval(load, 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [selectedId, recordingId, report]);
+  }, [transcriptId, recordingId, report]);
 
   // Ask for clarifying questions while recording.
   //
@@ -226,17 +273,20 @@ export default function App() {
     setError(null);
     setNotice(null);
     try {
-      if (recordingId) {
-        if (health?.can_record) {
+      if (activeMeetingId) {
+        if (recordingId && health?.can_record) {
           const stopped = await api.stopRecording();
           setNotice(
             `Recording stopped — ${stopped.segments} segment(s)` +
               (stopped.speakers > 0 ? `, ${stopped.speakers} speaker(s).` : "."),
           );
         } else {
-          await api.endMeeting(recordingId);
+          // Not a recording, just a meeting nobody closed. Ending it is bookkeeping.
+          await api.endMeeting(activeMeetingId);
+          setNotice("Meeting closed.");
         }
         setRecordingId(null);
+        setOpenMeetingId(null);
         setStartedAt(null);
         setDevice(null);
       } else {
@@ -266,7 +316,8 @@ export default function App() {
           );
         } else {
           const meeting = await api.createMeeting(title);
-          setRecordingId(meeting.id);
+          // Open, not recording — this engine has no capture to start.
+          setOpenMeetingId(meeting.id);
           select(meeting.id);
           setStartedAt(new Date(meeting.started_at).getTime());
           setNotice(
@@ -361,10 +412,9 @@ export default function App() {
   const select = (id: string) => navigate({ name: "meeting", id, tab: "transcript" });
   const setTab = (next: Tab) =>
     selectedId && navigate({ name: "meeting", id: selectedId, tab: next });
-  const setView = (next: View) =>
-    navigate(next === "meetings" ? { name: "home" } : ({ name: next } as Route));
 
-  const inWorkspace = view === "meetings";
+  /** Only a meeting page gets the library column and the intelligence panel beside it. */
+  const inWorkspace = route.name === "meeting";
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -381,17 +431,21 @@ export default function App() {
       />
 
       <Sidebar
-        view={view}
-        onChange={setView}
+        view={route.name}
+        onNavigate={navigate}
         isRecording={isRecording}
         onGoLive={() => {
           if (recordingId) select(recordingId);
         }}
-        onHome={() => navigate({ name: "home" })}
       />
 
       {inWorkspace && (
-        <MeetingLibrary meetings={meetings} selectedId={selectedId} onSelect={select} />
+        <MeetingLibrary
+          meetings={meetings}
+          selectedId={selectedId}
+          recordingId={recordingId}
+          onSelect={select}
+        />
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -434,7 +488,7 @@ export default function App() {
                   isRecording={isRecording && selectedId === recordingId}
                   // Only where the dock is not: two stop buttons on one screen invite the
                   // second press that starts a new recording.
-                  onStop={tab === "ask" && !busy ? toggleRecording : undefined}
+                  onStop={DOCKLESS_TABS.includes(tab) && !busy ? toggleRecording : undefined}
                   panelHidden={!panelOpen}
                   onShowPanel={() => setPanelOpen(true)}
                 />
@@ -457,6 +511,14 @@ export default function App() {
                     onSummarize={() => void summarize()}
                   />
                 )}
+                {tab === "notes" && (
+                  <MeetingNotes
+                    meetingId={selectedId}
+                    meetingTitle={selectedMeeting?.title ?? null}
+                    isRecording={isRecording && selectedId === recordingId}
+                    onNavigate={navigate}
+                  />
+                )}
                 {tab === "ask" && (
                   <ChatView
                     meetingId={selectedId}
@@ -467,16 +529,70 @@ export default function App() {
               </>
             )}
 
-            {view === "notes" && <NotesView />}
-            {view === "tickets" && <TicketsView />}
-            {view === "settings" && (
+            {route.name === "home" && (
+              <HomeView
+                meetings={meetings}
+                isRecording={isRecording}
+                canRecord={health?.can_record ?? false}
+                onNavigate={navigate}
+                onStartRecording={() => {
+                  navigate({ name: "record" });
+                  void toggleRecording();
+                }}
+                onImport={importAudio}
+              />
+            )}
+
+            {route.name === "record" && (
+              <RecordView
+                health={health}
+                isRecording={isRecording}
+                openMeeting={openMeetingId !== null}
+                startedAt={startedAt}
+                busy={busy}
+                liveDevice={device}
+                preferredDevice={preferredDevice}
+                onDeviceChange={setPreferredDevice}
+                language={language}
+                segments={segments}
+                onToggle={toggleRecording}
+                onImport={importAudio}
+                onNavigate={navigate}
+                recordingId={activeMeetingId}
+                listDevices={api.devices}
+              />
+            )}
+
+            {route.name === "library" && (
+              <LibraryView
+                meetings={meetings}
+                recordingId={recordingId}
+                canRecord={health?.can_record ?? false}
+                onNavigate={navigate}
+                onImport={importAudio}
+              />
+            )}
+
+            {route.name === "notes" && (
+              <NotesView noteId={route.id} onNavigate={navigate} />
+            )}
+            {route.name === "tasks" && (
+              <TasksView meetings={meetings} onNavigate={navigate} />
+            )}
+            {route.name === "tickets" && <TicketsView />}
+            {route.name === "trash" && <TrashView />}
+            {route.name === "agent" && <AgentView onNavigate={navigate} />}
+            {route.name === "help" && (
+              <HelpView section={route.section ?? "docs"} onNavigate={navigate} />
+            )}
+            {route.name === "settings" && (
               <SettingsView
                 theme={theme.theme}
                 onModeChange={theme.setMode}
                 onAccentChange={theme.setAccent}
               />
             )}
-            {view === "about" && <AboutView health={health} />}
+            {route.name === "about" && <AboutView health={health} />}
           </main>
 
           {inWorkspace && panelOpen && (
@@ -499,11 +615,12 @@ export default function App() {
             />
           )}
 
-          {/* Not on Ask: the dock floats bottom-centre, which is exactly where that tab puts
-              its message box, and a button sitting on top of a text field is not a control. */}
-          {inWorkspace && tab !== "ask" && (
+          {/* Not on Ask or Notes: the dock floats bottom-centre, which is exactly where those
+              tabs put their text field, and a button sitting on top of one is not a control. */}
+          {inWorkspace && !DOCKLESS_TABS.includes(tab) && (
             <RecordDock
               isRecording={isRecording}
+              openMeeting={openMeetingId !== null}
               startedAt={startedAt}
               busy={busy}
               canRecord={health?.can_record ?? false}

@@ -14,15 +14,26 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 export type Route =
   | { name: "home" }
+  | { name: "record" }
+  | { name: "library" }
   | { name: "meeting"; id: string; tab: MeetingTab }
-  | { name: "notes" }
+  | { name: "notes"; id?: string }
+  | { name: "tasks" }
   | { name: "tickets" }
+  | { name: "trash" }
+  | { name: "agent" }
+  | { name: "help"; section?: HelpSection }
   | { name: "settings"; section?: string }
   | { name: "about" };
 
-export type MeetingTab = "transcript" | "summary" | "ask";
+export type MeetingTab = "transcript" | "summary" | "notes" | "ask";
 
-const MEETING_TABS: MeetingTab[] = ["transcript", "summary", "ask"];
+const MEETING_TABS: MeetingTab[] = ["transcript", "summary", "notes", "ask"];
+
+/** The pages under Help. Named so a link can point at one directly. */
+export type HelpSection = "docs" | "support" | "whats-new" | "shortcuts";
+
+const HELP_SECTIONS: HelpSection[] = ["docs", "support", "whats-new", "shortcuts"];
 
 /** Parse a hash into a route. Anything unrecognised is home, never a blank screen. */
 export function parseRoute(hash: string): Route {
@@ -33,16 +44,34 @@ export function parseRoute(hash: string): Route {
 
   switch (parts[0]) {
     case "meetings": {
-      if (!parts[1]) return { name: "home" };
+      // `#/meetings` with no id is the library, not a broken meeting page.
+      if (!parts[1]) return { name: "library" };
       const tab = MEETING_TABS.includes(parts[2] as MeetingTab)
         ? (parts[2] as MeetingTab)
         : "transcript";
       return { name: "meeting", id: parts[1], tab };
     }
+    case "record":
+      return { name: "record" };
+    case "library":
+      return { name: "library" };
     case "notes":
-      return { name: "notes" };
+      return { name: "notes", id: parts[1] };
+    case "tasks":
+      return { name: "tasks" };
     case "tickets":
       return { name: "tickets" };
+    case "trash":
+      return { name: "trash" };
+    case "agent":
+      return { name: "agent" };
+    case "help":
+      return {
+        name: "help",
+        section: HELP_SECTIONS.includes(parts[1] as HelpSection)
+          ? (parts[1] as HelpSection)
+          : undefined,
+      };
     case "settings":
       return { name: "settings", section: parts[1] };
     case "about":
@@ -58,6 +87,10 @@ export function routeToHash(route: Route): string {
       return "#/";
     case "meeting":
       return `#/meetings/${route.id}/${route.tab}`;
+    case "notes":
+      return route.id ? `#/notes/${route.id}` : "#/notes";
+    case "help":
+      return route.section ? `#/help/${route.section}` : "#/help";
     case "settings":
       return route.section ? `#/settings/${route.section}` : "#/settings";
     default:

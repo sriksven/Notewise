@@ -14,6 +14,8 @@ export type { PermissionReadiness, SetupReadiness };
 
 export interface Health {
   status: string;
+  /** The engine's version. Separately versioned from this frontend, so it is reported. */
+  version: string;
   schema_version: number;
   /** Whether the AI backend keeps data on this machine. Shown in the UI. */
   ai_local: boolean;
@@ -64,6 +66,52 @@ export interface Note {
   body: string;
   created_at: string;
   updated_at: string;
+  /** When it was moved to the trash, or null while it is live. */
+  deleted_at: string | null;
+}
+
+/** One piece of source material behind a grounded answer. */
+export interface Citation {
+  /** Its number in the answer's `[n]` references. */
+  n: number;
+  kind: "meeting" | "note" | "ticket";
+  id: string;
+  title: string;
+}
+
+export interface GroundedAnswer {
+  text: string;
+  model: string;
+  citations: Citation[];
+  /**
+   * Whether there was any material behind the answer at all.
+   *
+   * False only when nothing was found — which is worth telling the user about, since retrieval
+   * is by word and a rewording may find it.
+   */
+  grounded: boolean;
+}
+
+export interface AgentStep {
+  n: number;
+  /** The tool it used, or `think` when it produced no usable action. */
+  action: string;
+  /** Its own one-line reason, when it gave one. */
+  reason: string | null;
+  observation: string;
+}
+
+export interface AgentRun {
+  id: string;
+  task: string;
+  status: "running" | "done" | "failed";
+  steps: AgentStep[];
+  note_id: string | null;
+  note_title: string | null;
+  result: string | null;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
 }
 
 export interface Person {
@@ -661,8 +709,75 @@ export const api = {
       body: JSON.stringify({ title, body }),
     }),
 
+  /**
+   * Create a note attached to a meeting.
+   *
+   * The link is a graph edge, not a column: a note outlives the meeting it was taken in and
+   * may reference several.
+   */
+  createMeetingNote: (meetingId: string, input: { title: string; body: string }) =>
+    request<Note>("/v1/notes", {
+      method: "POST",
+      body: JSON.stringify({ ...input, references_meeting: meetingId }),
+    }),
+
+  meetingNotes: (meetingId: string) =>
+    request<Note[]>(`/v1/meetings/${meetingId}/notes`),
+
+  /**
+   * Move a note to the trash. Recoverable with {@link restoreNote}.
+   *
+   * Returns the note, now carrying `deleted_at`, so a caller can offer an undo without a
+   * second round trip.
+   */
   deleteNote: (id: string) =>
-    request<{ deleted: boolean }>(`/v1/notes/${id}`, { method: "DELETE" }),
+    request<Note>(`/v1/notes/${id}`, { method: "DELETE" }),
+
+  restoreNote: (id: string) =>
+    request<Note>(`/v1/notes/${id}/restore`, { method: "POST" }),
+
+  trash: () => request<Note[]>("/v1/trash"),
+
+  /** Destroy one note for good. There is no undo behind this. */
+  purgeNote: (id: string) =>
+    request<Note>(`/v1/notes/${id}?purge=true`, { method: "DELETE" }),
+
+  emptyTrash: () =>
+    request<{ deleted: number }>("/v1/trash", { method: "DELETE" }),
+
+  /**
+   * Ask a question about one note.
+   *
+   * `scope: "workspace"` also searches the rest of the workspace, so a note can be asked what
+   * the meetings said about it. The note itself is always the first citation.
+   */
+  askNote: (
+    id: string,
+    messages: Array<{ role: string; content: string }>,
+    scope: "note" | "workspace" = "note",
+  ) =>
+    request<GroundedAnswer>(`/v1/notes/${id}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ messages, scope }),
+    }),
+
+  /** Ask the whole workspace. Answers come only from what retrieval found. */
+  ask: (messages: Array<{ role: string; content: string }>) =>
+    request<GroundedAnswer>("/v1/ask", {
+      method: "POST",
+      body: JSON.stringify({ messages }),
+    }),
+
+  /** Set the agent going. Returns immediately; poll with {@link agentRun}. */
+  startAgentRun: (task: string) =>
+    request<AgentRun>("/v1/agent/runs", {
+      method: "POST",
+      body: JSON.stringify({ task }),
+    }),
+
+  agentRun: (id: string) => request<AgentRun>(`/v1/agent/runs/${id}`),
+
+  agentRuns: () => request<AgentRun[]>("/v1/agent/runs"),
 
   people: () => request<Person[]>("/v1/people"),
 

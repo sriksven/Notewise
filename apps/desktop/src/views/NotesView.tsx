@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Plus, Trash2 } from "lucide-react";
+import { FileText, MessageCircleQuestion, Plus, Trash2 } from "lucide-react";
 
+import { NoteChat } from "../components/NoteChat";
 import { api, ApiError, type Note } from "../lib/api";
+import type { Route } from "../lib/router";
+
+interface Props {
+  /** Which note the address bar says is open, if any. */
+  noteId?: string;
+  onNavigate: (route: Route) => void;
+}
 
 /**
  * How long to wait after the last keystroke before saving.
@@ -25,13 +33,14 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
  * people stop trusting with anything that matters, and an explicit save button is a promise
  * to remember something the user should not have to.
  */
-export function NotesView() {
+export function NotesView({ noteId, onNavigate }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [save, setSave] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
 
   /** The last content committed to the engine, so an idle timer can skip a no-op save. */
   const persisted = useRef<{ title: string; body: string }>({ title: "", body: "" });
@@ -49,9 +58,25 @@ export function NotesView() {
     }
   }, []);
 
+  // Open whatever the address bar names, once the list has arrived. This is how a citation, an
+  // agent's finished note, and a link from a meeting all land on the right note — and how a
+  // reload stays on it.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    void load().then((loaded) => {
+      if (cancelled || !noteId) return;
+      const wanted = loaded.find((note) => note.id === noteId);
+      if (!wanted) return;
+      setSelectedId(wanted.id);
+      setTitle(wanted.title);
+      setBody(wanted.body);
+      persisted.current = { title: wanted.title, body: wanted.body };
+      setSave("idle");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [load, noteId]);
 
   const flush = useCallback(async (id: string, nextTitle: string, nextBody: string) => {
     if (
@@ -100,6 +125,8 @@ export function NotesView() {
     setBody(note.body);
     persisted.current = { title: note.title, body: note.body };
     setSave("idle");
+    // Keep the address bar honest, so reload and Back both work on a note.
+    onNavigate({ name: "notes", id: note.id });
   }
 
   async function create() {
@@ -113,19 +140,26 @@ export function NotesView() {
     }
   }
 
+  /**
+   * Move a note to the trash.
+   *
+   * No longer asks first, because it no longer destroys anything — the note is recoverable
+   * from the trash, and a confirm dialog in front of a reversible action is the one people
+   * learn to click through without reading.
+   */
   async function remove(note: Note) {
-    // Deliberate: this is the one destructive action in the view, and it asks first. There
-    // is no undo behind it, and a note is often the only copy of what someone typed.
-    if (!window.confirm(`Delete “${note.title}”? This cannot be undone.`)) return;
-
     try {
       await api.deleteNote(note.id);
       setNotes((current) => current.filter((n) => n.id !== note.id));
       if (selectedId === note.id) {
+        // The pending autosave would be rejected by the engine now, but cancelling it keeps
+        // a spurious "Not saved" off the screen.
         if (timer.current) clearTimeout(timer.current);
         setSelectedId(null);
         setTitle("");
         setBody("");
+        setAsking(false);
+        onNavigate({ name: "notes" });
       }
       setError(null);
     } catch (e) {
@@ -181,9 +215,11 @@ export function NotesView() {
                   <button
                     type="button"
                     onClick={() => void remove(note)}
-                    aria-label={`Delete ${note.title || "Untitled"}`}
+                    aria-label={`Move ${note.title || "Untitled"} to the trash`}
+                    title="Move to trash"
                     className="shrink-0 p-1 text-ink-faint opacity-0 transition
-                               hover:text-danger-text group-hover:opacity-100"
+                               hover:text-danger-text group-hover:opacity-100
+                               focus-visible:opacity-100"
                   >
                     <Trash2 size={12} aria-hidden />
                   </button>
@@ -229,6 +265,23 @@ export function NotesView() {
                       ? "Not saved"
                       : ""}
               </span>
+
+              <button
+                type="button"
+                onClick={() => setAsking((open) => !open)}
+                aria-pressed={asking}
+                // Labelled, not just titled: the visible word is "Ask", which read on its own
+                // by a screen reader does not say what is being asked.
+                aria-label="Ask about this note"
+                title="Ask about this note"
+                className={`flex shrink-0 items-center gap-1 rounded-full border border-hairline
+                            px-2.5 py-1 text-[11.5px] transition hover:bg-overlay ${
+                              asking ? "bg-overlay text-ink" : "text-ink-muted hover:text-ink"
+                            }`}
+              >
+                <MessageCircleQuestion size={12} aria-hidden />
+                Ask
+              </button>
             </div>
 
             <textarea
@@ -250,6 +303,18 @@ export function NotesView() {
           </p>
         )}
       </div>
+
+      {asking && selectedId && (
+        <NoteChat
+          // Keyed on the note, so switching notes resets the thread rather than carrying
+          // answers grounded in material the user is no longer looking at.
+          key={selectedId}
+          noteId={selectedId}
+          noteTitle={title}
+          onClose={() => setAsking(false)}
+          onNavigate={onNavigate}
+        />
+      )}
     </div>
   );
 }

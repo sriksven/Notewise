@@ -135,7 +135,7 @@ async fn chat_about_note(
         passages
     }; // lock released before the model call
 
-    answer(&state, body.messages, passages, wide).await
+    answer(&state, body.messages, passages).await
 }
 
 /// Ask the workspace.
@@ -173,7 +173,7 @@ async fn ask_workspace(
         })));
     }
 
-    answer(&state, body.messages, passages, true).await
+    answer(&state, body.messages, passages).await
 }
 
 /// Run the model against assembled passages and return the answer with its citations.
@@ -181,7 +181,6 @@ async fn answer(
     state: &Shared,
     messages: Vec<Turn>,
     passages: Vec<Passage>,
-    retrieved: bool,
 ) -> ApiResult<Json<serde_json::Value>> {
     let context = vec![format!(
         "{}\n\n{}",
@@ -196,10 +195,13 @@ async fn answer(
         "text": response.text,
         "model": response.model,
         "citations": retrieval::citations(&passages),
-        // Whether any of the material was found by searching, as opposed to being the note
-        // the user already had open. A client can use it to decide whether to explain that
-        // retrieval is lexical.
-        "grounded": retrieved,
+        // Whether there was any material behind this answer at all.
+        //
+        // Derived from the passages rather than from whether a *search* ran. Those are not the
+        // same question, and conflating them made a note-scoped answer — which is grounded on
+        // the note itself and needs no search — report `false` and get labelled "nothing
+        // matched" in the UI, directly under the citation it had just produced.
+        "grounded": !passages.is_empty(),
     })))
 }
 
@@ -299,6 +301,24 @@ mod tests {
         assert_eq!(citations[0]["kind"], "note");
         assert_eq!(citations[0]["id"], id.to_string());
         assert_eq!(citations[0]["n"], 1);
+    }
+
+    /// `grounded` reports whether there was material, not whether a search ran.
+    ///
+    /// The distinction is what a client keys its "nothing matched" hint off. Reporting `false`
+    /// for a note-scoped answer put that hint directly beneath a citation.
+    #[tokio::test]
+    async fn an_answer_with_a_citation_is_always_reported_as_grounded() {
+        let (app, state) = app();
+        let id = seed_note(&state, "Latency", "We hold p99 under 200ms.").await;
+
+        let (_, scoped) =
+            post_json(&app, &format!("/v1/notes/{id}/chat"), ask("what is p99?")).await;
+        assert_eq!(
+            scoped["grounded"], true,
+            "the note is material, even though nothing was searched"
+        );
+        assert!(!scoped["citations"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
