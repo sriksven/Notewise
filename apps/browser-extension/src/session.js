@@ -58,19 +58,19 @@ function stop(reason) {
   clearInterval(session.flush);
 
   const final = session.tracker.finish();
-  const { meetingId } = session;
+  const { meetingId, origin } = session;
   session = null;
 
   if (final) {
     // Best effort: the meeting is over either way, and a failed final flush costs some labels
     // rather than the transcript.
-    postSpeakerEvents(meetingId, final).catch(() => {});
+    postSpeakerEvents(meetingId, final, origin).catch(() => {});
   }
 
   console.info(`[notewise] stopped tracking speakers: ${reason}`);
 }
 
-function start(meetingId) {
+function start(meetingId, origin) {
   const tracker = new SpeakerTracker();
 
   const timer = setInterval(() => {
@@ -94,7 +94,11 @@ function start(meetingId) {
     const batch = session.tracker.drain();
     if (!batch) return;
 
-    const accepted = await postSpeakerEvents(session.meetingId, batch).catch(() => false);
+    const accepted = await postSpeakerEvents(
+      session.meetingId,
+      batch,
+      session.origin,
+    ).catch(() => false);
     if (!accepted) {
       // Dropped, not retried: the engine rejects a batch for structural reasons, so an identical
       // resend fails identically. Losing a batch costs some labels; a retry loop costs the meeting.
@@ -102,19 +106,22 @@ function start(meetingId) {
     }
   }, FLUSH_MS);
 
-  session = { tracker, meetingId, timer, flush };
+  session = { tracker, meetingId, origin, timer, flush };
   console.info(`[notewise] tracking speakers on ${platform.name} for meeting ${meetingId}`);
 }
 
 async function poll() {
-  const meetingId = await activeRecording();
+  // The engine is located on every poll rather than cached: the desktop app may be opened after
+  // the meeting page, and it may come back on a different port than it had last time.
+  const found = await activeRecording();
+  const meetingId = found?.meetingId ?? null;
 
   if (meetingId && !session) {
-    start(meetingId);
+    start(meetingId, found.origin);
   } else if (session && meetingId !== session.meetingId) {
     // Either recording stopped, or a different meeting started.
     stop(meetingId ? "the recording moved to another meeting" : "the recording stopped");
-    if (meetingId) start(meetingId);
+    if (meetingId) start(meetingId, found.origin);
   }
 }
 

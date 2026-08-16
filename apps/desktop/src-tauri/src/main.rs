@@ -78,9 +78,13 @@ fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error
     let state = AppState::new(db, ai).with_model_dir(model_dir(&data_dir));
     let frontend = frontend_dir(app)?;
 
-    // Port 0 asks the OS for a free port. A fixed port would collide with a `notewise serve`
-    // already running, and failing to launch because a CLI is open would be a poor trade.
-    let server = Server::bind("127.0.0.1:0")?;
+    // The first free port in the engine's discoverable window, not an arbitrary one.
+    //
+    // Port 0 avoided colliding with a running `notewise serve`, and made the engine
+    // impossible to find: the browser extension that reports who is speaking has to name a
+    // port in its manifest, and the app was never on it. `discoverable` keeps the collision
+    // property — it walks the window and only falls back to 0 if every one is taken.
+    let server = Server::discoverable();
 
     // The engine runs on its own runtime thread. Tauri owns the main thread for the event
     // loop, and blocking it would freeze the window.

@@ -106,10 +106,53 @@ impl Server {
         Ok(Self { addr: parsed })
     }
 
+    /// How many ports above the default are considered discoverable.
+    ///
+    /// The browser extension has to find the engine without being told where it is, and a
+    /// Manifest V3 `host_permissions` list is static — it cannot name a port chosen at runtime.
+    /// A small, fixed window is the only shape that satisfies both: the engine lands somewhere
+    /// inside it, and the extension can enumerate it.
+    ///
+    /// Ten, not one, because a `notewise serve` may already hold the default and the desktop app
+    /// failing to launch over that would be a poor trade. Ten, not a hundred, because every entry
+    /// is a permission the extension has to be granted and a request it may have to make.
+    pub const DISCOVERY_PORTS: u16 = 10;
+
     /// Bind to `127.0.0.1` on the default port.
     pub fn local() -> Self {
         Self {
             addr: SocketAddr::from(([127, 0, 0, 1], Self::DEFAULT_PORT)),
+        }
+    }
+
+    /// Bind the first free port in the discoverable window, falling back to any free port.
+    ///
+    /// The desktop shell used to ask for port 0 — a free port chosen by the OS — which avoided
+    /// collisions and made the engine unfindable: the extension had one hardcoded port and the
+    /// app was never on it.
+    ///
+    /// The fallback keeps the original property. If all ten are taken the app still starts; it
+    /// is simply not discoverable, which is better than refusing to open.
+    pub fn discoverable() -> Self {
+        for offset in 0..Self::DISCOVERY_PORTS {
+            let port = Self::DEFAULT_PORT + offset;
+            // Bound and dropped immediately: this is a probe, and the real listener is created
+            // later by `bind_with_frontend`. A port that frees in between is a race we lose by
+            // failing to start, which the caller reports — not by binding something unexpected.
+            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                return Self {
+                    addr: SocketAddr::from(([127, 0, 0, 1], port)),
+                };
+            }
+        }
+
+        tracing::warn!(
+            "ports {}-{} are all in use; the browser extension will not find this engine",
+            Self::DEFAULT_PORT,
+            Self::DEFAULT_PORT + Self::DISCOVERY_PORTS - 1
+        );
+        Self {
+            addr: SocketAddr::from(([127, 0, 0, 1], 0)),
         }
     }
 
@@ -273,6 +316,41 @@ mod tests {
                 ServeError::InvalidAddress(_)
             ));
         }
+    }
+
+    /// The window has to be reachable, which means loopback and inside the range the browser
+    /// extension is granted permission for. A port outside it is an engine nothing can find.
+    #[test]
+    fn a_discoverable_engine_lands_in_the_advertised_window() {
+        let server = Server::discoverable();
+        assert!(server.addr().ip().is_loopback());
+
+        let port = server.addr().port();
+        let last = Server::DEFAULT_PORT + Server::DISCOVERY_PORTS - 1;
+        assert!(
+            (Server::DEFAULT_PORT..=last).contains(&port) || port == 0,
+            "got {port}, which is neither in {}..={last} nor the all-taken fallback",
+            Server::DEFAULT_PORT
+        );
+    }
+
+    /// A port already in use must be stepped over, not failed on. The whole reason the shell
+    /// used port 0 was that a running `notewise serve` should not stop the app from opening.
+    #[test]
+    fn an_occupied_port_is_skipped() {
+        let held = std::net::TcpListener::bind(("127.0.0.1", Server::DEFAULT_PORT));
+
+        // Only meaningful if this test could actually take the default port; if something else
+        // on the machine holds it, the assertion below still holds for a different reason.
+        let server = Server::discoverable();
+        if held.is_ok() {
+            assert_ne!(
+                server.addr().port(),
+                Server::DEFAULT_PORT,
+                "the default was held, so discovery must have moved on"
+            );
+        }
+        assert!(server.addr().ip().is_loopback());
     }
 
     #[test]

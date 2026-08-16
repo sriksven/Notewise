@@ -8,11 +8,12 @@
  * subtle behaviour is.
  */
 
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { SpeakerTracker, MIN_TURN_MS } from "../src/tracker.js";
-import { activeRecording, postSpeakerEvents } from "../src/engine.js";
+import { activeRecording, findEngine, postSpeakerEvents, PORTS } from "../src/engine.js";
 
 /** A clock the test drives by hand. */
 function fakeClock(start = 0) {
@@ -184,20 +185,93 @@ test("elapsed time never goes negative", () => {
 });
 
 test("no recording means no meeting id, and a dead engine is not an error", async () => {
-  const notRecording = async () => ({ ok: true, json: async () => ({ recording: false }) });
-  assert.equal(await activeRecording(notRecording), null);
+  // Every port answers as a healthy engine that is idle.
+  const idle = async () => ({
+    ok: true,
+    json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: null }),
+  });
+  assert.equal(await activeRecording(idle), null);
 
   const recording = async () => ({
     ok: true,
-    json: async () => ({ recording: true, meeting_id: "abc" }),
+    json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: "abc" }),
   });
-  assert.equal(await activeRecording(recording), "abc");
+  assert.deepEqual(await activeRecording(recording), {
+    meetingId: "abc",
+    origin: "http://127.0.0.1:47821",
+  });
 
   // The desktop app is not running. A meeting page must not fill the console over that.
   const refused = async () => {
     throw new Error("ECONNREFUSED");
   };
   assert.equal(await activeRecording(refused), null);
+});
+
+test("the engine is found wherever in the window it landed", async () => {
+  // Only the third port is Notewise; the rest refuse, as they would with nothing listening.
+  const onThirdPort = async (url) => {
+    if (!url.startsWith("http://127.0.0.1:47823/")) throw new Error("ECONNREFUSED");
+    return {
+      ok: true,
+      json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: "m9" }),
+    };
+  };
+
+  assert.deepEqual(await activeRecording(onThirdPort), {
+    meetingId: "m9",
+    origin: "http://127.0.0.1:47823",
+  });
+});
+
+/**
+ * The safety property of probing. Something else on a loopback port may answer 200 with JSON;
+ * it will not answer with the engine's fields, and a speaker's name must never be posted to it.
+ */
+test("software that is not Notewise is never sent anything", async () => {
+  const somethingElse = async () => ({
+    ok: true,
+    json: async () => ({ status: "ok", message: "hello from an unrelated dev server" }),
+  });
+
+  assert.equal(await findEngine(somethingElse), null);
+  assert.equal(await activeRecording(somethingElse), null);
+});
+
+test("a recording engine wins over an idle one", async () => {
+  // The CLI is on the first port and idle; the desktop app is on the second and recording.
+  const both = async (url) => {
+    if (url.startsWith("http://127.0.0.1:47821/")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: null }),
+      };
+    }
+    if (url.startsWith("http://127.0.0.1:47822/")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: "live" }),
+      };
+    }
+    throw new Error("ECONNREFUSED");
+  };
+
+  const found = await activeRecording(both);
+  assert.equal(found.meetingId, "live");
+  assert.equal(found.origin, "http://127.0.0.1:47822", "names belong to whoever has the audio");
+});
+
+test("the probed window matches what the manifest asks permission for", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("../manifest.json", import.meta.url), "utf8"),
+  );
+  const declared = manifest.host_permissions.map((p) => p.replace(/^http:\/\/127\.0\.0\.1:/, "").replace(/\/\*$/, ""));
+
+  assert.deepEqual(
+    declared,
+    PORTS.map(String),
+    "a port the extension probes but cannot reach is a silent failure to find the engine",
+  );
 });
 
 test("a batch is posted to the loopback engine as JSON", async () => {
@@ -208,9 +282,12 @@ test("a batch is posted to the loopback engine as JSON", async () => {
   };
 
   const batch = { participants: [{ id: "p1", display_name: "Priya" }], turns: [] };
-  assert.equal(await postSpeakerEvents("m1", batch, fake), true);
+  assert.equal(
+    await postSpeakerEvents("m1", batch, "http://127.0.0.1:47825", fake),
+    true,
+  );
 
-  assert.equal(seen.url, "http://127.0.0.1:47821/v1/meetings/m1/speaker-events");
+  assert.equal(seen.url, "http://127.0.0.1:47825/v1/meetings/m1/speaker-events");
   assert.equal(seen.init.method, "POST");
   assert.deepEqual(JSON.parse(seen.init.body), batch);
 });
