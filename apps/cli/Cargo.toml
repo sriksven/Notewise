@@ -38,6 +38,12 @@ default = []
 record = ["notewise-audio-capture/os-capture", "notewise-api-server/record"]
 # Real transcription. Pulls a cmake build of whisper.cpp.
 whisper = ["notewise-recorder/whisper", "notewise-api-server/whisper"]
+# The ONNX transducer, as an alternative to Whisper. Separate from `whisper` because it
+# pulls ONNX Runtime, which a Whisper-only build has no use for.
+parakeet = ["notewise-transcription/parakeet"]
+# Same, but fetches ONNX Runtime at build time instead of expecting one on the system.
+# Without this the link fails on `_OrtGetApiBase`, which is not an obvious error to meet.
+parakeet-download = ["parakeet", "notewise-transcription/parakeet-download"]
 whisper-metal = [
     "whisper",
     "notewise-recorder/whisper-metal",

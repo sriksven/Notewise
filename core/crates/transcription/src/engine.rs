@@ -238,8 +238,19 @@ impl WhisperEngine {
             TranscriptionError::BadAudio(format!("could not create a decode state: {e}"))
         })?;
 
-        let mut params =
-            whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+        // Beam search, which is Whisper's own default and was not what this used.
+        //
+        // `Greedy { best_of: 1 }` takes the single highest-probability token at every step with
+        // no ability to revise, so one bad token drags the rest of the phrase after it. That is
+        // the failure mode behind a transcript full of fluent, confident, wrong words — and it
+        // costs nothing on clean speech, which is exactly why testing on clean speech hides it.
+        //
+        // Beam 5 is whisper.cpp's default. The cost is decode time, measured rather than
+        // assumed: see `benches/` notes in the commit that introduced this.
+        let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
+            beam_size: 5,
+            patience: -1.0,
+        });
         // whisper.cpp writes to stdout by default, which would corrupt the MCP server's
         // JSON-RPC stream sharing this process.
         params.set_print_progress(false);

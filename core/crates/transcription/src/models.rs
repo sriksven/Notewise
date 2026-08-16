@@ -16,6 +16,9 @@ pub enum ModelSize {
     Tiny,
     Base,
     Small,
+    /// Large-class accuracy with a pruned decoder. Not a size so much as a different trade —
+    /// see [`ModelSize::tradeoff`].
+    Turbo,
     Medium,
     Large,
 }
@@ -26,6 +29,7 @@ impl ModelSize {
             ModelSize::Tiny => "tiny",
             ModelSize::Base => "base",
             ModelSize::Small => "small",
+            ModelSize::Turbo => "turbo",
             ModelSize::Medium => "medium",
             ModelSize::Large => "large",
         }
@@ -54,9 +58,15 @@ impl ModelSize {
                 "Clearly better on accents, crosstalk and jargon. Several times slower than \
                  base, and still fast enough to record live on a modern machine."
             }
+            ModelSize::Turbo => {
+                "The best choice for real meetings. Large-v3's accuracy with most of the \
+                 decoder removed, so it handles accents, crosstalk and a laptop microphone far \
+                 better than base or small while staying fast enough to keep up live."
+            }
             ModelSize::Medium => {
                 "Better again, and heavy. Best kept for importing a recording after the fact \
-                 rather than transcribing as people speak."
+                 rather than transcribing as people speak. Turbo is usually the better pick at \
+                 this size."
             }
             ModelSize::Large => {
                 "The most accurate available. Wants a lot of memory and is by a wide margin \
@@ -125,8 +135,13 @@ impl ModelRegistry {
             ("base", ModelSize::Base, 147_951_465, true),
             ("small.en", ModelSize::Small, 487_614_201, false),
             ("small", ModelSize::Small, 487_601_967, true),
+            // Quantised turbo. The reason this list exists: at roughly the download size of
+            // `small`, it is a large-class model. Anyone getting poor transcripts from `base`
+            // on a real microphone wants this, and until now the catalogue did not offer it.
+            ("large-v3-turbo-q5_0", ModelSize::Turbo, 574_041_195, true),
             ("medium.en", ModelSize::Medium, 1_533_774_781, false),
             ("medium", ModelSize::Medium, 1_533_763_059, true),
+            ("large-v3-turbo", ModelSize::Turbo, 1_624_555_275, true),
             ("large-v3", ModelSize::Large, 3_095_033_483, true),
         ];
 

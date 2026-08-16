@@ -35,6 +35,13 @@ pub use engine::{MockEngine, TranscriptionEngine, WhisperEngine};
 pub use async_trait::async_trait;
 pub use models::{DownloadProgress, ModelInfo, ModelRegistry, ModelSize, ModelStore};
 pub use parakeet::{ParakeetEngine, ParakeetPaths, Vocabulary};
+
+/// The name that selects Parakeet wherever a Whisper model name is accepted.
+///
+/// Not in [`ModelRegistry`]: that catalogue is single-file ggml weights with a URL and
+/// an exact size, and Parakeet is four ONNX artifacts from a release archive. Putting it
+/// there would mean lying about one of those fields.
+pub const PARAKEET_MODEL_NAME: &str = "parakeet";
 pub use segment::{Segment, Transcript};
 pub use stream::{Utterance, UtteranceBuffer, UtteranceConfig};
 

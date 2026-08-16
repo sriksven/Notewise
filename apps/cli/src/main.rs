@@ -496,12 +496,20 @@ async fn email(
     Ok(())
 }
 
-/// Build a Whisper engine, downloading the model first if it is missing.
+/// Build a transcription engine, downloading the model first if it is missing.
+///
+/// `parakeet` selects the ONNX transducer instead of Whisper. It is chosen by name rather than
+/// by a separate flag so every surface that already takes `--model` gets it for nothing.
 #[cfg(feature = "whisper")]
 async fn whisper_engine(
     model_name: &str,
 ) -> Result<Box<dyn notewise_transcription::TranscriptionEngine>> {
     use notewise_transcription::{ModelRegistry, ModelStore, WhisperEngine};
+
+    #[cfg(feature = "parakeet")]
+    if model_name == notewise_transcription::PARAKEET_MODEL_NAME {
+        return parakeet_engine();
+    }
 
     let model = ModelRegistry::get(model_name)?;
     let store = ModelStore::new(model_store_dir()?);
@@ -519,6 +527,32 @@ async fn whisper_engine(
     }
 
     Ok(Box::new(WhisperEngine::new(model, store)?))
+}
+
+/// Build the Parakeet engine from its model directory.
+///
+/// The files are not fetched automatically the way a Whisper model is: Parakeet ships as four
+/// separate ONNX artifacts in a release archive rather than one file behind a stable URL, so
+/// there is nothing here that could be a one-line download yet. Pointing at a directory is
+/// honest about that; auto-download can come later without changing this seam.
+#[cfg(all(feature = "whisper", feature = "parakeet"))]
+fn parakeet_engine() -> Result<Box<dyn notewise_transcription::TranscriptionEngine>> {
+    use notewise_transcription::{ParakeetEngine, ParakeetPaths};
+
+    let dir = std::env::var("NOTEWISE_PARAKEET_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| model_store_dir().map(|d| d.join("parakeet")))?;
+
+    let paths = ParakeetPaths::in_directory(&dir);
+    if !paths.are_present() {
+        anyhow::bail!(
+            "no Parakeet model in {}. Put encoder.onnx, decoder.onnx, joiner.onnx and \
+             tokens.txt there, or set NOTEWISE_PARAKEET_DIR.",
+            dir.display()
+        );
+    }
+
+    Ok(Box::new(ParakeetEngine::load(&paths)?))
 }
 
 #[cfg(feature = "whisper")]
