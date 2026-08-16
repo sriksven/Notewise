@@ -29,10 +29,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod agent;
+mod ask;
 mod connectors;
 pub mod downloads;
 mod error;
 pub mod recording;
+mod retrieval;
 mod routes;
 mod setup;
 pub mod speakers;

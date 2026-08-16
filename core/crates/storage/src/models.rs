@@ -228,6 +228,12 @@ pub struct Note {
     pub body: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When this note was moved to the trash, or `None` while it is live.
+    ///
+    /// Serialized always rather than skipped when absent: a client rendering a list of notes
+    /// needs to distinguish "not trashed" from "this build does not report trashing", and an
+    /// absent field cannot say which.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 /// Reference to an issue in an external tracker.

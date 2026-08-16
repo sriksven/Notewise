@@ -42,6 +42,9 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 http-body-util = "0.1"
+# Only to implement `AiBackend` for the scripted test backend that drives the agent loop.
+# Not a runtime dependency: this crate consumes the trait, it does not implement it.
+async-trait.workspace = true
 
 [features]
 default = []

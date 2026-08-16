@@ -119,6 +119,10 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         // Workspace writes — notes, tickets, action items, decisions, people, series.
         // Kept in their own module so this table stays readable.
         .merge(crate::workspace::router())
+        // Grounded question answering over a note or the whole workspace.
+        .merge(crate::ask::router())
+        // The agent: multi-step research across the workspace, ending in a note.
+        .merge(crate::agent::router())
         .with_state(state)
 }
 

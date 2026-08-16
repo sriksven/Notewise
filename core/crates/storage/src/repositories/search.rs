@@ -53,6 +53,40 @@ impl<'a> SearchRepository<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Find rows matching *any* of `terms`, best match first.
+    ///
+    /// [`Self::search`] exists for a search box, where a typed phrase should match as a
+    /// phrase. This exists for retrieval, where the input is a whole question — "what did we
+    /// decide about the pricing tiers?" — and matching that as a phrase finds nothing at all.
+    /// FTS5's bm25 ranking still floats documents containing more of the terms to the top, so
+    /// an OR query is not the free-for-all it looks like.
+    ///
+    /// Each term is quoted, and embedded quotes are doubled, so a term is never interpreted
+    /// as FTS5 syntax. Terms are the caller's to choose: stopword removal is a language
+    /// decision, not a storage one.
+    pub fn search_any(&self, terms: &[String], limit: u32) -> Result<Vec<SearchHit>> {
+        let clauses: Vec<String> = terms
+            .iter()
+            .filter_map(|term| to_phrase_query(term))
+            .collect();
+        if clauses.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT entity_kind, entity_id, title,
+                    snippet(search_index, 3, '[', ']', '…', 32) AS snippet,
+                    rank
+             FROM search_index
+             WHERE search_index MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![clauses.join(" OR "), limit], map_hit)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Search within a single entity kind.
     pub fn search_kind(&self, kind: &str, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
         let Some(fts_query) = to_phrase_query(query) else {
@@ -150,6 +184,66 @@ mod tests {
             .unwrap();
     }
 
+    /// The distinction retrieval depends on: a whole question is not a phrase anyone said.
+    #[test]
+    fn any_term_matching_finds_what_phrase_matching_cannot() {
+        let db = db();
+        seed(&db);
+        let search = SearchRepository::new(&db);
+
+        let question = "when are we doing the Postgres migration?";
+        assert!(
+            search.search(question, 10).unwrap().is_empty(),
+            "a question is not a stored phrase"
+        );
+
+        let terms = ["postgres".to_string(), "migration".to_string()];
+        assert!(!search.search_any(&terms, 10).unwrap().is_empty());
+    }
+
+    /// Documents containing more of the terms should rank above those containing fewer,
+    /// otherwise an OR query is just a long list of weak matches.
+    #[test]
+    fn more_matching_terms_ranks_higher() {
+        let db = db();
+        seed(&db);
+
+        let terms = [
+            "postgres".to_string(),
+            "migrate".to_string(),
+            "quarter".to_string(),
+        ];
+        let hits = SearchRepository::new(&db).search_any(&terms, 10).unwrap();
+
+        assert_eq!(
+            hits.first().map(|h| h.title.as_str()),
+            Some("Migration plan"),
+            "the note matches all three terms; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn term_matching_survives_punctuation_and_empty_input() {
+        let db = db();
+        seed(&db);
+        let search = SearchRepository::new(&db);
+
+        // Quotes and operators must be data, never syntax.
+        let hostile = [
+            "\"".to_string(),
+            "OR".to_string(),
+            "postgres".to_string(),
+            "NEAR(".to_string(),
+        ];
+        assert!(!search.search_any(&hostile, 10).unwrap().is_empty());
+
+        assert!(search.search_any(&[], 10).unwrap().is_empty());
+        assert!(search
+            .search_any(&["  ".to_string()], 10)
+            .unwrap()
+            .is_empty());
+    }
+
     #[test]
     fn finds_matches_across_every_indexed_kind() {
         let db = db();
@@ -227,7 +321,7 @@ mod tests {
             })
             .unwrap();
 
-        repo.delete(note.id).unwrap();
+        repo.purge(note.id).unwrap();
         assert_eq!(
             SearchRepository::new(&db)
                 .search("ephemeral", 10)

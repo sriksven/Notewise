@@ -397,6 +397,33 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_decisions_meeting ON decisions(meeting_id);
     CREATE INDEX idx_decisions_summary ON decisions(summary_id);
     "#,
+    // v7 — a recoverable delete for notes.
+    //
+    // A note is frequently the only copy of something a person typed, and the previous
+    // `DELETE FROM notes` was unrecoverable behind a single confirm dialog. Soft delete
+    // makes the destructive step reversible; emptying the trash is the irreversible one,
+    // and is now the only path that reaches `DELETE`.
+    //
+    // Only notes get this. Meetings own transcripts and audio and want a different
+    // conversation; tickets mirror external systems where deletion has to propagate. Adding
+    // a `deleted_at` to every table "for symmetry" would mean every query in the codebase
+    // grows a filter it does not need.
+    r#"
+    ALTER TABLE notes ADD COLUMN deleted_at TEXT;
+    -- Partial: the index exists to find the few trashed notes, not to catalogue the many
+    -- live ones. A full index here would be almost entirely NULLs.
+    CREATE INDEX idx_notes_deleted ON notes(deleted_at) WHERE deleted_at IS NOT NULL;
+
+    -- Trashing is an UPDATE, so without this the note would stay in the search index and
+    -- keep surfacing in results after the user deleted it. Restoring re-indexes it, because
+    -- that is an UPDATE too.
+    DROP TRIGGER notes_au;
+    CREATE TRIGGER notes_au AFTER UPDATE ON notes BEGIN
+        DELETE FROM search_index WHERE entity_kind = 'note' AND entity_id = old.id;
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        SELECT 'note', new.id, new.title, new.body WHERE new.deleted_at IS NULL;
+    END;
+    "#,
 ];
 
 /// Schema version this build understands.

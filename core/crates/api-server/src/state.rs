@@ -39,6 +39,8 @@ pub struct AppState {
     connectors: std::sync::RwLock<Arc<notewise_connectors::ConnectorRegistry>>,
     recording: RecordingManager,
     downloads: DownloadManager,
+    /// Agent runs, in memory. See [`crate::agent`] for why they are not persisted.
+    agents: crate::agent::AgentRegistry,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -61,6 +63,7 @@ impl AppState {
             )),
             recording: RecordingManager::new(),
             downloads: DownloadManager::new(),
+            agents: crate::agent::AgentRegistry::new(),
             speaker_timelines: Default::default(),
         }
     }
@@ -91,6 +94,11 @@ impl AppState {
     /// Model downloads, running and finished.
     pub fn downloads(&self) -> &DownloadManager {
         &self.downloads
+    }
+
+    /// Agent runs, running and finished.
+    pub fn agents(&self) -> &crate::agent::AgentRegistry {
+        &self.agents
     }
 
     /// Speaker events accumulated for meetings still in progress.

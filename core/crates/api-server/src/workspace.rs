@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router as AxumRouter};
 use chrono::{DateTime, Utc};
@@ -34,6 +34,12 @@ pub(crate) fn router() -> AxumRouter<Shared> {
             "/v1/notes/:id",
             get(get_note).put(update_note).delete(delete_note),
         )
+        .route("/v1/notes/:id/restore", post(restore_note))
+        // Registered before the `:id` routes above would ever match — axum's router is not
+        // order-sensitive for distinct literals, but `/v1/trash` and `/v1/notes/:id` do not
+        // overlap anyway. Kept adjacent to the notes block because that is what it holds.
+        .route("/v1/trash", get(list_trash).delete(empty_trash))
+        .route("/v1/meetings/:id/notes", get(meeting_notes))
         .route("/v1/tickets", post(create_ticket))
         .route(
             "/v1/tickets/:id",
@@ -117,19 +123,118 @@ async fn update_note(
     ))
 }
 
+/// Move a note to the trash, or destroy it.
+///
+/// Trashing is the default and `?purge=true` is the escape hatch, rather than the other way
+/// round: the destructive reading of `DELETE /v1/notes/:id` is the one a mistyped script or a
+/// stale client would reach for, and it should not be the one that loses work.
 async fn delete_note(
     State(state): State<Shared>,
     Path(id): Path<String>,
-) -> ApiResult<Json<Deleted>> {
+    Query(query): Query<DeleteNoteQuery>,
+) -> ApiResult<Json<notewise_storage::Note>> {
     let id = parse_id(&id)?;
     let db = state.db().await;
-    NoteRepository::new(&db).delete(id)?;
-    Ok(Json(Deleted { deleted: true }))
+    let repo = NoteRepository::new(&db);
+
+    if query.purge {
+        let note = repo.get(id)?;
+        // The edge table has no foreign keys, so nothing cascades for it. Without this the
+        // note's links survive it and point at a row that is gone.
+        Graph::new(&db).detach(NodeRef::new(NodeKind::Note, id))?;
+        repo.purge(id)?;
+        return Ok(Json(note));
+    }
+
+    Ok(Json(repo.trash(id)?))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DeleteNoteQuery {
+    /// Destroy the note instead of trashing it. Not undoable.
+    #[serde(default)]
+    purge: bool,
+}
+
+async fn restore_note(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<notewise_storage::Note>> {
+    let id = parse_id(&id)?;
+    let db = state.db().await;
+    Ok(Json(NoteRepository::new(&db).restore(id)?))
+}
+
+/// What is in the trash.
+///
+/// Notes only. Meetings own audio and transcripts and are not deleted from the UI at all;
+/// tickets mirror external trackers where a delete has to propagate rather than linger.
+async fn list_trash(State(state): State<Shared>) -> ApiResult<Json<Vec<notewise_storage::Note>>> {
+    let db = state.db().await;
+    Ok(Json(NoteRepository::new(&db).list_trashed()?))
+}
+
+async fn empty_trash(State(state): State<Shared>) -> ApiResult<Json<Emptied>> {
+    let db = state.db().await;
+    let repo = NoteRepository::new(&db);
+
+    // Detach before destroying, for the same reason as `purge` above. Collected first
+    // because the rows are gone by the time the delete returns.
+    let graph = Graph::new(&db);
+    for id in repo.trashed_ids()? {
+        graph.detach(NodeRef::new(NodeKind::Note, id))?;
+    }
+
+    Ok(Json(Emptied {
+        deleted: repo.empty_trash()?,
+    }))
 }
 
 #[derive(Debug, Serialize)]
+struct Emptied {
+    deleted: usize,
+}
+
+/// The acknowledgement returned by the delete endpoints that have nothing to hand back.
+#[derive(Debug, Serialize)]
 struct Deleted {
     deleted: bool,
+}
+
+/// The notes a user wrote against one meeting.
+///
+/// A graph edge rather than a `meeting_id` column, per the ownership rule: a note is not owned
+/// by the meeting it was taken in. It survives the meeting, can reference several, and can be
+/// unlinked without being destroyed.
+async fn meeting_notes(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<notewise_storage::Note>>> {
+    let meeting_id = parse_id(&id)?;
+    let db = state.db().await;
+
+    let related = Graph::new(&db).related_of_kind(
+        NodeRef::new(NodeKind::Meeting, meeting_id),
+        NodeKind::Note,
+        1,
+    )?;
+
+    let repo = NoteRepository::new(&db);
+    let mut notes = Vec::with_capacity(related.len());
+    for node in related {
+        // A note whose row is gone leaves a dangling edge only if something deleted it
+        // without detaching; skip rather than fail the whole list over one bad edge.
+        if let Ok(note) = repo.get(node.node.id) {
+            // Trashed notes stay out of the meeting's tab. They are reachable in the trash,
+            // which is where a user looks for something they deleted.
+            if note.deleted_at.is_none() {
+                notes.push(note);
+            }
+        }
+    }
+
+    notes.sort_by_key(|note| std::cmp::Reverse(note.updated_at));
+    Ok(Json(notes))
 }
 
 // ---------------------------------------------------------------- tickets
@@ -1335,5 +1440,209 @@ mod tests {
             after["enabled"], true,
             "erasing is not the same as switching off"
         );
+    }
+
+    // ------------------------------------------------------------ trash
+
+    async fn seed_note(state: &Arc<AppState>, title: &str) -> Id {
+        let db = state.db().await;
+        NoteRepository::new(&db)
+            .create(notewise_storage::NewNote {
+                project_id: None,
+                title: title.into(),
+                body: format!("body of {title}"),
+            })
+            .expect("note")
+            .id
+    }
+
+    fn delete(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("DELETE")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("request")
+    }
+
+    #[tokio::test]
+    async fn deleting_a_note_trashes_it_and_it_can_be_restored() {
+        let (app, state) = app();
+        let id = seed_note(&state, "Recoverable").await;
+
+        let (status, trashed) = call(&app, delete(&format!("/v1/notes/{id}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            !trashed["deleted_at"].is_null(),
+            "a plain DELETE should trash, not destroy: {trashed}"
+        );
+
+        let (_, trash) = call(&app, get("/v1/trash")).await;
+        assert_eq!(trash.as_array().expect("array").len(), 1);
+
+        let (status, restored) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/notes/{id}/restore"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(restored["deleted_at"].is_null());
+
+        let (_, trash) = call(&app, get("/v1/trash")).await;
+        assert!(trash.as_array().expect("array").is_empty());
+    }
+
+    /// The destructive reading of `DELETE` has to be asked for by name.
+    #[tokio::test]
+    async fn purge_destroys_the_note_outright() {
+        let (app, state) = app();
+        let id = seed_note(&state, "Doomed").await;
+
+        let (status, _) = call(&app, delete(&format!("/v1/notes/{id}?purge=true"))).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = call(&app, get(&format!("/v1/notes/{id}"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (_, trash) = call(&app, get("/v1/trash")).await;
+        assert!(
+            trash.as_array().expect("array").is_empty(),
+            "a purged note should not land in the trash"
+        );
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_destroys_what_is_in_it_and_nothing_else() {
+        let (app, state) = app();
+        let kept = seed_note(&state, "Kept").await;
+        let discarded = seed_note(&state, "Discarded").await;
+
+        call(&app, delete(&format!("/v1/notes/{discarded}"))).await;
+
+        let (status, body) = call(&app, delete("/v1/trash")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["deleted"], 1);
+
+        let (status, _) = call(&app, get(&format!("/v1/notes/{kept}"))).await;
+        assert_eq!(status, StatusCode::OK, "the live note should survive");
+        let (status, _) = call(&app, get(&format!("/v1/notes/{discarded}"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    /// Editing a trashed note must fail rather than quietly restore it — the notes editor
+    /// autosaves on a timer, so a save can land after the delete.
+    #[tokio::test]
+    async fn a_trashed_note_rejects_edits() {
+        let (app, state) = app();
+        let id = seed_note(&state, "Gone").await;
+        call(&app, delete(&format!("/v1/notes/{id}"))).await;
+
+        let (status, _) = call(
+            &app,
+            json_request(
+                "PUT",
+                &format!("/v1/notes/{id}"),
+                serde_json::json!({"title": "Back", "body": "resurrected"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (_, note) = call(&app, get(&format!("/v1/notes/{id}"))).await;
+        assert_eq!(note["title"], "Gone");
+        assert!(!note["deleted_at"].is_null());
+    }
+
+    // ------------------------------------------------------------ meeting notes
+
+    #[tokio::test]
+    async fn a_meeting_lists_the_notes_that_reference_it() {
+        let (app, state) = app();
+        let meeting = seed_meeting(&state, "Planning", 1_700_000_000).await;
+        let other = seed_meeting(&state, "Retro", 1_700_003_600).await;
+
+        let linked = seed_note(&state, "My notes").await;
+        let unlinked = seed_note(&state, "Unrelated").await;
+        {
+            let db = state.db().await;
+            Graph::new(&db)
+                .connect(
+                    NodeRef::new(NodeKind::Note, linked),
+                    EdgeKind::References,
+                    NodeRef::new(NodeKind::Meeting, meeting),
+                )
+                .expect("link");
+        }
+
+        let (status, notes) = call(&app, get(&format!("/v1/meetings/{meeting}/notes"))).await;
+        assert_eq!(status, StatusCode::OK);
+        let notes = notes.as_array().expect("array");
+        assert_eq!(notes.len(), 1, "only the linked note: {notes:?}");
+        assert_eq!(notes[0]["id"], linked.to_string());
+        assert_ne!(notes[0]["id"], unlinked.to_string());
+
+        let (_, none) = call(&app, get(&format!("/v1/meetings/{other}/notes"))).await;
+        assert!(none.as_array().expect("array").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_trashed_note_leaves_its_meeting_tab() {
+        let (app, state) = app();
+        let meeting = seed_meeting(&state, "Standup", 1_700_000_000).await;
+        let note = seed_note(&state, "Scratch").await;
+        {
+            let db = state.db().await;
+            Graph::new(&db)
+                .connect(
+                    NodeRef::new(NodeKind::Note, note),
+                    EdgeKind::References,
+                    NodeRef::new(NodeKind::Meeting, meeting),
+                )
+                .expect("link");
+        }
+
+        call(&app, delete(&format!("/v1/notes/{note}"))).await;
+
+        let (_, notes) = call(&app, get(&format!("/v1/meetings/{meeting}/notes"))).await;
+        assert!(
+            notes.as_array().expect("array").is_empty(),
+            "a trashed note should not show on the meeting"
+        );
+    }
+
+    /// Purging must take the note's edges with it. Nothing cascades for the edge table, so
+    /// without an explicit detach the meeting would keep listing a note that no longer exists.
+    #[tokio::test]
+    async fn purging_a_note_removes_its_edges() {
+        let (app, state) = app();
+        let meeting = seed_meeting(&state, "Kickoff", 1_700_000_000).await;
+        let note = seed_note(&state, "Doomed").await;
+        {
+            let db = state.db().await;
+            Graph::new(&db)
+                .connect(
+                    NodeRef::new(NodeKind::Note, note),
+                    EdgeKind::References,
+                    NodeRef::new(NodeKind::Meeting, meeting),
+                )
+                .expect("link");
+        }
+
+        call(&app, delete(&format!("/v1/notes/{note}?purge=true"))).await;
+
+        {
+            let db = state.db().await;
+            assert_eq!(
+                Graph::new(&db).edge_count().expect("count"),
+                0,
+                "the note's edge should have gone with it"
+            );
+        }
+
+        let (_, notes) = call(&app, get(&format!("/v1/meetings/{meeting}/notes"))).await;
+        assert!(notes.as_array().expect("array").is_empty());
     }
 }
