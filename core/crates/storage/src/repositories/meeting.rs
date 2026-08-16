@@ -48,6 +48,7 @@ impl<'a> MeetingRepository<'a> {
             series_id: None,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         };
 
         self.db.conn().execute(
@@ -83,8 +84,9 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
-             FROM meetings ORDER BY started_at DESC LIMIT ?1",
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
+                    deleted_at
+             FROM meetings WHERE deleted_at IS NULL ORDER BY started_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit], map_meeting)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -95,8 +97,9 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_in_project(&self, project_id: Id) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
-             FROM meetings WHERE project_id = ?1 ORDER BY started_at DESC",
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
+                    deleted_at
+             FROM meetings WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![project_id], map_meeting)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -108,8 +111,9 @@ impl<'a> MeetingRepository<'a> {
     pub fn list_active(&self) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
-             FROM meetings WHERE ended_at IS NULL ORDER BY started_at DESC",
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
+                    deleted_at
+             FROM meetings WHERE ended_at IS NULL AND deleted_at IS NULL ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map([], map_meeting)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -144,6 +148,57 @@ impl<'a> MeetingRepository<'a> {
         self.get(id)
     }
 
+    /// Move a meeting to the trash. Reversible with [`Self::restore`].
+    ///
+    /// The v10 trigger takes its transcript out of the search index as a side effect, so a
+    /// trashed meeting stops answering questions — including through the agent, which reads
+    /// search results.
+    pub fn trash(&self, id: Id) -> Result<Meeting> {
+        self.db.conn().execute(
+            "UPDATE meetings SET deleted_at = ?2, updated_at = ?2
+             WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id, Utc::now()],
+        )?;
+        // No `changed` check: zero rows means missing or already trashed, and `get`
+        // distinguishes them. Trashing twice keeps the first discard time.
+        self.get(id)
+    }
+
+    pub fn restore(&self, id: Id) -> Result<Meeting> {
+        self.db.conn().execute(
+            "UPDATE meetings SET deleted_at = NULL, updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, Utc::now()],
+        )?;
+        self.get(id)
+    }
+
+    /// What is in the trash, most recently discarded first.
+    pub fn list_trashed(&self) -> Result<Vec<Meeting>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
+                    deleted_at
+             FROM meetings WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+        )?;
+        let rows = stmt.query_map([], map_meeting)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
+    /// The ids in the trash, for a caller that must detach edges before destroying the rows.
+    pub fn trashed_ids(&self) -> Result<Vec<Id>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare("SELECT id FROM meetings WHERE deleted_at IS NOT NULL")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Destroy a meeting and everything that cascades from it: transcript, summaries,
+    /// decisions, action items, participants.
+    ///
+    /// Callers must detach its graph edges and drop its embeddings first — neither cascades,
+    /// because neither table has a foreign key that could.
     pub fn delete(&self, id: Id) -> Result<()> {
         let changed = self
             .db
@@ -294,7 +349,8 @@ impl<'a> MeetingRepository<'a> {
 }
 
 const SELECT_MEETING: &str =
-    "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at
+    "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
+                    deleted_at
      FROM meetings WHERE id = ?1";
 
 fn map_meeting(row: &Row<'_>) -> rusqlite::Result<Result<Meeting>> {
@@ -310,6 +366,7 @@ fn map_meeting(row: &Row<'_>) -> rusqlite::Result<Result<Meeting>> {
             series_id: row.get(6)?,
             created_at: row.get(7)?,
             updated_at: row.get(8)?,
+            deleted_at: row.get(9)?,
         })
     })())
 }

@@ -617,6 +617,11 @@ fn load(db: &Database, kind: &'static str, id: Id) -> Option<Passage> {
         "meeting" => {
             let repo = MeetingRepository::new(db);
             let meeting = repo.get(id).ok()?;
+            // Trashed meetings are excluded for the same reason trashed notes are: a user who
+            // deleted something does not expect it to keep informing answers.
+            if meeting.deleted_at.is_some() {
+                return None;
+            }
             Some(Passage {
                 kind,
                 id,

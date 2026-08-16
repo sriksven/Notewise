@@ -245,6 +245,8 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
 
     let mut pending = Vec::new();
 
+    // `list_recent` already excludes trashed meetings, so a deleted one stops being embedded.
+    // Its existing vectors are dropped when it is trashed — see the delete handler.
     let meetings = MeetingRepository::new(db);
     for meeting in meetings.list_recent(u32::MAX)? {
         let updated = meeting.ended_at.unwrap_or(meeting.started_at);

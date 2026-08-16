@@ -1,4 +1,5 @@
-import { PanelRightOpen, Square } from "lucide-react";
+import { useState } from "react";
+import { PanelRightOpen, Square, Trash2, X } from "lucide-react";
 
 import type { Meeting, Segment } from "../lib/api";
 
@@ -23,6 +24,13 @@ interface Props {
   /** Shown only when the panel is hidden, so re-opening it is never a dead end. */
   panelHidden: boolean;
   onShowPanel: () => void;
+  /**
+   * Move this meeting to the trash. Absent while it is recording.
+   *
+   * Recoverable, which is what makes the button defensible at all: a meeting owns its
+   * transcript, summaries, decisions and action items, and all of them go with it.
+   */
+  onDelete?: () => void;
 }
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -63,7 +71,9 @@ export function WorkspaceHeader({
   onStop,
   panelHidden,
   onShowPanel,
+  onDelete,
 }: Props) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const speakers = new Set(
     segments.map((segment) => segment.speaker).filter((name): name is string => name !== null),
   );
@@ -117,6 +127,49 @@ export function WorkspaceHeader({
             Stop
           </button>
         )}
+
+        {/* Two presses, not a modal. A dialog over the meeting is heavier than this deserves
+            now that the delete is reversible, and an inline confirm keeps what is about to go
+            on screen while you decide. */}
+        {onDelete &&
+          !isRecording &&
+          meeting &&
+          (confirmingDelete ? (
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className="text-[12px] text-ink-muted">Move to trash?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingDelete(false);
+                  onDelete();
+                }}
+                className="rounded-full bg-danger-line px-2.5 py-1 text-[12px] font-medium
+                           text-danger-text transition hover:opacity-90"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                aria-label="Cancel"
+                className="text-ink-faint transition hover:text-ink"
+              >
+                <X size={13} aria-hidden />
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              aria-label="Move this meeting to the trash"
+              title="Move to trash"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg
+                         border border-hairline bg-surface text-ink-muted transition
+                         hover:bg-overlay hover:text-danger-text"
+            >
+              <Trash2 size={13} aria-hidden />
+            </button>
+          ))}
 
         {panelHidden && (
           <button

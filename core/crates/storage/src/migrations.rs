@@ -499,6 +499,54 @@ const MIGRATIONS: &[&str] = &[
     INSERT INTO search_index(entity_kind, entity_id, title, body)
     SELECT 'transcript_segment', id, COALESCE(speaker, ''), text FROM transcript_segments;
     "#,
+    // v10 — a recoverable delete for meetings.
+    //
+    // Meetings were undeletable from the UI, which was defensible while there was no trash and
+    // no undo: a meeting owns its transcript, its summaries, its decisions and its action
+    // items, and every one of those cascades. Destroying all of it behind a single confirm
+    // dialog is not a button worth having.
+    //
+    // With a trash it becomes ordinary. The reversible step hides the meeting; the
+    // irreversible one is emptying the trash, and it is the only path that reaches a `DELETE`.
+    //
+    // The segment triggers are conditional on the *meeting's* state, which is why they need
+    // rewriting again one migration after v9. A trashed meeting whose lines stayed in the
+    // index would keep answering questions — including through the agent, which reads search
+    // results — after the user had deleted it. That is the same failure the v7 note trigger
+    // exists to prevent, one level up.
+    r#"
+    ALTER TABLE meetings ADD COLUMN deleted_at TEXT;
+    CREATE INDEX idx_meetings_deleted ON meetings(deleted_at) WHERE deleted_at IS NOT NULL;
+
+    -- Segments follow their meeting into and out of the trash. `segments_ai` gains the same
+    -- condition so importing into an already-trashed meeting cannot resurrect it in search.
+    DROP TRIGGER segments_ai;
+    CREATE TRIGGER segments_ai AFTER INSERT ON transcript_segments BEGIN
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        SELECT 'transcript_segment', new.id, COALESCE(new.speaker, ''), new.text
+         WHERE (SELECT deleted_at FROM meetings WHERE id = new.meeting_id) IS NULL;
+    END;
+
+    DROP TRIGGER segments_au;
+    CREATE TRIGGER segments_au AFTER UPDATE ON transcript_segments BEGIN
+        DELETE FROM search_index
+         WHERE entity_kind = 'transcript_segment' AND entity_id = old.id;
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        SELECT 'transcript_segment', new.id, COALESCE(new.speaker, ''), new.text
+         WHERE (SELECT deleted_at FROM meetings WHERE id = new.meeting_id) IS NULL;
+    END;
+
+    -- Trashing or restoring a meeting rewrites its segments' index entries in one statement.
+    CREATE TRIGGER meetings_au AFTER UPDATE OF deleted_at ON meetings BEGIN
+        DELETE FROM search_index
+         WHERE entity_kind = 'transcript_segment'
+           AND entity_id IN (SELECT id FROM transcript_segments WHERE meeting_id = new.id);
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        SELECT 'transcript_segment', id, COALESCE(speaker, ''), text
+          FROM transcript_segments
+         WHERE meeting_id = new.id AND new.deleted_at IS NULL;
+    END;
+    "#,
 ];
 
 /// Schema version this build understands.

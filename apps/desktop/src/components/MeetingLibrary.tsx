@@ -191,6 +191,7 @@ export function MeetingLibrary({ meetings, selectedId, recordingId, onSelect }: 
           source: "combined",
           started_at: new Date().toISOString(),
           ended_at: new Date().toISOString(),
+          deleted_at: null,
         } satisfies Meeting),
     }));
   }, [hits, meetings]);

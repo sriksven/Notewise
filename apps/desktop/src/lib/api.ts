@@ -216,6 +216,8 @@ export interface Meeting {
   source: string;
   started_at: string;
   ended_at: string | null;
+  /** When it was moved to the trash, or null while it is live. */
+  deleted_at: string | null;
 }
 
 export interface Segment {
@@ -774,7 +776,24 @@ export const api = {
   restoreNote: (id: string) =>
     request<Note>(`/v1/notes/${id}/restore`, { method: "POST" }),
 
-  trash: () => request<Note[]>("/v1/trash"),
+  /** Notes and meetings, kept apart: restoring a meeting brings a transcript back with it. */
+  trash: () => request<{ notes: Note[]; meetings: Meeting[] }>("/v1/trash"),
+
+  /**
+   * Move a meeting to the trash.
+   *
+   * Recoverable with {@link restoreMeeting}. Refused while that meeting is being recorded —
+   * deleting it out from under the capture pipeline is a crash with extra steps.
+   */
+  deleteMeeting: (id: string) =>
+    request<Meeting>(`/v1/meetings/${id}`, { method: "DELETE" }),
+
+  restoreMeeting: (id: string) =>
+    request<Meeting>(`/v1/meetings/${id}/restore`, { method: "POST" }),
+
+  /** Destroy a meeting for good, with its transcript, summaries, decisions and action items. */
+  purgeMeeting: (id: string) =>
+    request<Meeting>(`/v1/meetings/${id}?purge=true`, { method: "DELETE" }),
 
   /** Destroy one note for good. There is no undo behind this. */
   purgeNote: (id: string) =>

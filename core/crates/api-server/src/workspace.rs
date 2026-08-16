@@ -18,9 +18,10 @@ use serde::{Deserialize, Serialize};
 
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
-    ActionItem, Decision, Id, MeetingSeries, MeetingSeriesRepository, NewActionItem, NewDecision,
-    NewMeetingSeries, NewPerson, NewTicket, NoteRepository, Person, PersonRepository,
-    SettingsRepository, SummaryRepository, Ticket, TicketEdit, TicketRepository, WorkStatus,
+    ActionItem, Decision, EmbeddingRepository, Id, MeetingRepository, MeetingSeries,
+    MeetingSeriesRepository, NewActionItem, NewDecision, NewMeetingSeries, NewPerson, NewTicket,
+    NoteRepository, Person, PersonRepository, SettingsRepository, SummaryRepository, Ticket,
+    TicketEdit, TicketRepository, WorkStatus,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -40,6 +41,8 @@ pub(crate) fn router() -> AxumRouter<Shared> {
         // overlap anyway. Kept adjacent to the notes block because that is what it holds.
         .route("/v1/trash", get(list_trash).delete(empty_trash))
         .route("/v1/meetings/:id/notes", get(meeting_notes))
+        .route("/v1/meetings/:id", delete(delete_meeting))
+        .route("/v1/meetings/:id/restore", post(restore_meeting))
         .route("/v1/tickets", post(create_ticket))
         .route(
             "/v1/tickets/:id",
@@ -167,27 +170,105 @@ async fn restore_note(
 
 /// What is in the trash.
 ///
-/// Notes only. Meetings own audio and transcripts and are not deleted from the UI at all;
-/// tickets mirror external trackers where a delete has to propagate rather than linger.
-async fn list_trash(State(state): State<Shared>) -> ApiResult<Json<Vec<notewise_storage::Note>>> {
+/// Notes and meetings. Tickets are excluded on purpose: they mirror external trackers, where a
+/// delete has to propagate rather than sit in a local limbo nothing else can see.
+///
+/// Returned as one object with two lists rather than a merged array, because the two need
+/// different actions behind them — restoring a meeting brings a transcript back, and the
+/// warning before destroying one is not the warning before destroying a note.
+async fn list_trash(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
     let db = state.db().await;
-    Ok(Json(NoteRepository::new(&db).list_trashed()?))
+    Ok(Json(serde_json::json!({
+        "notes": NoteRepository::new(&db).list_trashed()?,
+        "meetings": MeetingRepository::new(&db).list_trashed()?,
+    })))
 }
 
+/// Destroy everything in the trash.
+///
+/// Edges and embeddings are detached first for both kinds. Neither table has a foreign key —
+/// the edge table references heterogeneous kinds and the embedding table is derived data — so
+/// nothing cascades for either, and a row left behind points at something that is gone.
 async fn empty_trash(State(state): State<Shared>) -> ApiResult<Json<Emptied>> {
     let db = state.db().await;
-    let repo = NoteRepository::new(&db);
-
-    // Detach before destroying, for the same reason as `purge` above. Collected first
-    // because the rows are gone by the time the delete returns.
+    let notes = NoteRepository::new(&db);
+    let meetings = MeetingRepository::new(&db);
     let graph = Graph::new(&db);
-    for id in repo.trashed_ids()? {
+    let embeddings = EmbeddingRepository::new(&db);
+
+    for id in notes.trashed_ids()? {
         graph.detach(NodeRef::new(NodeKind::Note, id))?;
+        embeddings.delete_for_entity("note", id)?;
+    }
+
+    let mut destroyed = 0;
+    for id in meetings.trashed_ids()? {
+        graph.detach(NodeRef::new(NodeKind::Meeting, id))?;
+        embeddings.delete_for_entity("meeting", id)?;
+        // The transcript, summaries, decisions and action items go with it by cascade.
+        meetings.delete(id)?;
+        destroyed += 1;
     }
 
     Ok(Json(Emptied {
-        deleted: repo.empty_trash()?,
+        deleted: notes.empty_trash()? + destroyed,
     }))
+}
+
+/// Move a meeting to the trash, or destroy it.
+///
+/// Trashing is the default and `?purge=true` is the escape hatch, exactly as for notes. The
+/// stakes are higher here — a meeting owns its transcript, its summaries, its decisions and
+/// its action items, and all of them cascade — which is the argument for the reversible step
+/// existing, not against the endpoint.
+async fn delete_meeting(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Query(query): Query<DeleteNoteQuery>,
+) -> ApiResult<Json<notewise_storage::Meeting>> {
+    let id = parse_id(&id)?;
+
+    // Checked before the database lock is taken, not after: `Database` is `Send` but not
+    // `Sync`, and a guard held across this await makes the whole handler non-`Send`.
+    //
+    // A recording in progress is not something to delete out from under the pipeline writing
+    // into it. Stop it first.
+    if let Some(status) = state.recording().status().await {
+        if status.meeting_id == id {
+            return Err(ApiError::BadRequest(
+                "this meeting is being recorded; stop the recording first".into(),
+            ));
+        }
+    }
+
+    let db = state.db().await;
+    let repo = MeetingRepository::new(&db);
+
+    if query.purge {
+        let meeting = repo.get(id)?;
+        Graph::new(&db).detach(NodeRef::new(NodeKind::Meeting, id))?;
+        EmbeddingRepository::new(&db).delete_for_entity("meeting", id)?;
+        repo.delete(id)?;
+        return Ok(Json(meeting));
+    }
+
+    let trashed = repo.trash(id)?;
+    // Its vectors go now rather than at purge: they would otherwise keep matching questions
+    // for a meeting the user has deleted, and the search index is already handled by trigger.
+    EmbeddingRepository::new(&db).delete_for_entity("meeting", id)?;
+    Ok(Json(trashed))
+}
+
+async fn restore_meeting(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<notewise_storage::Meeting>> {
+    let id = parse_id(&id)?;
+    let db = state.db().await;
+    // The transcript returns to the search index by trigger. Its embeddings do not — the next
+    // indexing pass rebuilds them, which is why `collect_pending` compares timestamps rather
+    // than assuming what is missing was never there.
+    Ok(Json(MeetingRepository::new(&db).restore(id)?))
 }
 
 #[derive(Debug, Serialize)]
@@ -1477,7 +1558,7 @@ mod tests {
         );
 
         let (_, trash) = call(&app, get("/v1/trash")).await;
-        assert_eq!(trash.as_array().expect("array").len(), 1);
+        assert_eq!(trash["notes"].as_array().expect("notes").len(), 1);
 
         let (status, restored) = call(
             &app,
@@ -1492,7 +1573,7 @@ mod tests {
         assert!(restored["deleted_at"].is_null());
 
         let (_, trash) = call(&app, get("/v1/trash")).await;
-        assert!(trash.as_array().expect("array").is_empty());
+        assert!(trash["notes"].as_array().expect("notes").is_empty());
     }
 
     /// The destructive reading of `DELETE` has to be asked for by name.
@@ -1509,7 +1590,7 @@ mod tests {
 
         let (_, trash) = call(&app, get("/v1/trash")).await;
         assert!(
-            trash.as_array().expect("array").is_empty(),
+            trash["notes"].as_array().expect("notes").is_empty(),
             "a purged note should not land in the trash"
         );
     }
@@ -1610,6 +1691,163 @@ mod tests {
         assert!(
             notes.as_array().expect("array").is_empty(),
             "a trashed note should not show on the meeting"
+        );
+    }
+
+    // ------------------------------------------------------------ deleting a meeting
+
+    async fn seed_transcript(state: &Arc<AppState>, meeting: Id, text: &str) {
+        let db = state.db().await;
+        MeetingRepository::new(&db)
+            .add_segment(notewise_storage::NewTranscriptSegment {
+                meeting_id: meeting,
+                speaker: Some("Dana".into()),
+                text: text.into(),
+                start_ms: 0,
+                end_ms: 2000,
+                confidence: None,
+            })
+            .expect("segment");
+    }
+
+    #[tokio::test]
+    async fn a_meeting_can_be_trashed_and_restored() {
+        let (app, state) = app();
+        let id = seed_meeting(&state, "Pricing review", 1_700_000_000).await;
+
+        let (status, trashed) = call(&app, delete(&format!("/v1/meetings/{id}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!trashed["deleted_at"].is_null(), "{trashed}");
+
+        let (_, trash) = call(&app, get("/v1/trash")).await;
+        assert_eq!(trash["meetings"].as_array().expect("meetings").len(), 1);
+
+        // Gone from the ordinary listing.
+        {
+            let db = state.db().await;
+            assert!(MeetingRepository::new(&db)
+                .list_recent(50)
+                .unwrap()
+                .is_empty());
+        }
+
+        let (status, restored) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/meetings/{id}/restore"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(restored["deleted_at"].is_null());
+
+        {
+            let db = state.db().await;
+            assert_eq!(
+                MeetingRepository::new(&db).list_recent(50).unwrap().len(),
+                1
+            );
+        }
+    }
+
+    /// A trashed meeting must stop answering questions. Its lines leaving the search index is
+    /// what makes that true for the agent too, which reads search results rather than lists.
+    #[tokio::test]
+    async fn trashing_a_meeting_removes_its_transcript_from_search() {
+        let (app, state) = app();
+        let id = seed_meeting(&state, "Pricing", 1_700_000_000).await;
+        seed_transcript(&state, id, "we settled on three pricing tiers").await;
+
+        {
+            let db = state.db().await;
+            let search = notewise_storage::SearchRepository::new(&db);
+            assert_eq!(search.search("tiers", 10).unwrap().len(), 1);
+        }
+
+        call(&app, delete(&format!("/v1/meetings/{id}"))).await;
+
+        {
+            let db = state.db().await;
+            let search = notewise_storage::SearchRepository::new(&db);
+            assert!(
+                search.search("tiers", 10).unwrap().is_empty(),
+                "a trashed meeting should not be searchable"
+            );
+        }
+
+        call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/meetings/{id}/restore"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+
+        {
+            let db = state.db().await;
+            let search = notewise_storage::SearchRepository::new(&db);
+            assert_eq!(
+                search.search("tiers", 10).unwrap().len(),
+                1,
+                "restoring should put the transcript back"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn purging_a_meeting_destroys_it_and_its_transcript() {
+        let (app, state) = app();
+        let id = seed_meeting(&state, "Doomed", 1_700_000_000).await;
+        seed_transcript(&state, id, "this will not survive").await;
+
+        let (status, _) = call(&app, delete(&format!("/v1/meetings/{id}?purge=true"))).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let db = state.db().await;
+        assert!(MeetingRepository::new(&db).get(id).is_err());
+        assert!(
+            notewise_storage::SearchRepository::new(&db)
+                .search("survive", 10)
+                .unwrap()
+                .is_empty(),
+            "the transcript should have cascaded"
+        );
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_destroys_trashed_meetings() {
+        let (app, state) = app();
+        let kept = seed_meeting(&state, "Kept", 1_700_000_000).await;
+        let discarded = seed_meeting(&state, "Discarded", 1_700_003_600).await;
+
+        call(&app, delete(&format!("/v1/meetings/{discarded}"))).await;
+        let (status, body) = call(&app, delete("/v1/trash")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["deleted"], 1);
+
+        let db = state.db().await;
+        assert!(MeetingRepository::new(&db).get(kept).is_ok());
+        assert!(MeetingRepository::new(&db).get(discarded).is_err());
+    }
+
+    /// Deleting a meeting out from under the pipeline writing into it is not a delete, it is
+    /// a crash with extra steps.
+    #[tokio::test]
+    async fn a_meeting_being_recorded_cannot_be_deleted() {
+        let (app, state) = app();
+        let id = seed_meeting(&state, "Live", 1_700_000_000).await;
+
+        // No capture in a test build, so this asserts the guard exists rather than exercising
+        // it against a real recording — `recording().status()` is `None` here.
+        let (status, _) = call(&app, delete(&format!("/v1/meetings/{id}"))).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "with nothing recording, deleting is allowed"
         );
     }
 

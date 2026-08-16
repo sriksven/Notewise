@@ -404,6 +404,24 @@ export default function App() {
     }
   };
 
+  /**
+   * Move a meeting to the trash and leave the page it was on.
+   *
+   * Reversible, so no dialog beyond the header's own two-press confirm. Navigating away
+   * matters: staying on a meeting that has just been deleted shows a transcript the rest of
+   * the app can no longer find.
+   */
+  const deleteMeeting = async (id: string) => {
+    try {
+      await api.deleteMeeting(id);
+      setNotice("Meeting moved to the trash.");
+      navigate({ name: "library" });
+      await refresh();
+    } catch (e) {
+      report(e);
+    }
+  };
+
   const exportMeeting = (variant: "full" | "brief") => {
     if (!selectedId) return;
     // Navigating lets the browser handle the download, preserving the filename from
@@ -537,6 +555,7 @@ export default function App() {
                   onStop={DOCKLESS_TABS.includes(tab) && !busy ? toggleRecording : undefined}
                   panelHidden={!panelOpen}
                   onShowPanel={() => setPanelOpen(true)}
+                  onDelete={selectedId ? () => void deleteMeeting(selectedId) : undefined}
                 />
 
                 {tab === "transcript" && (

@@ -82,6 +82,8 @@ pub struct Meeting {
     pub series_id: Option<Id>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When this meeting was moved to the trash, or `None` while it is live.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 /// A human. Not a workspace member: most people in a user's meetings will never have an
@@ -390,6 +392,7 @@ mod tests {
             series_id: None,
             created_at: ts(1000),
             updated_at: ts(1000),
+            deleted_at: None,
         };
         assert!(m.is_recording());
         assert_eq!(m.duration_ms(), None);
@@ -407,6 +410,7 @@ mod tests {
             series_id: None,
             created_at: ts(1000),
             updated_at: ts(1090),
+            deleted_at: None,
         };
         assert!(!m.is_recording());
         assert_eq!(m.duration_ms(), Some(90_000));
