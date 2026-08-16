@@ -492,6 +492,30 @@ export const api = {
       body: JSON.stringify({ kind, model, endpoint }),
     }),
 
+  /**
+   * Transcribe a file the user picked, by sending its bytes.
+   *
+   * A browser file picker never reveals where a file came from, so the path endpoint below
+   * cannot be driven from this window. Uploading is the price of a working "choose a file"
+   * button that needs no native dialog — and over loopback it is a local copy.
+   */
+  importUpload: (file: File, language?: string) =>
+    request<{
+      meeting_id: string;
+      segments: number;
+      speakers: number;
+      audio_ms: number;
+    }>("/v1/import/upload", {
+      method: "POST",
+      headers: {
+        // `content-type` is deliberately not JSON here; `request` sets it, so it is overridden.
+        "content-type": "application/octet-stream",
+        "x-notewise-filename": encodeURIComponent(file.name),
+        ...(language ? { "x-notewise-language": language } : {}),
+      },
+      body: file,
+    }),
+
   /** Transcribe a file already on this machine into a new meeting. */
   importAudio: (options: {
     path: string;

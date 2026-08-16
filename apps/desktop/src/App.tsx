@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle } from "lucide-react";
 
 import { IntelPanel } from "./components/IntelPanel";
@@ -310,18 +310,33 @@ export default function App() {
    * A path rather than a file upload: the engine runs on this machine, so uploading would copy
    * gigabytes through HTTP to reach a file that is already there.
    */
-  const importAudio = async () => {
-    const path = window.prompt("Path to an audio file on this machine:");
-    if (!path?.trim()) return;
+  /**
+   * Transcribe a file the user picks.
+   *
+   * A hidden `<input type="file">` driven by the menu item, because a browser picker is the only
+   * one available without a native dialog and the IPC that comes with it. It hands over bytes and
+   * never a path, so the file is uploaded — over loopback, which is a local copy.
+   *
+   * This replaced a `window.prompt` asking for an absolute path typed from memory.
+   */
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const importAudio = () => fileInput.current?.click();
+
+  const onFileChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset immediately so choosing the same file twice in a row still fires a change event.
+    event.target.value = "";
+    if (!file) return;
 
     setBusy(true);
     setError(null);
-    setNotice("Transcribing — this runs at about 25x realtime.");
+    setNotice(
+      `Transcribing ${file.name} — this runs at about 25x realtime, so a one-hour recording ` +
+        `takes a couple of minutes.`,
+    );
     try {
-      const result = await api.importAudio({
-        path: path.trim(),
-        language: language ?? undefined,
-      });
+      const result = await api.importUpload(file, language ?? undefined);
       select(result.meeting_id);
       setNotice(
         `Imported ${Math.round(result.audio_ms / 1000)}s of audio — ` +
@@ -353,6 +368,18 @@ export default function App() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Offscreen rather than hidden: a `display:none` input cannot be opened by a click
+          in some webviews, and this has to work in the one Tauri ships. */}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.aac,.webm"
+        onChange={(event) => void onFileChosen(event)}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+      />
+
       <Sidebar
         view={view}
         onChange={setView}

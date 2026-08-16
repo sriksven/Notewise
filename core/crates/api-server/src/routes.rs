@@ -25,6 +25,9 @@ use notewise_transcription::ModelRegistry;
 
 use axum::response::sse::Event;
 use futures_util::StreamExt;
+// Only used by the feature-gated upload path.
+#[cfg(all(feature = "record", feature = "whisper"))]
+use tokio::io::AsyncWriteExt;
 
 use crate::downloads::{DownloadState, DownloadStatus};
 use crate::error::{ApiError, ApiResult};
@@ -80,6 +83,12 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/languages", get(list_languages))
         .route("/v1/backend", post(switch_backend))
         .route("/v1/import", post(import_audio))
+        .route(
+            "/v1/import/upload",
+            // axum caps bodies at 2 MB by default, which no recording clears. The body is
+            // streamed straight to disk, so the ceiling bounds the file rather than memory.
+            post(import_upload).layer(axum::extract::DefaultBodyLimit::max(4 << 30)),
+        )
         .route("/v1/search", get(search))
         // Drafting only. There is deliberately no route that sends one — see `draft_emails`.
         .route(
@@ -218,81 +227,83 @@ struct DeviceBody {
 /// Returns an empty list rather than an error in a build without capture. A picker with nothing
 /// in it is self-explanatory; a 501 makes a client decide whether to show an error for a
 /// feature it may not even offer.
+#[cfg(feature = "record")]
 async fn list_devices() -> Json<serde_json::Value> {
-    #[cfg(feature = "record")]
-    {
-        use notewise_audio_capture::{CaptureKind, PermissionStatus};
+    use notewise_audio_capture::{CaptureKind, PermissionStatus};
 
-        // Asked before enumerating, because enumerating without the grant does not fail — it
-        // *hangs*. CoreAudio waits on a TCC decision that never arrives, the request never
-        // answers, and the picker sits empty forever showing "no devices found" while the real
-        // answer is "macOS will not tell you until you allow the microphone".
-        let permission = tokio::task::spawn_blocking(|| {
-            notewise_audio_capture::permission_status(CaptureKind::Microphone)
-        })
-        .await
-        .unwrap_or(PermissionStatus::NotRequested);
+    // Asked before enumerating, because enumerating without the grant does not fail — it
+    // *hangs*. CoreAudio waits on a TCC decision that never arrives, the request never
+    // answers, and the picker sits empty forever showing "no devices found" while the real
+    // answer is "macOS will not tell you until you allow the microphone".
+    let permission = tokio::task::spawn_blocking(|| {
+        notewise_audio_capture::permission_status(CaptureKind::Microphone)
+    })
+    .await
+    .unwrap_or(PermissionStatus::NotRequested);
 
-        if !matches!(permission, PermissionStatus::Granted) {
-            return Json(serde_json::json!({
-                "devices": [],
-                "available": true,
-                "error": "macOS does not list input devices until microphone access is allowed",
-            }));
-        }
-
-        // On a blocking thread even so. This is a synchronous CoreAudio call that can take
-        // hundreds of milliseconds with a Bluetooth device waking up, and holding a runtime
-        // worker for that stalls every other request.
-        //
-        // Bounded as well, because "granted" is what TCC believes and a wedged audio daemon is
-        // still possible. A picker that says it could not read the list is recoverable; a
-        // request that never returns is not.
-        let enumerated = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            tokio::task::spawn_blocking(notewise_audio_capture::input_devices),
-        )
-        .await;
-
-        return match enumerated {
-            Ok(Ok(Ok(devices))) => {
-                let devices: Vec<DeviceBody> = devices
-                    .into_iter()
-                    .map(|d| DeviceBody {
-                        name: d.name,
-                        is_default: d.is_default,
-                        sample_rate: d.sample_rate,
-                        channels: d.channels,
-                    })
-                    .collect();
-                Json(serde_json::json!({ "devices": devices, "available": true }))
-            }
-            // Reported rather than swallowed: an empty picker and a broken audio subsystem
-            // look identical to a user otherwise.
-            Ok(Ok(Err(e))) => {
-                tracing::warn!(error = %e, "could not enumerate input devices");
-                Json(serde_json::json!({
-                    "devices": [], "available": true, "error": e.to_string(),
-                }))
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(error = %e, "the device enumeration thread failed");
-                Json(serde_json::json!({
-                    "devices": [], "available": true, "error": "the audio system did not respond",
-                }))
-            }
-            Err(_) => {
-                tracing::warn!("timed out enumerating input devices");
-                Json(serde_json::json!({
-                    "devices": [],
-                    "available": true,
-                    "error": "the audio system did not answer in time",
-                }))
-            }
-        };
+    if !matches!(permission, PermissionStatus::Granted) {
+        return Json(serde_json::json!({
+            "devices": [],
+            "available": true,
+            "error": "macOS does not list input devices until microphone access is allowed",
+        }));
     }
 
-    #[cfg(not(feature = "record"))]
+    // On a blocking thread even so. This is a synchronous CoreAudio call that can take
+    // hundreds of milliseconds with a Bluetooth device waking up, and holding a runtime
+    // worker for that stalls every other request.
+    //
+    // Bounded as well, because "granted" is what TCC believes and a wedged audio daemon is
+    // still possible. A picker that says it could not read the list is recoverable; a
+    // request that never returns is not.
+    let enumerated = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(notewise_audio_capture::input_devices),
+    )
+    .await;
+
+    match enumerated {
+        Ok(Ok(Ok(devices))) => {
+            let devices: Vec<DeviceBody> = devices
+                .into_iter()
+                .map(|d| DeviceBody {
+                    name: d.name,
+                    is_default: d.is_default,
+                    sample_rate: d.sample_rate,
+                    channels: d.channels,
+                })
+                .collect();
+            Json(serde_json::json!({ "devices": devices, "available": true }))
+        }
+        // Reported rather than swallowed: an empty picker and a broken audio subsystem
+        // look identical to a user otherwise.
+        Ok(Ok(Err(e))) => {
+            tracing::warn!(error = %e, "could not enumerate input devices");
+            Json(serde_json::json!({
+                "devices": [], "available": true, "error": e.to_string(),
+            }))
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "the device enumeration thread failed");
+            Json(serde_json::json!({
+                "devices": [], "available": true, "error": "the audio system did not respond",
+            }))
+        }
+        Err(_) => {
+            tracing::warn!("timed out enumerating input devices");
+            Json(serde_json::json!({
+                "devices": [],
+                "available": true,
+                "error": "the audio system did not answer in time",
+            }))
+        }
+    }
+}
+
+/// Without capture compiled in there is nothing to enumerate, and saying so beats an empty
+/// list that looks like a machine with no microphone.
+#[cfg(not(feature = "record"))]
+async fn list_devices() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "devices": [], "available": false }))
 }
 
@@ -590,6 +601,166 @@ async fn import_audio(
          features"
             .into(),
     ))
+}
+
+/// Decode a percent-encoded header value.
+///
+/// Written here rather than taken as a dependency: this decodes one header, and the failure mode
+/// of a malformed escape is to keep the literal characters, which is what a file name containing
+/// a stray `%` should do anyway.
+#[cfg_attr(
+    not(all(feature = "record", feature = "whisper")),
+    allow(dead_code, reason = "only the upload path decodes a file name")
+)]
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(byte) = hex {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+
+    // Lossy rather than a rejection: a name that is not valid UTF-8 becomes a title with a
+    // replacement character in it, which beats refusing to import the audio.
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Transcribe an uploaded file.
+///
+/// The path endpoint above exists because the engine and the file are on the same machine, and
+/// for the CLI that is exactly right. A window cannot use it: a browser file picker hands over
+/// bytes and deliberately never reveals where they came from, so the only way to offer a real
+/// "choose a file" button without a native dialog and the IPC that comes with it is to accept
+/// the bytes.
+///
+/// The copy costs less than it sounds. This is loopback, and the alternative was a text box
+/// asking the user to type an absolute path from memory.
+///
+/// The body is the raw file. Not multipart: there is exactly one part, and hand-rolling a
+/// multipart parser to carry a filename that arrives in a header anyway would be work with no
+/// return.
+async fn import_upload(
+    State(state): State<Shared>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Body,
+) -> ApiResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    #[cfg(all(feature = "record", feature = "whisper"))]
+    {
+        // The name is for the meeting's title and the temp file's extension only; it never
+        // becomes a path. A caller sending `../../etc/passwd` gets a meeting with a silly name.
+        let supplied = headers
+            .get("x-notewise-filename")
+            .and_then(|v| v.to_str().ok())
+            // Percent-encoded by the client, because a header may only carry ASCII and a file
+            // name may not — "Réunion.wav" would otherwise arrive mangled or be dropped.
+            .map(percent_decode)
+            .map(|n| n.rsplit(['/', '\\']).next().unwrap_or(&n).to_string())
+            .filter(|n| !n.trim().is_empty());
+
+        let extension = supplied
+            .as_deref()
+            .and_then(|n| n.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()))
+            .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()) && ext.len() <= 8)
+            .unwrap_or_else(|| "wav".to_string());
+
+        // Written to a temp file the OS will clean up, then transcribed from disk — the decoder
+        // reads a file, and buffering a gigabyte of audio in memory to avoid one local write
+        // would be the worse trade.
+        let dir = std::env::temp_dir().join("notewise-imports");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| ApiError::Internal(format!("could not prepare the import folder: {e}")))?;
+
+        // Streamed to disk rather than collected first. An hour of 48 kHz stereo is well over
+        // a gigabyte, and buffering that in memory to write it out again would make importing a
+        // real meeting recording a way to exhaust the machine.
+        let path = dir.join(format!("{}.{extension}", Id::new()));
+        let mut file = tokio::fs::File::create(&path)
+            .await
+            .map_err(|e| ApiError::Internal(format!("could not stage the upload: {e}")))?;
+
+        let mut stream = body.into_data_stream();
+        let mut written: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| ApiError::BadRequest(format!("upload failed: {e}")))?;
+            written += chunk.len() as u64;
+            if let Err(e) = file.write_all(&chunk).await {
+                // Half a file on disk is worse than none: the decoder would read it as a
+                // truncated recording and produce a transcript that silently stops early.
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(ApiError::Internal(format!(
+                    "could not write the upload: {e}"
+                )));
+            }
+        }
+        file.flush()
+            .await
+            .map_err(|e| ApiError::Internal(format!("could not finish the upload: {e}")))?;
+        drop(file);
+
+        if written == 0 {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(ApiError::BadRequest("the upload is empty".into()));
+        }
+
+        let title = supplied.as_deref().map(|n| {
+            n.rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(n)
+                .to_string()
+        });
+
+        let result = crate::recording::import_file(
+            state.db_path().map(|p| p.to_path_buf()),
+            state.model_dir().to_path_buf(),
+            crate::recording::ImportRequest {
+                path: path.clone(),
+                title,
+                model: None,
+                language: headers
+                    .get("x-notewise-language")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string),
+            },
+        )
+        .await;
+
+        // Removed whether or not the import worked. A failed transcription must not leave the
+        // user's audio sitting in a temp folder they will never look in.
+        let _ = tokio::fs::remove_file(&path).await;
+        let result = result?;
+
+        Ok((
+            axum::http::StatusCode::CREATED,
+            Json(serde_json::json!({
+                "meeting_id": result.0,
+                "segments": result.1.segments,
+                "speakers": result.1.speakers,
+                "audio_ms": result.1.audio_ms,
+            })),
+        ))
+    }
+    #[cfg(not(all(feature = "record", feature = "whisper")))]
+    {
+        let _ = (state, headers, body);
+        Err(ApiError::NotImplemented(
+            "this build cannot transcribe: it was compiled without the 'record' and 'whisper' \
+             features"
+                .into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------- email drafts
@@ -2841,6 +3012,40 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn a_percent_encoded_filename_survives_the_header() {
+        // Headers are ASCII; file names are not. This is why the client encodes at all.
+        assert_eq!(
+            percent_decode("R%C3%A9union%20d%27%C3%A9quipe.wav"),
+            "Réunion d'équipe.wav"
+        );
+        assert_eq!(percent_decode("standup.wav"), "standup.wav");
+        assert_eq!(percent_decode(""), "");
+    }
+
+    /// A malformed escape keeps its characters rather than failing. A file genuinely called
+    /// "50%.wav" must import, not be rejected by its own name.
+    #[test]
+    fn a_stray_percent_is_kept_literally() {
+        assert_eq!(percent_decode("50%.wav"), "50%.wav");
+        assert_eq!(percent_decode("%zz.wav"), "%zz.wav");
+        assert_eq!(percent_decode("%"), "%");
+    }
+
+    /// The name reaches a meeting title and a temp file's extension, never a path. Even so, the
+    /// handler strips directories — a caller is not a file picker, and the cost of being wrong
+    /// here is writing outside the import folder.
+    #[test]
+    fn a_traversing_filename_cannot_escape() {
+        let decoded = percent_decode("..%2F..%2Fetc%2Fpasswd");
+        assert_eq!(decoded, "../../etc/passwd");
+
+        // What the handler does with it: take the last component only.
+        let stripped = decoded.rsplit(['/', '\\']).next().unwrap();
+        assert_eq!(stripped, "passwd");
+        assert!(!stripped.contains('/'), "no separator may survive");
     }
 
     /// The key must never come back out through the API.

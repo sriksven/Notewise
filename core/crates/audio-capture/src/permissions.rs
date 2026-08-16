@@ -173,17 +173,19 @@ fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
     // `os-capture`. Without that feature `unavailable_reason` has already returned, so this is
     // unreachable rather than merely unused — but it still has to compile.
     #[cfg(feature = "os-capture")]
-    {
-        return (!notewise_macos_permissions::can_hold_screen_recording()).then(|| {
-            "system audio needs a signed release build — macOS attaches screen recording to a \
-             verifiable app identity, and this build is ad-hoc signed, so it cannot be added in \
-             System Settings"
-                .to_string()
-        });
-    }
+    let signable = notewise_macos_permissions::can_hold_screen_recording();
 
+    // Without the capture feature `unavailable_reason` has already returned above, so this is
+    // unreachable rather than merely unused — but it still has to compile.
     #[cfg(not(feature = "os-capture"))]
-    None
+    let signable = true;
+
+    (!signable).then(|| {
+        "system audio needs a signed release build — macOS attaches screen recording to a \
+         verifiable app identity, and this build is ad-hoc signed, so it cannot be added in \
+         System Settings"
+            .to_string()
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
