@@ -34,7 +34,7 @@
 //! keeps only the order, which is the part both retrievers agree means something, and it needs
 //! no tuning: an entity both retrievers rank highly beats one that either ranks alone.
 
-use notewise_ai_router::cosine;
+use notewise_ai_router::{cosine, AiBackend, ChatMessage, ChatRequest, Role};
 use notewise_storage::EmbeddingRepository;
 
 use std::collections::BTreeMap;
@@ -446,6 +446,127 @@ fn assemble(
     }
 
     passages
+}
+
+// ---------------------------------------------------------------- relevance
+
+/// How much of a passage the relevance check sees.
+///
+/// Enough to judge whether it bears on the question, short enough that eight of them stay a
+/// cheap call. The full passage still goes to the answer — this is a filter, not a summary.
+const JUDGE_EXCERPT_CHARS: usize = 500;
+
+/// Drop the passages that do not actually bear on the question.
+///
+/// # Why a model call rather than a better threshold
+///
+/// Cosine similarity is not calibrated for relevance. It says which document is *nearer*, not
+/// whether any of them is *about* the question, and no threshold over it can answer the second
+/// question from the first. Measured on a real workspace: asking about Kubernetes scored 0.509
+/// against a meeting on pricing bands — higher than that same meeting scored against several
+/// questions it genuinely answered — because embeddings put anything shaped like a workplace
+/// discussion in the same neighbourhood.
+///
+/// Relative thresholds help when the corpus is large enough to have a background to measure
+/// against. On a small workspace there is none, and the nearest document is returned however
+/// unrelated it is. That is the case this closes.
+///
+/// What *is* calibrated for relevance is a language model, and there is already one
+/// configured. This is a reranker built from it: show it the candidates, keep what it says
+/// bears on the question.
+///
+/// # Fail open, always
+///
+/// A filter that cannot run returns everything. Every failure here — an unreachable model,
+/// an unparseable reply, a refusal — costs precision and never an answer, which is the right
+/// way round: over-citing is a nuisance, and losing the passage that held the answer is not.
+pub async fn keep_relevant(
+    state: &std::sync::Arc<crate::state::AppState>,
+    question: &str,
+    passages: Vec<Passage>,
+) -> Vec<Passage> {
+    // One candidate is still worth checking — the small-corpus failure returns exactly one.
+    // Zero is not.
+    if passages.is_empty() {
+        return passages;
+    }
+
+    let listing = passages
+        .iter()
+        .enumerate()
+        .map(|(index, passage)| {
+            format!(
+                "[{}] {} — {}\n{}",
+                index + 1,
+                passage.kind,
+                passage.title,
+                truncate(&passage.text, JUDGE_EXCERPT_CHARS)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let prompt = format!(
+        "A user asked: {question}\n\n\
+         Below are passages retrieved from their workspace. Some may have been retrieved \
+         only because they are vaguely similar in subject matter.\n\n\
+         {listing}\n\n\
+         Which passages contain information that helps answer the question? Reply with only \
+         the numbers, separated by commas — for example: 1, 3\n\
+         If none of them do, reply with exactly: none"
+    );
+
+    let request = ChatRequest::new(vec![ChatMessage {
+        role: Role::User,
+        content: prompt,
+    }]);
+
+    let Ok(response) = state.ai().chat(&request).await else {
+        tracing::debug!("relevance check unavailable; keeping every passage");
+        return passages;
+    };
+
+    match parse_relevance(&response.text, passages.len()) {
+        Some(keep) => passages
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| keep.contains(&(index + 1)))
+            .map(|(_, passage)| passage)
+            .collect(),
+        None => passages,
+    }
+}
+
+/// Read the judge's reply, or `None` if it cannot be read.
+///
+/// `None` and `Some(empty)` mean different things and the distinction is the whole point:
+/// unparseable means keep everything, an explicit "none" means the model looked and found
+/// nothing relevant, which is the answer this filter exists to get.
+pub fn parse_relevance(reply: &str, count: usize) -> Option<Vec<usize>> {
+    let lowered = reply.to_lowercase();
+
+    // Numbers first: a reply of "none of them except 2" contains a real answer, and treating
+    // the word "none" as decisive there would throw away the passage it just endorsed.
+    let numbers: Vec<usize> = lowered
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|piece| !piece.is_empty())
+        .filter_map(|piece| piece.parse::<usize>().ok())
+        .filter(|n| *n >= 1 && *n <= count)
+        .collect();
+
+    if !numbers.is_empty() {
+        let mut unique = numbers;
+        unique.sort_unstable();
+        unique.dedup();
+        return Some(unique);
+    }
+
+    if lowered.contains("none") {
+        return Some(Vec::new());
+    }
+
+    // Neither numbers nor a refusal — the model said something else entirely.
+    None
 }
 
 /// The `'static` name for a stored kind, or `None` for one this build does not render.
@@ -1044,6 +1165,53 @@ mod tests {
     #[test]
     fn a_middling_score_is_not_exempt_from_the_separation_test() {
         assert!(cutoff(&scores(&[0.60, 0.59, 0.58, 0.57, 0.56])).is_none());
+    }
+
+    // ------------------------------------------------------------ the relevance judge
+
+    #[test]
+    fn a_list_of_numbers_is_read() {
+        assert_eq!(parse_relevance("1, 3", 5), Some(vec![1, 3]));
+        assert_eq!(parse_relevance("2", 5), Some(vec![2]));
+        assert_eq!(parse_relevance("[1, 2, 4]", 5), Some(vec![1, 2, 4]));
+        assert_eq!(parse_relevance("Passages 1 and 4.", 5), Some(vec![1, 4]));
+    }
+
+    #[test]
+    fn numbers_come_back_sorted_and_deduplicated() {
+        assert_eq!(parse_relevance("3, 1, 3, 1", 5), Some(vec![1, 3]));
+    }
+
+    /// The distinction the whole filter rests on. An explicit "none" is the model having
+    /// looked and found nothing — the answer this exists to get. Unparseable is the model
+    /// having failed, and must keep everything instead.
+    #[test]
+    fn none_and_gibberish_mean_different_things() {
+        assert_eq!(parse_relevance("none", 3), Some(Vec::new()));
+        assert_eq!(parse_relevance("None.", 3), Some(Vec::new()));
+        assert_eq!(
+            parse_relevance("None of them are relevant.", 3),
+            Some(Vec::new())
+        );
+
+        assert_eq!(parse_relevance("I'm not sure what you mean", 3), None);
+        assert_eq!(parse_relevance("", 3), None);
+    }
+
+    /// "none of them except 2" contains a real answer, and treating the word as decisive
+    /// would discard the passage the model had just endorsed.
+    #[test]
+    fn a_number_wins_over_the_word_none() {
+        assert_eq!(parse_relevance("none of them except 2", 5), Some(vec![2]));
+    }
+
+    /// A hallucinated index would panic an unchecked filter or silently keep the wrong
+    /// passage; out of range is simply not a passage.
+    #[test]
+    fn out_of_range_numbers_are_discarded() {
+        assert_eq!(parse_relevance("1, 9, 42", 3), Some(vec![1]));
+        assert_eq!(parse_relevance("0", 3), None, "there is no passage zero");
+        assert_eq!(parse_relevance("7, 8", 3), None);
     }
 
     #[test]

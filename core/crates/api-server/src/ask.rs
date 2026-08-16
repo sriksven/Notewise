@@ -127,7 +127,14 @@ async fn chat_about_note(
     if wide {
         // Hybrid, so a note can be asked what the meetings said about it even when they said
         // it in different words. The database lock is taken and released inside.
-        let found = retrieval::gather_hybrid(&state, &question).await?;
+        // Filtered, because a workspace-scoped answer that cites something irrelevant is
+        // worse than one that says it found nothing.
+        let found = retrieval::keep_relevant(
+            &state,
+            &question,
+            retrieval::gather_hybrid(&state, &question).await?,
+        )
+        .await;
         // The note is already passage 1; drop it if retrieval finds it again, or the model is
         // shown the same text twice under two numbers.
         passages.extend(
@@ -137,7 +144,7 @@ async fn chat_about_note(
         );
     }
 
-    answer(&state, body.messages, passages).await
+    answer(&state, body.messages, passages, 0).await
 }
 
 /// Ask the workspace.
@@ -156,23 +163,40 @@ async fn ask_workspace(
         .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
         .to_string();
 
-    let passages = retrieval::gather_hybrid(&state, &question).await?;
+    let retrieved = retrieval::gather_hybrid(&state, &question).await?;
+    let considered = retrieved.len();
+    // Similarity says which document is nearest; it does not say whether any of them is about
+    // the question. See `retrieval::keep_relevant`.
+    let passages = retrieval::keep_relevant(&state, &question, retrieved).await;
 
     // Answered here rather than by the model. Handing a model an empty context block and
     // asking it to "answer only from the material" is asking it to notice an absence, which
     // is exactly the instruction models are worst at following.
     if passages.is_empty() {
+        // The two empty cases read very differently to a user, and conflating them hides the
+        // one they can act on: "found nothing" means try other words, while "found six and
+        // none of them answered it" means the material genuinely is not there.
+        let text = if considered == 0 {
+            "Nothing in this workspace matches that question. Try wording closer to what \
+             would actually have been said."
+                .to_string()
+        } else {
+            format!(
+                "Looked at {considered} passage{} and none of them answer that question.",
+                if considered == 1 { "" } else { "s" }
+            )
+        };
+
         return Ok(Json(serde_json::json!({
-            "text": "Nothing in this workspace matches that question. Search is by word, \
-                     so a different wording — or a term that would actually appear in the \
-                     transcript — may find it.",
+            "text": text,
             "model": state.ai().model_id(),
             "citations": [],
             "grounded": false,
+            "considered": considered,
         })));
     }
 
-    answer(&state, body.messages, passages).await
+    answer(&state, body.messages, passages, considered).await
 }
 
 /// Run the model against assembled passages and return the answer with its citations.
@@ -180,6 +204,7 @@ async fn answer(
     state: &Shared,
     messages: Vec<Turn>,
     passages: Vec<Passage>,
+    considered: usize,
 ) -> ApiResult<Json<serde_json::Value>> {
     let context = vec![format!(
         "{}\n\n{}",
@@ -194,6 +219,10 @@ async fn answer(
         "text": response.text,
         "model": response.model,
         "citations": retrieval::citations(&passages),
+        // How many passages retrieval produced before the relevance filter. Reported so a
+        // client can tell "found nothing" from "found six and discarded them", and so this is
+        // diagnosable without attaching a debugger to a model call.
+        "considered": considered.max(passages.len()),
         // Whether there was any material behind this answer at all.
         //
         // Derived from the passages rather than from whether a *search* ran. Those are not the

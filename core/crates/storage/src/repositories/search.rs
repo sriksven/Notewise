@@ -184,6 +184,62 @@ mod tests {
             .unwrap();
     }
 
+    /// Who said something is searchable.
+    ///
+    /// It was not until v9: the segment trigger wrote an empty title, so a speaker's name only
+    /// ever matched when somebody else said it out loud. "What did Alex commit to?" is one of
+    /// the most natural questions to put to a transcript.
+    #[test]
+    fn a_speaker_name_finds_what_they_said() {
+        let db = db();
+        seed(&db);
+
+        let hits = SearchRepository::new(&db).search("Alex", 10).unwrap();
+        assert_eq!(hits.len(), 1, "got {hits:?}");
+        assert_eq!(hits[0].entity_kind, "transcript_segment");
+        assert!(hits[0].snippet.contains("Postgres"), "{hits:?}");
+    }
+
+    /// Attribution arrives after the segment does — diarization assigns it when a recording
+    /// ends, and the extension can name someone later still. Without an UPDATE trigger every
+    /// name assigned after the fact stayed invisible.
+    #[test]
+    fn a_speaker_named_after_the_fact_becomes_searchable() {
+        let db = db();
+        let meetings = MeetingRepository::new(&db);
+        let meeting = meetings
+            .create(NewMeeting {
+                project_id: None,
+                title: "Sync".into(),
+                source: MeetingSource::Microphone,
+                started_at: Utc.timestamp_opt(1_700_000_000, 0).single().unwrap(),
+            })
+            .unwrap();
+
+        // Anonymous at first, as a live recording is.
+        let segment = meetings
+            .add_segment(NewTranscriptSegment {
+                meeting_id: meeting.id,
+                speaker: None,
+                text: "I will take the migration script.".into(),
+                start_ms: 0,
+                end_ms: 3000,
+                confidence: None,
+            })
+            .unwrap();
+
+        let search = SearchRepository::new(&db);
+        assert!(search.search("Priya", 10).unwrap().is_empty());
+
+        meetings.set_segment_speaker(segment.id, "Priya").unwrap();
+
+        assert_eq!(
+            search.search("Priya", 10).unwrap().len(),
+            1,
+            "a name assigned after the segment must reach the index"
+        );
+    }
+
     /// The distinction retrieval depends on: a whole question is not a phrase anyone said.
     #[test]
     fn any_term_matching_finds_what_phrase_matching_cannot() {

@@ -465,6 +465,40 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_embeddings_entity ON embeddings(entity_kind, entity_id);
     CREATE INDEX idx_embeddings_model  ON embeddings(model);
     "#,
+    // v9 — put the speaker in the search index.
+    //
+    // Since v3 the segment triggers have written `''` into the indexed `title` column and only
+    // `new.text` into the body, so **who said something has never been searchable**. "What did
+    // Sam commit to?" found nothing unless another speaker happened to say the word "Sam" out
+    // loud. That is one of the most natural questions to put to a transcript, and it is the
+    // one piece of structure a transcript has that prose does not.
+    //
+    // The missing UPDATE trigger matters as much as the wrong INSERT one. Speaker attribution
+    // arrives *after* the segment does — diarization assigns it when a recording ends, and the
+    // browser extension can name someone later still — so a segment indexed at insert with no
+    // speaker would never pick one up. Without `segments_au`, every name assigned after the
+    // fact was invisible to search.
+    r#"
+    DROP TRIGGER segments_ai;
+    CREATE TRIGGER segments_ai AFTER INSERT ON transcript_segments BEGIN
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        VALUES ('transcript_segment', new.id, COALESCE(new.speaker, ''), new.text);
+    END;
+
+    CREATE TRIGGER segments_au AFTER UPDATE ON transcript_segments BEGIN
+        DELETE FROM search_index
+         WHERE entity_kind = 'transcript_segment' AND entity_id = old.id;
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        VALUES ('transcript_segment', new.id, COALESCE(new.speaker, ''), new.text);
+    END;
+
+    -- Rebuild what the old triggers wrote. Delete-then-insert rather than UPDATE: an FTS5
+    -- table stores a tokenized index rather than the row, and replacing the entry is the
+    -- documented way to change one.
+    DELETE FROM search_index WHERE entity_kind = 'transcript_segment';
+    INSERT INTO search_index(entity_kind, entity_id, title, body)
+    SELECT 'transcript_segment', id, COALESCE(speaker, ''), text FROM transcript_segments;
+    "#,
 ];
 
 /// Schema version this build understands.
