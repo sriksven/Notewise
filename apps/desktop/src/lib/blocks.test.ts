@@ -1,0 +1,326 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  blockAfter,
+  emptyDocument,
+  isListItem,
+  newBlock,
+  parse,
+  serialize,
+  shortcutFor,
+  toPlainText,
+  type Block,
+  type BlockType,
+} from "./blocks";
+
+/** Blocks without their ids, which are not persisted and not part of the document. */
+function shape(blocks: Block[]): Array<Omit<Block, "id">> {
+  return blocks.map(({ id: _id, ...rest }) => rest);
+}
+
+describe("parse", () => {
+  it("reads a plain paragraph", () => {
+    expect(shape(parse("Just some text."))).toEqual([
+      { type: "paragraph", text: "Just some text." },
+    ]);
+  });
+
+  it("reads the three heading levels", () => {
+    expect(shape(parse("# One\n\n## Two\n\n### Three"))).toEqual([
+      { type: "heading1", text: "One" },
+      { type: "heading2", text: "Two" },
+      { type: "heading3", text: "Three" },
+    ]);
+  });
+
+  it("reads bullets written with either marker", () => {
+    expect(shape(parse("- dash\n* star"))).toEqual([
+      { type: "bullet", text: "dash" },
+      { type: "bullet", text: "star" },
+    ]);
+  });
+
+  // Ordering in the rule table: the todo forms have to be tried before the plain bullet, or
+  // `- [ ] thing` parses as a bullet whose text is `[ ] thing`.
+  it("reads checked and unchecked todos", () => {
+    expect(shape(parse("- [ ] open\n- [x] done\n- [X] also done"))).toEqual([
+      { type: "todo", text: "open", checked: false },
+      { type: "todo", text: "done", checked: true },
+      { type: "todo", text: "also done", checked: true },
+    ]);
+  });
+
+  it("reads numbered items written with a dot or a bracket", () => {
+    expect(shape(parse("1. first\n2) second"))).toEqual([
+      { type: "numbered", text: "first" },
+      { type: "numbered", text: "second" },
+    ]);
+  });
+
+  it("reads quotes with or without a space", () => {
+    expect(shape(parse("> spaced\n>tight"))).toEqual([
+      { type: "quote", text: "spaced" },
+      { type: "quote", text: "tight" },
+    ]);
+  });
+
+  it("reads a fenced code block whole", () => {
+    const blocks = parse("```\nlet x = 1;\nlet y = 2;\n```");
+    expect(shape(blocks)).toEqual([{ type: "code", text: "let x = 1;\nlet y = 2;" }]);
+  });
+
+  // A `# comment` in a shell snippet is a comment, not a heading.
+  it("does not parse markers inside code", () => {
+    const blocks = parse("```\n# not a heading\n- not a bullet\n```");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("code");
+    expect(blocks[0].text).toBe("# not a heading\n- not a bullet");
+  });
+
+  it("closes an unterminated code fence at the end of input", () => {
+    const blocks = parse("```\nno closing fence");
+    expect(shape(blocks)).toEqual([{ type: "code", text: "no closing fence" }]);
+  });
+
+  it("reads the divider forms", () => {
+    for (const line of ["---", "***", "___", "- - -"]) {
+      expect(shape(parse(line))).toEqual([{ type: "divider", text: "" }]);
+    }
+  });
+
+  it("treats blank lines as separators rather than blocks", () => {
+    expect(parse("one\n\n\n\ntwo")).toHaveLength(2);
+  });
+
+  // Every note written before the block editor existed is plain text.
+  it("opens a document written as plain prose", () => {
+    const legacy = "Some thoughts.\n\nAnd a second paragraph.";
+    expect(shape(parse(legacy))).toEqual([
+      { type: "paragraph", text: "Some thoughts." },
+      { type: "paragraph", text: "And a second paragraph." },
+    ]);
+  });
+
+  it("gives an empty document one block to type into", () => {
+    for (const input of ["", "   ", "\n\n"]) {
+      const blocks = parse(input);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe("paragraph");
+      expect(blocks[0].text).toBe("");
+    }
+  });
+
+  it("normalises Windows line endings", () => {
+    expect(shape(parse("one\r\ntwo"))).toEqual([
+      { type: "paragraph", text: "one" },
+      { type: "paragraph", text: "two" },
+    ]);
+  });
+
+  it("leaves inline formatting as literal text", () => {
+    // The editor is a block parser; what is inside a line is the user's business.
+    expect(shape(parse("some **bold** and `code`"))).toEqual([
+      { type: "paragraph", text: "some **bold** and `code`" },
+    ]);
+  });
+
+  it("gives every block a distinct id", () => {
+    const blocks = parse("one\n\ntwo\n\nthree");
+    expect(new Set(blocks.map((b) => b.id)).size).toBe(3);
+  });
+});
+
+describe("serialize", () => {
+  it("writes each type with its marker", () => {
+    const blocks: Block[] = [
+      newBlock("heading1", "Title"),
+      newBlock("paragraph", "Text."),
+      newBlock("bullet", "point"),
+      newBlock("quote", "said"),
+    ];
+    expect(serialize(blocks)).toBe("# Title\n\nText.\n\n- point\n\n> said\n");
+  });
+
+  it("writes a todo's state", () => {
+    const open = newBlock("todo", "open");
+    const done: Block = { ...newBlock("todo", "done"), checked: true };
+    expect(serialize([open, done])).toBe("- [ ] open\n- [x] done\n");
+  });
+
+  // A blank line between list items breaks the list in most renderers.
+  it("keeps consecutive list items adjacent", () => {
+    const blocks = [newBlock("bullet", "a"), newBlock("bullet", "b"), newBlock("bullet", "c")];
+    expect(serialize(blocks)).toBe("- a\n- b\n- c\n");
+  });
+
+  it("separates blocks of different types", () => {
+    const blocks = [newBlock("bullet", "a"), newBlock("paragraph", "b")];
+    expect(serialize(blocks)).toBe("- a\n\nb\n");
+  });
+
+  /**
+   * Renumbered from position rather than preserving what was typed: a reordered list should
+   * read 1, 2, 3, and every Markdown renderer renumbers anyway — keeping the original digits
+   * would make the file disagree with every view of it.
+   */
+  it("renumbers a numbered list from its position", () => {
+    const blocks = [
+      newBlock("numbered", "first"),
+      newBlock("numbered", "second"),
+      newBlock("numbered", "third"),
+    ];
+    expect(serialize(blocks)).toBe("1. first\n2. second\n3. third\n");
+  });
+
+  it("restarts numbering after an interruption", () => {
+    const blocks = [
+      newBlock("numbered", "a"),
+      newBlock("numbered", "b"),
+      newBlock("paragraph", "aside"),
+      newBlock("numbered", "c"),
+    ];
+    expect(serialize(blocks)).toBe("1. a\n2. b\n\naside\n\n1. c\n");
+  });
+
+  it("fences code", () => {
+    expect(serialize([newBlock("code", "let x = 1;")])).toBe("```\nlet x = 1;\n```\n");
+  });
+
+  it("ends with exactly one newline", () => {
+    const out = serialize([newBlock("paragraph", "text")]);
+    expect(out).toBe("text\n");
+    expect(out.endsWith("\n\n")).toBe(false);
+  });
+
+  it("writes an empty document as almost nothing", () => {
+    expect(serialize(emptyDocument()).trim()).toBe("");
+  });
+});
+
+describe("round-tripping", () => {
+  /**
+   * The invariant the editor rests on: whatever is on screen survives a save and a reload.
+   * `serialize(parse(x)) === x` is deliberately *not* claimed — `*` bullets become `-` — but
+   * the block direction must be exact.
+   */
+  it("preserves blocks through a save and a load", () => {
+    const original: Block[] = [
+      newBlock("heading1", "Meeting notes"),
+      newBlock("paragraph", "We covered three things."),
+      newBlock("bullet", "pricing"),
+      newBlock("bullet", "hiring"),
+      { ...newBlock("todo", "send the summary"), checked: false },
+      { ...newBlock("todo", "book the room"), checked: true },
+      newBlock("numbered", "first"),
+      newBlock("numbered", "second"),
+      newBlock("quote", "we should ship Friday"),
+      newBlock("code", "cargo test --workspace"),
+      newBlock("divider"),
+      newBlock("heading3", "Afterwards"),
+      newBlock("paragraph", "Nothing else."),
+    ];
+
+    expect(shape(parse(serialize(original)))).toEqual(shape(original));
+  });
+
+  it("is stable across repeated saves", () => {
+    const once = serialize(parse("# Title\n\n- a\n- b\n\n1. x\n2. y\n"));
+    expect(serialize(parse(once))).toBe(once);
+  });
+
+  it("survives text containing marker-like characters", () => {
+    const tricky: Block[] = [
+      newBlock("paragraph", "3 - 2 = 1"),
+      newBlock("paragraph", "a # b"),
+      newBlock("paragraph", "> not a quote because it is mid-line"),
+    ];
+    // The third *will* re-read as a quote — a line starting with `>` is a quote by definition,
+    // and that is Markdown's rule rather than a bug in the parser.
+    const reread = shape(parse(serialize(tricky)));
+    expect(reread[0]).toEqual({ type: "paragraph", text: "3 - 2 = 1" });
+    expect(reread[1]).toEqual({ type: "paragraph", text: "a # b" });
+  });
+
+  it("preserves multi-line code exactly", () => {
+    const code = newBlock("code", "line one\n  indented\n\nafter a blank");
+    expect(shape(parse(serialize([code])))).toEqual([
+      { type: "code", text: "line one\n  indented\n\nafter a blank" },
+    ]);
+  });
+});
+
+describe("shortcutFor", () => {
+  it("recognises the markers as they are typed", () => {
+    const cases: Array<[string, BlockType]> = [
+      ["# ", "heading1"],
+      ["## ", "heading2"],
+      ["### ", "heading3"],
+      ["- ", "bullet"],
+      ["* ", "bullet"],
+      ["1. ", "numbered"],
+      ["3) ", "numbered"],
+      ["> ", "quote"],
+      ["[] ", "todo"],
+      ["[ ] ", "todo"],
+      ["```", "code"],
+      ["---", "divider"],
+    ];
+
+    for (const [typed, type] of cases) {
+      expect(shortcutFor(typed), typed).toEqual({ type, rest: "" });
+    }
+  });
+
+  it("does not fire on ordinary text", () => {
+    for (const text of ["hello", "#hashtag", "-dash", "1.5", "a - b", ""]) {
+      expect(shortcutFor(text), text).toBeNull();
+    }
+  });
+});
+
+describe("blockAfter", () => {
+  // What every editor does, and what makes a list usable.
+  it("continues a list", () => {
+    for (const type of ["bullet", "numbered", "todo"] as BlockType[]) {
+      expect(blockAfter(newBlock(type, "something")).type).toBe(type);
+    }
+  });
+
+  // Pressing Enter twice is how a list is escaped without reaching for the mouse.
+  it("ends a list when the item is empty", () => {
+    for (const type of ["bullet", "numbered", "todo"] as BlockType[]) {
+      expect(blockAfter(newBlock(type, "")).type).toBe("paragraph");
+      expect(blockAfter(newBlock(type, "   ")).type).toBe("paragraph");
+    }
+  });
+
+  it("does not continue a heading or a quote", () => {
+    expect(blockAfter(newBlock("heading1", "Title")).type).toBe("paragraph");
+    expect(blockAfter(newBlock("quote", "said")).type).toBe("paragraph");
+  });
+
+  it("gives a new todo an unchecked state", () => {
+    const next = blockAfter(newBlock("todo", "done thing"));
+    expect(next.checked).toBe(false);
+  });
+});
+
+describe("helpers", () => {
+  it("knows which types are list items", () => {
+    expect(isListItem("bullet")).toBe(true);
+    expect(isListItem("numbered")).toBe(true);
+    expect(isListItem("todo")).toBe(true);
+    expect(isListItem("paragraph")).toBe(false);
+    expect(isListItem("heading1")).toBe(false);
+  });
+
+  it("strips markers and empties for a plain-text view", () => {
+    const blocks = [
+      newBlock("heading1", "Title"),
+      newBlock("divider"),
+      newBlock("paragraph", ""),
+      newBlock("bullet", "point"),
+    ];
+    expect(toPlainText(blocks)).toBe("Title\npoint");
+  });
+});

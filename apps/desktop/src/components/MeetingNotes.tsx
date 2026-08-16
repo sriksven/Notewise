@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, Plus } from "lucide-react";
 
+import { BlockEditor } from "./BlockEditor";
+import { parse, serialize, type Block } from "../lib/blocks";
 import { api, ApiError, type Note } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import type { Route } from "../lib/router";
@@ -35,7 +37,7 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
 export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [body, setBody] = useState("");
+  const [blocks, setBlocks] = useState<Block[]>(() => parse(""));
   const [save, setSave] = useState<SaveState>("idle");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     if (!meetingId) {
       setNotes([]);
       setSelectedId(null);
-      setBody("");
+      setBlocks(parse(""));
       setLoading(false);
       return;
     }
@@ -63,7 +65,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
       // Open the most recent, which is what `meetingNotes` returns first.
       const first = loaded[0] ?? null;
       setSelectedId(first?.id ?? null);
-      setBody(first?.body ?? "");
+      setBlocks(parse(first?.body ?? ""));
       persisted.current = first?.body ?? "";
       setError(null);
     } catch (e) {
@@ -131,6 +133,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     if (timer.current) clearTimeout(timer.current);
 
     timer.current = setTimeout(() => {
+      const body = serialize(blocks);
       if (selectedId) void flush(selectedId, selected?.title ?? "Meeting notes", body);
       else if (body.trim()) void createFirst(body);
     }, AUTOSAVE_MS);
@@ -138,14 +141,14 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [meetingId, selectedId, body, selected?.title, flush, createFirst]);
+  }, [meetingId, selectedId, blocks, selected?.title, flush, createFirst]);
 
   const addAnother = async () => {
     if (!meetingId) return;
     // Flush the current note first, or the pending edit dies with the timer.
     if (selectedId) {
       if (timer.current) clearTimeout(timer.current);
-      await flush(selectedId, selected?.title ?? "Meeting notes", body);
+      await flush(selectedId, selected?.title ?? "Meeting notes", serialize(blocks));
     }
     try {
       const note = await api.createMeetingNote(meetingId, {
@@ -154,7 +157,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
       });
       setNotes((current) => [note, ...current]);
       setSelectedId(note.id);
-      setBody("");
+      setBlocks(parse(""));
       persisted.current = "";
       setSave("idle");
     } catch (e) {
@@ -165,10 +168,10 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
   const open = async (note: Note) => {
     if (selectedId && selectedId !== note.id) {
       if (timer.current) clearTimeout(timer.current);
-      await flush(selectedId, selected?.title ?? "Meeting notes", body);
+      await flush(selectedId, selected?.title ?? "Meeting notes", serialize(blocks));
     }
     setSelectedId(note.id);
-    setBody(note.body);
+    setBlocks(parse(note.body));
     persisted.current = note.body;
     setSave("idle");
   };
@@ -245,22 +248,24 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
           Loading
         </p>
       ) : (
-        <textarea
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-8 py-5"
           onBlur={() => {
+            const body = serialize(blocks);
             if (selectedId) void flush(selectedId, selected?.title ?? "Meeting notes", body);
             else if (body.trim()) void createFirst(body);
           }}
-          placeholder={
-            isRecording
-              ? "Type while it runs. Saved automatically."
-              : "Your own notes on this meeting. Markdown, saved automatically."
-          }
-          aria-label="Meeting notes"
-          className="min-h-0 flex-1 resize-none bg-transparent px-8 py-5 text-[14px]
-                     leading-relaxed text-ink outline-none placeholder:text-ink-faint"
-        />
+        >
+          <BlockEditor
+            blocks={blocks}
+            onChange={setBlocks}
+            placeholder={
+              isRecording
+                ? "Type while it runs. Saved automatically."
+                : "Your own notes on this meeting. Press / for blocks."
+            }
+          />
+        </div>
       )}
 
       {error && (

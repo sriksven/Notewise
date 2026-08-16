@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, MessageCircleQuestion, Plus, Trash2 } from "lucide-react";
 
+import { BlockEditor } from "../components/BlockEditor";
 import { NoteChat } from "../components/NoteChat";
+import { parse, serialize, type Block } from "../lib/blocks";
 import { api, ApiError, type Note } from "../lib/api";
 import type { Route } from "../lib/router";
 
@@ -26,8 +28,8 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
  * The workspace's notes.
  *
  * `body` is opaque to the engine — storage treats it as text precisely so the editor format
- * can change without a migration. This is a plain Markdown textarea for now; the roadmap's
- * block editor can replace it without the schema noticing.
+ * could change without a migration. It did: this is a block editor now, and the schema did not
+ * notice, because what it writes is still Markdown.
  *
  * Autosaves rather than asking the user to press save. A notes pane that can lose work is one
  * people stop trusting with anything that matters, and an explicit save button is a promise
@@ -37,7 +39,14 @@ export function NotesView({ noteId, onNavigate }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  /**
+   * The document, as blocks.
+   *
+   * Markdown is what is stored; blocks are what is edited. `lib/blocks.ts` explains why that
+   * way round — in short, the body is read by search, embedding, the agent and the vault
+   * connector, and JSON in any of those is noise.
+   */
+  const [blocks, setBlocks] = useState<Block[]>(() => parse(""));
   const [save, setSave] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
@@ -69,7 +78,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
       if (!wanted) return;
       setSelectedId(wanted.id);
       setTitle(wanted.title);
-      setBody(wanted.body);
+      setBlocks(parse(wanted.body));
       persisted.current = { title: wanted.title, body: wanted.body };
       setSave("idle");
     });
@@ -105,24 +114,24 @@ export function NotesView({ noteId, onNavigate }: Props) {
     if (timer.current) clearTimeout(timer.current);
 
     timer.current = setTimeout(() => {
-      void flush(selectedId, title, body);
+      void flush(selectedId, title, serialize(blocks));
     }, AUTOSAVE_MS);
 
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [selectedId, title, body, flush]);
+  }, [selectedId, title, blocks, flush]);
 
   async function open(note: Note) {
     // Flush the outgoing note before switching, or the pending edit is lost with the timer.
     if (selectedId && selectedId !== note.id) {
       if (timer.current) clearTimeout(timer.current);
-      await flush(selectedId, title, body);
+      await flush(selectedId, title, serialize(blocks));
     }
 
     setSelectedId(note.id);
     setTitle(note.title);
-    setBody(note.body);
+    setBlocks(parse(note.body));
     persisted.current = { title: note.title, body: note.body };
     setSave("idle");
     // Keep the address bar honest, so reload and Back both work on a note.
@@ -157,7 +166,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
         if (timer.current) clearTimeout(timer.current);
         setSelectedId(null);
         setTitle("");
-        setBody("");
+        setBlocks(parse(""));
         setAsking(false);
         onNavigate({ name: "notes" });
       }
@@ -242,7 +251,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                onBlur={() => void flush(selectedId, title, body)}
+                onBlur={() => void flush(selectedId, title, serialize(blocks))}
                 placeholder="Untitled"
                 aria-label="Note title"
                 className="min-w-0 flex-1 bg-transparent text-[14px] font-semibold
@@ -284,16 +293,16 @@ export function NotesView({ noteId, onNavigate }: Props) {
               </button>
             </div>
 
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onBlur={() => void flush(selectedId, title, body)}
-              placeholder="Markdown."
-              aria-label="Note body"
-              className="min-h-0 flex-1 resize-none bg-transparent px-5 py-4 text-[13px]
-                         leading-relaxed text-ink outline-none
-                         placeholder:text-ink-faint"
-            />
+            <div
+              className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+              onBlur={() => void flush(selectedId, title, serialize(blocks))}
+            >
+              <BlockEditor
+                blocks={blocks}
+                onChange={setBlocks}
+                placeholder="Type, or press / for blocks."
+              />
+            </div>
           </>
         )}
 
