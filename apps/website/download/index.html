@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Install Notewise — macOS, Windows, Linux</title>
+    <meta
+      name="description"
+      content="How to get Notewise running on macOS, Windows or Linux. Built from source — there are no installers yet, and this page says exactly what works on each platform."
+    />
+    <meta name="theme-color" content="#0d0d0f" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>◐</text></svg>" />
+    <script type="module" src="/src/download.ts"></script>
+  </head>
+
+  <body>
+    <div class="fixed inset-x-0 top-0 z-50 h-0.5 bg-transparent">
+      <div id="progress" class="h-full w-0 bg-accent transition-[width] duration-150 ease-out"></div>
+    </div>
+
+    <header id="nav" class="fixed inset-x-0 top-0 z-40 border-b border-transparent transition-all duration-300">
+      <div class="container-page flex h-16 items-center gap-6">
+        <a href="../" class="flex items-center gap-2 font-semibold tracking-tight">
+          <span class="text-accent">◐</span>
+          Notewise
+        </a>
+        <div class="ml-auto flex items-center gap-2">
+          <a class="btn-ghost px-4 py-2 text-[13px]" href="../">Overview</a>
+          <a
+            class="btn-primary px-4 py-2 text-[13px]"
+            href="https://github.com/sriksven/Notewise"
+            target="_blank"
+            rel="noreferrer noopener"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main class="pt-16">
+      <section class="relative overflow-hidden py-20">
+        <div
+          data-parallax="0.2"
+          class="pointer-events-none absolute left-1/2 top-0 h-[26rem] w-[40rem] -translate-x-1/2 rounded-full bg-accent/15 blur-[130px]"
+          aria-hidden="true"
+        ></div>
+
+        <div class="container-page relative text-center">
+          <p class="eyebrow animate-fade-up">Install</p>
+          <h1
+            class="mx-auto mt-4 max-w-3xl text-[clamp(2.2rem,5.5vw,3.6rem)] font-semibold leading-[1.06] tracking-[-0.03em] animate-fade-up"
+            style="animation-delay: 70ms"
+          >
+            Build it from source
+          </h1>
+          <p
+            class="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-ink-muted animate-fade-up"
+            style="animation-delay: 140ms"
+          >
+            There are no installers yet — no signed builds, no release channel, no auto-update.
+            Ten minutes and a working toolchain gets you the whole thing.
+          </p>
+        </div>
+      </section>
+
+      <!-- Platform status, stated before the commands rather than after. -->
+      <section class="container-page pb-6">
+        <div class="grid gap-4 md:grid-cols-3" id="platforms">
+          <!-- Filled by download.ts; the detected platform is highlighted. -->
+        </div>
+      </section>
+
+      <section class="container-page py-12">
+        <div class="mx-auto max-w-3xl">
+          <div class="flex flex-wrap items-center gap-2" role="tablist" aria-label="Operating system">
+            <button class="os-tab" role="tab" data-os="mac" aria-selected="true">macOS</button>
+            <button class="os-tab" role="tab" data-os="windows" aria-selected="false">Windows</button>
+            <button class="os-tab" role="tab" data-os="linux" aria-selected="false">Linux / Ubuntu</button>
+          </div>
+
+          <div id="steps" class="mt-8 space-y-4">
+            <!-- Filled by download.ts for the selected OS. -->
+          </div>
+        </div>
+      </section>
+
+      <section class="border-t border-hairline py-20">
+        <div class="container-page mx-auto max-w-3xl">
+          <h2 class="text-[24px] font-semibold tracking-[-0.02em]" data-reveal>After it is running</h2>
+
+          <div class="mt-8 space-y-4">
+            <div class="card p-6" data-reveal>
+              <h3 class="text-[15px] font-medium">Download a transcription model</h3>
+              <p class="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+                Settings → Transcription models. <code class="text-ink">large-v3-turbo</code> is
+                the one worth having: close to the largest model in accuracy, a fraction of the
+                time, and it is what fixes most “it did not hear that properly” transcripts.
+              </p>
+            </div>
+
+            <div class="card p-6" data-reveal style="--reveal-delay: 80ms">
+              <h3 class="text-[15px] font-medium">Point it at a model for summaries</h3>
+              <p class="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+                Install <a class="text-accent underline decoration-hairline underline-offset-2" href="https://ollama.com" target="_blank" rel="noreferrer noopener">Ollama</a>
+                and pull something — <code class="text-ink">llama3.1:8b</code> is a good start —
+                and nothing leaves your machine. Or add your own API key for a hosted provider,
+                and the app will tell you plainly that it is now sending transcripts there.
+              </p>
+            </div>
+
+            <div class="card p-6" data-reveal style="--reveal-delay: 160ms">
+              <h3 class="text-[15px] font-medium">Turn on search by meaning</h3>
+              <p class="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+                <code class="text-ink">ollama pull nomic-embed-text</code>, then Settings →
+                Search by meaning → Build index. Embedding runs locally and never goes to your
+                chat provider.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="border-t border-hairline py-20">
+        <div class="container-page mx-auto max-w-3xl text-center" data-reveal="scale">
+          <h2 class="text-[24px] font-semibold tracking-[-0.02em]">Something not working?</h2>
+          <p class="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-ink-muted">
+            The app's About screen reports what your build can actually do — whether it can
+            record, which model is loaded, and whether it runs locally. Most reports turn out to
+            be one of those saying no.
+          </p>
+          <div class="mt-8 flex flex-wrap justify-center gap-3">
+            <a
+              class="btn-primary"
+              href="https://github.com/sriksven/Notewise/issues"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Open an issue</a
+            >
+            <a class="btn-ghost" href="../#honest">What does not work yet</a>
+          </div>
+          <p class="mx-auto mt-6 max-w-md text-[12.5px] leading-relaxed text-ink-faint">
+            Please do not paste a transcript into a public issue. It is a recording of people
+            who did not agree to that.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-hairline py-10">
+      <div class="container-page flex flex-col items-center justify-between gap-4 text-[13px] text-ink-faint sm:flex-row">
+        <p>Notewise — MIT licensed. Built to be read.</p>
+        <div class="flex gap-5">
+          <a class="transition-colors hover:text-ink" href="../">Overview</a>
+          <a
+            class="transition-colors hover:text-ink"
+            href="https://github.com/sriksven/Notewise"
+            target="_blank"
+            rel="noreferrer noopener"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

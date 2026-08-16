@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notewise — meeting intelligence that never leaves your machine</title>
+    <meta
+      name="description"
+      content="Record, transcribe and understand your meetings entirely on your own hardware. Open source, local-first, no account required."
+    />
+    <meta name="theme-color" content="#0d0d0f" />
+
+    <meta property="og:title" content="Notewise" />
+    <meta
+      property="og:description"
+      content="Meeting intelligence that never leaves your machine. Open source and local-first."
+    />
+    <meta property="og:type" content="website" />
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>◐</text></svg>" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+
+  <body>
+    <!-- Reading progress. Width is driven by scroll position in main.ts. -->
+    <div class="fixed inset-x-0 top-0 z-50 h-0.5 bg-transparent">
+      <div id="progress" class="h-full w-0 bg-accent transition-[width] duration-150 ease-out"></div>
+    </div>
+
+    <header
+      id="nav"
+      class="fixed inset-x-0 top-0 z-40 border-b border-transparent transition-all duration-300"
+    >
+      <div class="container-page flex h-16 items-center gap-6">
+        <a href="#top" class="flex items-center gap-2 font-semibold tracking-tight">
+          <span class="text-accent">◐</span>
+          Notewise
+        </a>
+
+        <nav class="ml-auto hidden items-center gap-6 text-[13.5px] text-ink-muted md:flex">
+          <a class="transition-colors hover:text-ink" href="#how">How it works</a>
+          <a class="transition-colors hover:text-ink" href="#features">Features</a>
+          <a class="transition-colors hover:text-ink" href="#privacy">Privacy</a>
+          <a class="transition-colors hover:text-ink" href="#honest">What's missing</a>
+        </nav>
+
+        <div class="ml-auto flex items-center gap-2 md:ml-0">
+          <a
+            class="btn-ghost hidden px-4 py-2 text-[13px] sm:inline-flex"
+            href="https://github.com/sriksven/Notewise"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <svg viewBox="0 0 16 16" class="h-4 w-4 fill-current" aria-hidden="true">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+            </svg>
+            GitHub
+          </a>
+          <a class="btn-primary px-4 py-2 text-[13px]" href="./download/">Get Notewise</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ─────────────────────────────────────────────  hero -->
+      <section class="relative flex min-h-[92vh] items-center overflow-hidden pt-16">
+        <!-- Drifting light. Purely decorative, and the first thing reduced-motion removes. -->
+        <div
+          data-parallax="0.25"
+          class="pointer-events-none absolute -left-40 top-10 h-[34rem] w-[34rem] rounded-full bg-accent/20 blur-[120px] animate-drift"
+          aria-hidden="true"
+        ></div>
+        <div
+          data-parallax="0.4"
+          class="pointer-events-none absolute -right-32 bottom-0 h-[28rem] w-[28rem] rounded-full bg-record/10 blur-[130px] animate-drift"
+          style="animation-delay: -3s"
+          aria-hidden="true"
+        ></div>
+
+        <div class="container-page relative grid items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
+          <div>
+            <p class="eyebrow animate-fade-up">Local-first meeting intelligence</p>
+
+            <h1
+              class="mt-4 text-[clamp(2.6rem,6vw,4.4rem)] font-semibold leading-[1.03] tracking-[-0.03em] animate-fade-up"
+              style="animation-delay: 80ms"
+            >
+              Your meetings.<br />
+              <span class="bg-gradient-to-r from-accent-soft via-ink to-accent bg-clip-text text-transparent">
+                Your machine.
+              </span>
+            </h1>
+
+            <p
+              class="mt-6 max-w-xl text-[17px] leading-relaxed text-ink-muted animate-fade-up"
+              style="animation-delay: 160ms"
+            >
+              Record a meeting and get a transcript, a summary, the decisions and who owes
+              what — computed on your own hardware. No account, no upload, no subscription.
+            </p>
+
+            <div class="mt-9 flex flex-wrap items-center gap-3 animate-fade-up" style="animation-delay: 240ms">
+              <a class="btn-primary" href="./download/">
+                Install it
+                <span aria-hidden="true">→</span>
+              </a>
+              <a
+                class="btn-ghost"
+                href="https://github.com/sriksven/Notewise"
+                target="_blank"
+                rel="noreferrer noopener"
+                >Read the source</a
+              >
+            </div>
+
+            <dl
+              class="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-hairline pt-7 animate-fade-up"
+              style="animation-delay: 320ms"
+            >
+              <div>
+                <dd class="text-[26px] font-semibold tabular-nums" data-count="1091">0</dd>
+                <dt class="mt-0.5 text-[12px] text-ink-faint">tests passing</dt>
+              </div>
+              <div>
+                <dd class="text-[26px] font-semibold tabular-nums" data-count="0">0</dd>
+                <dt class="mt-0.5 text-[12px] text-ink-faint">bytes uploaded</dt>
+              </div>
+              <div>
+                <dd class="text-[26px] font-semibold">MIT</dd>
+                <dt class="mt-0.5 text-[12px] text-ink-faint">licensed core</dt>
+              </div>
+            </dl>
+          </div>
+
+          <!-- A miniature of the actual app, not a stock screenshot. -->
+          <div class="relative animate-fade-up" style="animation-delay: 200ms" data-parallax="-0.06">
+            <div class="card overflow-hidden shadow-[0_40px_80px_-30px_rgba(0,0,0,0.8)]">
+              <div class="flex items-center gap-1.5 border-b border-hairline px-4 py-3">
+                <span class="h-2.5 w-2.5 rounded-full bg-hairline"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-hairline"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-hairline"></span>
+                <span class="ml-3 flex items-center gap-1.5 text-[11px] text-ink-faint">
+                  <span class="h-1.5 w-1.5 rounded-full bg-record animate-pulse-ring"></span>
+                  recording · 12:04
+                </span>
+              </div>
+
+              <div class="space-y-3 p-5 font-mono text-[12.5px] leading-relaxed">
+                <p><span class="text-accent">Dana</span> <span class="text-ink-muted">00:12</span><br />We settled on three pricing tiers.</p>
+                <p><span class="text-accent">Alex</span> <span class="text-ink-muted">00:19</span><br />Enterprise stays on a custom quote.</p>
+                <p><span class="text-accent">Dana</span> <span class="text-ink-muted">00:27</span><br />Sam owns the page rewrite, due Friday.</p>
+              </div>
+
+              <div class="border-t border-hairline bg-raised p-5">
+                <p class="eyebrow mb-3">Extracted automatically</p>
+                <ul class="space-y-2 text-[13px]">
+                  <li class="flex gap-2"><span class="text-accent">✓</span> Decision — three pricing tiers</li>
+                  <li class="flex gap-2"><span class="text-accent">✓</span> Action — Sam: page rewrite, Friday</li>
+                  <li class="flex gap-2"><span class="text-ink-faint">?</span> Worth asking — what is the enterprise floor?</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <a
+          href="#how"
+          class="absolute inset-x-0 bottom-8 mx-auto w-fit text-[12px] text-ink-faint transition-colors hover:text-ink"
+        >
+          <span class="block animate-drift">scroll ↓</span>
+        </a>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  scroll-driven pipeline -->
+      <section id="how" class="relative">
+        <div class="container-page py-24">
+          <div class="mx-auto max-w-2xl text-center" data-reveal>
+            <p class="eyebrow">How it works</p>
+            <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tracking-[-0.02em]">
+              Audio in. Understanding out.
+            </h2>
+            <p class="mt-4 text-[16px] leading-relaxed text-ink-muted">
+              Four stages, all of them on your hardware. Scroll to follow one meeting through.
+            </p>
+          </div>
+        </div>
+
+        <!-- The sticky panel stays put while the steps scroll past it. `data-stage` marks the
+             elements that drive it; main.ts swaps the panel as each reaches the middle. -->
+        <div class="container-page grid gap-16 pb-24 lg:grid-cols-2">
+          <div class="space-y-[42vh] lg:space-y-[52vh]">
+            <div data-stage="1" class="lg:pt-[24vh]">
+              <p class="font-mono text-[12px] text-accent">01</p>
+              <h3 class="mt-2 text-[26px] font-semibold tracking-[-0.01em]">Capture</h3>
+              <p class="mt-3 max-w-md text-[15px] leading-relaxed text-ink-muted">
+                Press record. Audio is captured from your microphone and written straight to a
+                SQLite file beside your other notes. Nothing is streamed anywhere.
+              </p>
+            </div>
+
+            <div data-stage="2">
+              <p class="font-mono text-[12px] text-accent">02</p>
+              <h3 class="mt-2 text-[26px] font-semibold tracking-[-0.01em]">Transcribe</h3>
+              <p class="mt-3 max-w-md text-[15px] leading-relaxed text-ink-muted">
+                Whisper runs locally, GPU-accelerated on Apple silicon. Speakers are separated
+                as it goes, so the transcript reads as a conversation rather than a wall.
+              </p>
+            </div>
+
+            <div data-stage="3">
+              <p class="font-mono text-[12px] text-accent">03</p>
+              <h3 class="mt-2 text-[26px] font-semibold tracking-[-0.01em]">Understand</h3>
+              <p class="mt-3 max-w-md text-[15px] leading-relaxed text-ink-muted">
+                A model you choose — Ollama on your machine, or your own API key — pulls out the
+                summary, the decisions and the commitments, each linked back to the moment it
+                was said.
+              </p>
+            </div>
+
+            <div data-stage="4" class="lg:pb-[24vh]">
+              <p class="font-mono text-[12px] text-accent">04</p>
+              <h3 class="mt-2 text-[26px] font-semibold tracking-[-0.01em]">Ask</h3>
+              <p class="mt-3 max-w-md text-[15px] leading-relaxed text-ink-muted">
+                Question any meeting, any note, or the whole workspace. Every answer cites what
+                it drew from, and says so plainly when the answer is not there.
+              </p>
+            </div>
+          </div>
+
+          <div class="hidden lg:block">
+            <div class="sticky top-28">
+              <div class="card relative aspect-[4/3] overflow-hidden">
+                <div id="stage-panels" class="absolute inset-0">
+                  <!-- Panels are stacked; main.ts toggles `is-active`. -->
+                  <div data-panel="1" class="stage-panel absolute inset-0 p-8">
+                    <div class="flex h-full flex-col items-center justify-center gap-5">
+                      <span class="flex h-20 w-20 items-center justify-center rounded-full bg-record text-white animate-pulse-ring">
+                        <svg viewBox="0 0 24 24" class="h-8 w-8 fill-current" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+                      </span>
+                      <p class="font-mono text-[13px] text-ink-muted">MacBook Pro Microphone</p>
+                      <div class="flex h-10 items-end gap-1" aria-hidden="true">
+                        <span class="w-1.5 rounded bg-accent/70" style="height:30%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:70%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:45%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:90%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:55%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:25%"></span>
+                        <span class="w-1.5 rounded bg-accent/70" style="height:65%"></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div data-panel="2" class="stage-panel absolute inset-0 space-y-3 p-8 font-mono text-[12.5px] leading-relaxed">
+                    <p class="text-ink-faint">whisper · large-v3-turbo · local</p>
+                    <p><span class="text-accent">Dana</span> We settled on three pricing tiers.</p>
+                    <p><span class="text-accent">Alex</span> Enterprise stays on a custom quote.</p>
+                    <p><span class="text-accent">Dana</span> Sam owns the page rewrite, due Friday.</p>
+                    <p class="text-ink-faint">▍</p>
+                  </div>
+
+                  <div data-panel="3" class="stage-panel absolute inset-0 space-y-4 p-8">
+                    <p class="eyebrow">Decisions</p>
+                    <p class="text-[14px]">Three pricing tiers: starter, team, enterprise.</p>
+                    <div class="rule"></div>
+                    <p class="eyebrow">Action items</p>
+                    <ul class="space-y-2 text-[14px]">
+                      <li class="flex items-start gap-2"><span class="mt-1 h-3.5 w-3.5 shrink-0 rounded border border-hairline"></span> Sam — rewrite the pricing page · Friday</li>
+                      <li class="flex items-start gap-2"><span class="mt-1 h-3.5 w-3.5 shrink-0 rounded border border-hairline"></span> Dana — confirm the enterprise floor</li>
+                    </ul>
+                  </div>
+
+                  <div data-panel="4" class="stage-panel absolute inset-0 space-y-4 p-8">
+                    <div class="ml-auto w-fit rounded-2xl bg-accent px-3.5 py-2 text-[13.5px] text-bg">
+                      What did we decide about pricing?
+                    </div>
+                    <div class="w-fit rounded-2xl border border-hairline bg-raised px-3.5 py-2 text-[13.5px]">
+                      Three tiers — starter, team and enterprise, with enterprise on a custom
+                      quote. <span class="font-mono text-accent">[1]</span>
+                    </div>
+                    <p class="font-mono text-[11.5px] text-ink-faint">
+                      [1] meeting — Pricing review, 16 Aug
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  features -->
+      <section id="features" class="border-t border-hairline py-24">
+        <div class="container-page">
+          <div class="mx-auto max-w-2xl text-center" data-reveal>
+            <p class="eyebrow">Everything in the box</p>
+            <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tracking-[-0.02em]">
+              A workspace, not a transcript dump
+            </h2>
+          </div>
+
+          <div class="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3" id="feature-grid">
+            <!-- Filled by main.ts from one list, so the copy lives in one place. -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  privacy -->
+      <section id="privacy" class="relative overflow-hidden border-t border-hairline py-24">
+        <div
+          data-parallax="0.18"
+          class="pointer-events-none absolute left-1/2 top-1/2 h-[30rem] w-[30rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/10 blur-[130px]"
+          aria-hidden="true"
+        ></div>
+
+        <div class="container-page relative">
+          <div class="mx-auto max-w-2xl text-center" data-reveal>
+            <p class="eyebrow">Where your data goes</p>
+            <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tracking-[-0.02em]">
+              Nowhere, unless you send it
+            </h2>
+            <p class="mt-4 text-[16px] leading-relaxed text-ink-muted">
+              Most tools in this category say "private" and mean "encrypted on our servers".
+              Here it is a property of the architecture: the parts that leave your machine are
+              the ones you switch on.
+            </p>
+          </div>
+
+          <div class="mx-auto mt-14 max-w-3xl space-y-3">
+            <div class="card flex items-start gap-4 p-5" data-reveal="left">
+              <span class="mt-0.5 rounded-lg bg-accent/15 px-2 py-1 text-[11px] font-semibold text-accent-soft">LOCAL</span>
+              <div>
+                <h3 class="text-[15px] font-medium">Recording, transcription, search, notes</h3>
+                <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
+                  Whisper runs on your hardware. Your workspace is a SQLite file you can open,
+                  back up, or delete. Search — including semantic search — is computed locally.
+                </p>
+              </div>
+            </div>
+
+            <div class="card flex items-start gap-4 p-5" data-reveal="left" style="--reveal-delay: 90ms">
+              <span class="mt-0.5 rounded-lg bg-accent/15 px-2 py-1 text-[11px] font-semibold text-accent-soft">LOCAL</span>
+              <div>
+                <h3 class="text-[15px] font-medium">Summaries and answers, with Ollama</h3>
+                <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
+                  Point Notewise at a model running on your machine and nothing leaves it. This
+                  is the default, and the app tells you which mode you are in.
+                </p>
+              </div>
+            </div>
+
+            <div class="card flex items-start gap-4 p-5" data-reveal="left" style="--reveal-delay: 180ms">
+              <span class="mt-0.5 rounded-lg bg-record/15 px-2 py-1 text-[11px] font-semibold text-record">YOUR CHOICE</span>
+              <div>
+                <h3 class="text-[15px] font-medium">Summaries with a hosted model</h3>
+                <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
+                  Bring your own Anthropic, OpenAI-compatible or Gemini key and that transcript
+                  goes to that provider. Keys live in your OS keychain and no endpoint will
+                  read one back to you.
+                </p>
+              </div>
+            </div>
+
+            <div class="card flex items-start gap-4 p-5" data-reveal="left" style="--reveal-delay: 270ms">
+              <span class="mt-0.5 rounded-lg bg-record/15 px-2 py-1 text-[11px] font-semibold text-record">YOUR CHOICE</span>
+              <div>
+                <h3 class="text-[15px] font-medium">Connectors</h3>
+                <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
+                  Write meetings to a Markdown vault (stays local) or POST them to a webhook
+                  you control (does not). Each connector says which it is before you enable it.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p class="mx-auto mt-8 max-w-2xl text-center text-[13.5px] leading-relaxed text-ink-faint" data-reveal>
+            Recognising people by voice is off by default, and switching it off erases what was
+            stored. It identifies people who never installed anything — so it is a decision you
+            make, not one made for you.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  open source -->
+      <section class="border-t border-hairline py-24">
+        <div class="container-page grid items-center gap-12 lg:grid-cols-2">
+          <div data-reveal="left">
+            <p class="eyebrow">Open source</p>
+            <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.8rem)] font-semibold tracking-[-0.02em]">
+              Read it before you trust it
+            </h2>
+            <p class="mt-5 text-[16px] leading-relaxed text-ink-muted">
+              The engine and the apps are MIT licensed. Every claim on this page is checkable
+              against the source — including the one about nothing being uploaded, which is
+              enforced by a server that refuses to bind to anything but loopback.
+            </p>
+
+            <div class="mt-8 flex flex-wrap gap-3">
+              <a
+                class="btn-primary"
+                href="https://github.com/sriksven/Notewise"
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <svg viewBox="0 0 16 16" class="h-4 w-4 fill-current" aria-hidden="true">
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+                </svg>
+                sriksven/Notewise
+              </a>
+              <a
+                class="btn-ghost"
+                href="https://github.com/sriksven/Notewise/blob/main/docs/roadmap.md"
+                target="_blank"
+                rel="noreferrer noopener"
+                >Roadmap</a
+              >
+            </div>
+          </div>
+
+          <div class="card overflow-hidden" data-reveal="right">
+            <div class="border-b border-hairline px-5 py-3 font-mono text-[12px] text-ink-faint">
+              repository layout
+            </div>
+            <pre class="overflow-x-auto p-5 font-mono text-[12.5px] leading-relaxed text-ink-muted"><span class="text-ink">core/</span>        Rust engine — 14 crates      <span class="text-accent">MIT</span>
+  storage/     SQLite, migrations, FTS5
+  graph/       typed nodes and edges
+  ai-router/   the one seam every model call goes through
+  transcription/  whisper.cpp
+  api-server/  loopback-only REST + MCP
+
+<span class="text-ink">apps/</span>        thin platform shells         <span class="text-accent">MIT</span>
+  desktop/     Tauri + React
+  cli/         the engine, linked directly
+  browser-extension/  speaker names, zero permissions
+
+<span class="text-ink">cloud/</span>       opt-in hosted services       <span class="text-ink-faint">BSL 1.1</span>
+             (scaffolds — nothing runs yet)</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  honest limitations -->
+      <section id="honest" class="border-t border-hairline py-24">
+        <div class="container-page">
+          <div class="mx-auto max-w-2xl text-center" data-reveal>
+            <p class="eyebrow">What does not work yet</p>
+            <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tracking-[-0.02em]">
+              The part most landing pages leave out
+            </h2>
+            <p class="mt-4 text-[16px] leading-relaxed text-ink-muted">
+              Finding this out after installing something is worse than reading it here.
+            </p>
+          </div>
+
+          <div class="mx-auto mt-12 max-w-3xl space-y-3" id="limitations">
+            <!-- Filled by main.ts. -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────  cta -->
+      <section class="relative overflow-hidden border-t border-hairline py-28">
+        <div
+          data-parallax="0.3"
+          class="pointer-events-none absolute left-1/2 top-0 h-[26rem] w-[46rem] -translate-x-1/2 rounded-full bg-accent/15 blur-[130px]"
+          aria-hidden="true"
+        ></div>
+        <div class="container-page relative text-center" data-reveal="scale">
+          <h2 class="mx-auto max-w-2xl text-[clamp(2rem,5vw,3.4rem)] font-semibold leading-[1.08] tracking-[-0.025em]">
+            Run it on your own machine
+          </h2>
+          <p class="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-ink-muted">
+            Free, open source, and there is nothing to sign up for.
+          </p>
+          <div class="mt-9 flex flex-wrap justify-center gap-3">
+            <a class="btn-primary" href="./download/">Installation guide →</a>
+            <a
+              class="btn-ghost"
+              href="https://github.com/sriksven/Notewise"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Star on GitHub</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-hairline py-10">
+      <div class="container-page flex flex-col items-center justify-between gap-4 text-[13px] text-ink-faint sm:flex-row">
+        <p>Notewise — MIT licensed. Built to be read.</p>
+        <div class="flex gap-5">
+          <a class="transition-colors hover:text-ink" href="./download/">Install</a>
+          <a
+            class="transition-colors hover:text-ink"
+            href="https://github.com/sriksven/Notewise"
+            target="_blank"
+            rel="noreferrer noopener"
+            >GitHub</a
+          >
+          <a
+            class="transition-colors hover:text-ink"
+            href="https://github.com/sriksven/Notewise/issues"
+            target="_blank"
+            rel="noreferrer noopener"
+            >Report a bug</a
+          >
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

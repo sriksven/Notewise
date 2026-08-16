@@ -52,6 +52,35 @@ jobs:
       - name: Build
         run: npx vite build
 
+  website:
+    name: website
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/website
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/website/package-lock.json
+
+      - run: npm ci
+
+      # Its own job rather than a row in the matrix above: the site is a static document with
+      # no unit tests, and `npm test` would have to be a lie to fit. Typecheck and build are
+      # the real checks — a build failure here is a page whose buttons do nothing.
+      #
+      # `pages.yml` also builds it, but only on pushes to main. This runs on pull requests,
+      # which is where a break should be caught.
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
   extension:
     name: browser extension
     runs-on: ubuntu-latest
