@@ -1,0 +1,72 @@
+name: frontend
+
+# Separate from `core` for the reason stated there: a broken frontend toolchain must not block
+# an engine fix. These jobs are cheap and fully offline — no browser, no engine, no network —
+# so they run on every push rather than on a schedule.
+#
+# This workflow exists because it did not: the desktop app had over a hundred tests and a
+# typecheck that nothing in CI ever ran, which meant "it compiles" rested entirely on whoever
+# last happened to run it by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apps:
+    name: ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing app should not hide a second one failing differently.
+      fail-fast: false
+      matrix:
+        app: [desktop, web-dashboard]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+
+      # `ci` rather than `install`: it installs exactly the lockfile and fails if the lockfile
+      # and manifest disagree, which is the check worth having in CI.
+      - run: npm ci
+
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npm test
+
+      # Catches what a typecheck does not: a Tailwind class that does not exist, an import
+      # that resolves in dev and not in a production build, a bundle that fails to chunk.
+      - name: Build
+        run: npx vite build
+
+  extension:
+    name: browser extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/browser-extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No dependencies and no lockfile — the extension is plain JavaScript tested with
+      # node's own runner, which is deliberate: an extension that ships a bundler's output is
+      # harder to audit, and this one asks for zero permissions.
+      - name: Tests
+        run: npm test
