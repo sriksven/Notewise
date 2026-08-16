@@ -199,6 +199,11 @@ function Shortcuts() {
     ["⌘K", "Jump to the search box"],
     ["⌘N", "New note"],
     ["⌘⇧R", "Start or stop recording"],
+    ["⌘B", "Bold the selection"],
+    ["⌘I", "Italic"],
+    ["⌘E", "Inline code"],
+    ["⌘⇧X", "Strikethrough"],
+    ["/", "Block menu, on an empty line"],
     ["Enter", "Send a question"],
     ["⇧Enter", "New line in a question"],
     ["Esc", "Close an open menu"],
@@ -207,7 +212,10 @@ function Shortcuts() {
   return (
     <>
       <Topic title="Keyboard">
-        <p>The few that are worth the muscle memory. Ctrl works in place of ⌘.</p>
+        <p>
+          The few that are worth the muscle memory. Ctrl works in place of ⌘. The formatting
+          chords act on the selection inside a note.
+        </p>
       </Topic>
       <dl className="card divide-y divide-hairline overflow-hidden">
         {rows.map(([keys, what]) => (

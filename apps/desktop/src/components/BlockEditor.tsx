@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  Bold,
   Check,
   Code,
   Heading1,
@@ -7,8 +8,10 @@ import {
   Heading3,
   List,
   ListOrdered,
+  Italic,
   Minus,
   Quote,
+  Strikethrough,
   SquareCheck,
   Type,
 } from "lucide-react";
@@ -22,6 +25,7 @@ import {
   type Block,
   type BlockType,
 } from "../lib/blocks";
+import { hasFormatting, markForKey, parseInline, toggleMark, type Mark } from "../lib/inline";
 
 interface Props {
   blocks: Block[];
@@ -56,10 +60,21 @@ const MENU: Array<{ type: BlockType; label: string; hint: string; Icon: typeof T
  * model cannot represent. Getting that right is what ProseMirror and Lexical are for, and
  * taking one of those is a dependency and a serialization format to own.
  *
- * A textarea per block gives up inline formatting toolbars — bold is typed as `**bold**` — and
- * gets, in exchange, native text editing that already works: selection, undo, spellcheck, IME
- * composition, accessibility, and paste as plain text. For a notes pane during a meeting, the
- * thing that matters is that typing never does anything surprising.
+ * A textarea per block gets native text editing that already works: selection, undo,
+ * spellcheck, IME composition, accessibility, and paste as plain text. For a pane people type
+ * into during a meeting, nothing surprising is worth more than any of that.
+ *
+ * # Inline formatting without contenteditable
+ *
+ * The obvious cost of a textarea is that it can only show plain text, so bold reads as
+ * `**bold**`. That is answered by rendering the *unfocused* blocks: a line without the caret
+ * shows formatted text, and clicking into it reveals the markers again. One click of
+ * awkwardness on the line being edited, formatted text everywhere else, and the stored file
+ * stays Markdown a human can read.
+ *
+ * ⌘B, ⌘I, ⌘E and ⌘⇧X toggle marks over the selection, and a toolbar appears when there is
+ * one. Both go through `lib/inline.ts`, which toggles rather than only wrapping — an editor
+ * where the same key only ever adds markers accumulates `****bold****`.
  *
  * # Focus
  *
@@ -71,10 +86,16 @@ const MENU: Array<{ type: BlockType; label: string; hint: string; Icon: typeof T
 export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props) {
   /** Where to put the caret after the next render, if anywhere. */
   const pending = useRef<{ id: string; offset: number | "end" } | null>(null);
+  /** Where to put a *range* after the next render — formatting keeps the words selected. */
+  const pendingSelection = useRef<{ id: string; start: number; end: number } | null>(null);
   const fields = useRef(new Map<string, HTMLTextAreaElement>());
   /** Which block has the slash menu open. */
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
+  /** Which block has the caret. Everything else renders its formatting. */
+  const [focused, setFocused] = useState<string | null>(null);
+  /** The block with a non-empty selection, which gets the formatting toolbar. */
+  const [selecting, setSelecting] = useState<string | null>(null);
 
   const register = useCallback((id: string, element: HTMLTextAreaElement | null) => {
     if (element) fields.current.set(id, element);
@@ -84,6 +105,17 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
   // Before paint, not after: restoring focus in a `useEffect` lets the browser show one frame
   // with the caret in the wrong place, which reads as a flicker.
   useLayoutEffect(() => {
+    const range = pendingSelection.current;
+    if (range) {
+      pendingSelection.current = null;
+      const field = fields.current.get(range.id);
+      if (field) {
+        field.focus();
+        field.setSelectionRange(range.start, range.end);
+      }
+      return;
+    }
+
     const target = pending.current;
     if (!target) return;
     pending.current = null;
@@ -227,6 +259,23 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
     onChange(next);
   };
 
+  /**
+   * Toggle a mark over the textarea's current selection.
+   *
+   * The selection is restored afterwards through the same `pending` mechanism the structural
+   * operations use — an editor that drops your selection on every ⌘B is unusable.
+   */
+  const applyMark = (index: number, field: HTMLTextAreaElement, mark: Mark) => {
+    const block = blocks[index];
+    const next = toggleMark(
+      { text: block.text, start: field.selectionStart, end: field.selectionEnd },
+      mark,
+    );
+
+    pendingSelection.current = { id: block.id, start: next.start, end: next.end };
+    replace(index, { ...block, text: next.text });
+  };
+
   const move = (index: number, delta: -1 | 1) => {
     const target = blocks[index + delta];
     if (!target) return;
@@ -262,6 +311,19 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
         setMenuFor(null);
         return;
       }
+    }
+
+    // Formatting chords. Not in the app's global handler: they act on a textarea's selection,
+    // which only this component has, and ⌘B means nothing anywhere else.
+    if (event.metaKey || event.ctrlKey) {
+      const mark = block.type === "code" ? null : markForKey(event.key, event.shiftKey);
+      if (mark) {
+        event.preventDefault();
+        applyMark(index, field, mark);
+        return;
+      }
+      // Everything else with a modifier belongs to the app or the OS.
+      return;
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
@@ -332,6 +394,22 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
           menuIndex={menuIndex}
           onPick={(type) => convert(index, type)}
           onCloseMenu={() => setMenuFor(null)}
+          focused={focused === block.id}
+          showToolbar={selecting === block.id}
+          onFocus={() => setFocused(block.id)}
+          onBlur={() => {
+            setFocused((current) => (current === block.id ? null : current));
+            setSelecting((current) => (current === block.id ? null : current));
+          }}
+          onSelectionChange={(hasRange) =>
+            setSelecting((current) =>
+              hasRange ? block.id : current === block.id ? null : current,
+            )
+          }
+          onMark={(mark) => {
+            const field = fields.current.get(block.id);
+            if (field) applyMark(index, field, mark);
+          }}
           onText={(text) => setText(index, text)}
           onToggle={() => replace(index, { ...block, checked: !block.checked })}
           onKeyDown={(event) => onKeyDown(event, index)}
@@ -365,6 +443,12 @@ function Row({
   index,
   register,
   placeholder,
+  focused,
+  showToolbar,
+  onFocus,
+  onBlur,
+  onSelectionChange,
+  onMark,
   menuOpen,
   menuIndex,
   onPick,
@@ -378,6 +462,12 @@ function Row({
   index: number;
   register: (id: string, element: HTMLTextAreaElement | null) => void;
   placeholder?: string;
+  focused: boolean;
+  showToolbar: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+  onSelectionChange: (hasRange: boolean) => void;
+  onMark: (mark: Mark) => void;
   menuOpen: boolean;
   menuIndex: number;
   onPick: (type: BlockType) => void;
@@ -397,6 +487,10 @@ function Row({
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
   }, [block.text, block.type]);
+
+  // Code is shown raw: its content is not Markdown, and rendering `**` inside a shell snippet
+  // as bold would be wrong rather than pretty.
+  const rendered = !focused && block.type !== "code" && hasFormatting(block.text);
 
   if (block.type === "divider") {
     return (
@@ -444,23 +538,78 @@ function Row({
         <span className="mt-1 w-0.5 shrink-0 self-stretch rounded bg-hairline" aria-hidden />
       )}
 
-      <textarea
-        ref={(element) => {
-          field.current = element;
-          register(block.id, element);
-        }}
-        value={block.text}
-        onChange={(event) => onText(event.target.value)}
-        onKeyDown={onKeyDown}
-        rows={1}
-        placeholder={placeholder}
-        aria-label={`${block.type} block`}
-        spellCheck={block.type !== "code"}
-        className={`min-w-0 flex-1 resize-none overflow-hidden bg-transparent outline-none
-                    placeholder:text-ink-faint ${STYLES[block.type]} ${
-                      block.type === "code" ? "rounded-lg bg-overlay px-3 py-2" : ""
-                    } ${block.checked ? "text-ink-faint line-through" : "text-ink"}`}
-      />
+      <div className="relative min-w-0 flex-1">
+        <textarea
+          ref={(element) => {
+            field.current = element;
+            register(block.id, element);
+          }}
+          value={block.text}
+          onChange={(event) => onText(event.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          // `select` covers the mouse; the keyboard cases come through `keyup` after the
+          // caret has actually moved, which `keydown` is too early for.
+          onSelect={(event) => {
+            const target = event.currentTarget;
+            onSelectionChange(target.selectionStart !== target.selectionEnd);
+          }}
+          rows={1}
+          placeholder={placeholder}
+          aria-label={`${block.type} block`}
+          spellCheck={block.type !== "code"}
+          className={`w-full resize-none overflow-hidden bg-transparent outline-none
+                      placeholder:text-ink-faint ${STYLES[block.type]} ${
+                        block.type === "code" ? "rounded-lg bg-overlay px-3 py-2" : ""
+                      } ${block.checked ? "text-ink-faint line-through" : "text-ink"} ${
+                        // Transparent and on top, rather than `visibility: hidden` or
+                        // unmounted, while the rendered view shows underneath.
+                        //
+                        // Unmounting would lose the browser's undo history for the line.
+                        // `visibility: hidden` would take the textarea out of the
+                        // accessibility tree, leaving an unfocused formatted line with
+                        // nothing a screen reader could reach or edit.
+                        //
+                        // Transparent keeps it focusable, announced, and hit-testable — so a
+                        // click lands the caret exactly where the browser would have put it,
+                        // with no coordinate arithmetic here.
+                        rendered ? "absolute inset-0 text-transparent caret-transparent" : ""
+                      }`}
+        />
+
+        {/* The rendered view. Only when this block does not have the caret and actually
+            contains formatting — otherwise it is the same pixels with a chance of drifting. */}
+        {rendered && (
+          <div
+            // Hidden from assistive tech: the transparent textarea above carries the same
+            // text, and announcing both would read every formatted line twice.
+            aria-hidden
+            className={`pointer-events-none w-full whitespace-pre-wrap break-words ${
+              STYLES[block.type]
+            } ${block.checked ? "text-ink-faint line-through" : "text-ink"}`}
+          >
+            {parseInline(block.text).map((span, n) =>
+              span.href ? (
+                <a
+                  key={n}
+                  href={span.href}
+                  onClick={(event) => event.preventDefault()}
+                  className="text-accent underline decoration-hairline underline-offset-2"
+                >
+                  {span.text}
+                </a>
+              ) : (
+                <span key={n} className={classFor(span.marks)}>
+                  {span.text}
+                </span>
+              ),
+            )}
+          </div>
+        )}
+
+        {showToolbar && <FormatBar onMark={onMark} />}
+      </div>
 
       {menuOpen && (
         <SlashMenu selected={menuIndex} onPick={onPick} onClose={onCloseMenu} />
@@ -516,6 +665,64 @@ function SlashMenu({
           {item.hint && (
             <span className="font-mono text-[11px] text-ink-faint">{item.hint}</span>
           )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Tailwind classes for a span's marks. */
+function classFor(marks: Mark[]): string {
+  return [
+    marks.includes("bold") && "font-semibold",
+    marks.includes("italic") && "italic",
+    marks.includes("strike") && "line-through text-ink-muted",
+    marks.includes("code") && "rounded bg-overlay px-1 py-0.5 font-mono text-[0.9em]",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * The formatting toolbar, shown while text is selected.
+ *
+ * `onMouseDown` with `preventDefault`, not `onClick`: the textarea loses focus on mousedown,
+ * and by the time a click fires the selection this acts on is already gone.
+ *
+ * Below the line rather than above it. Above is the conventional position and it is wrong
+ * here: on the first block of a note it lands under the title bar, which sits in a different
+ * stacking context and swallows the clicks. Below is always inside the editor's own scroll
+ * area, so it is reachable on every line.
+ */
+function FormatBar({ onMark }: { onMark: (mark: Mark) => void }) {
+  const buttons: Array<{ mark: Mark; label: string; Icon: typeof Bold; keys: string }> = [
+    { mark: "bold", label: "Bold", Icon: Bold, keys: "⌘B" },
+    { mark: "italic", label: "Italic", Icon: Italic, keys: "⌘I" },
+    { mark: "code", label: "Code", Icon: Code, keys: "⌘E" },
+    { mark: "strike", label: "Strikethrough", Icon: Strikethrough, keys: "⌘⇧X" },
+  ];
+
+  return (
+    <div
+      role="toolbar"
+      aria-label="Formatting"
+      className="absolute left-0 top-full z-20 mt-1 flex items-center gap-0.5 rounded-lg
+                 border border-hairline bg-surface px-1 py-1 shadow-dock"
+    >
+      {buttons.map((button) => (
+        <button
+          key={button.mark}
+          type="button"
+          aria-label={button.label}
+          title={`${button.label} (${button.keys})`}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onMark(button.mark);
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded text-ink-muted
+                     transition hover:bg-overlay hover:text-ink"
+        >
+          <button.Icon size={13} aria-hidden />
         </button>
       ))}
     </div>
