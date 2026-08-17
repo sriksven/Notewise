@@ -4465,7 +4465,7 @@ mod tests {
             &app,
             Request::builder()
                 .method("DELETE")
-                .uri(&format!("/v1/speaker-models/{}", model.name))
+                .uri(format!("/v1/speaker-models/{}", model.name))
                 .body(Body::empty())
                 .unwrap(),
         )
