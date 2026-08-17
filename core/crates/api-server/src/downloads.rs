@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use notewise_transcription::{ModelInfo, ModelStore};
+use notewise_transcription::{Artifact, ModelInfo, ModelStore};
 use serde::Serialize;
 use tokio::sync::{watch, Mutex};
 
@@ -34,9 +34,25 @@ impl DownloadStatus {
     }
 }
 
+/// Which catalogue a download belongs to.
+///
+/// One manager serves both, so that a double-click cannot start two transfers of anything. But
+/// progress is streamed by *per-catalogue* routes, so a client reading `GET /v1/downloads` has to
+/// know which route can watch a given entry. Without this, a speaker-model download listed there
+/// was watched through `/v1/models/:name/download` and answered `400 not in the registry`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadKind {
+    /// A Whisper model, watchable at `/v1/models/:name/download`.
+    Transcription,
+    /// A speaker-embedding model, belonging to `/v1/speaker-models`.
+    Speaker,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DownloadState {
     pub model: String,
+    pub kind: DownloadKind,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     /// Precomputed so every client does not reimplement the same division — including the
@@ -47,11 +63,12 @@ pub struct DownloadState {
 }
 
 impl DownloadState {
-    fn starting(model: &ModelInfo) -> Self {
+    fn starting(artifact: &Artifact, kind: DownloadKind) -> Self {
         Self {
-            model: model.name.to_string(),
+            model: artifact.name.clone(),
+            kind,
             downloaded_bytes: 0,
-            total_bytes: model.bytes,
+            total_bytes: artifact.bytes,
             percent: 0,
             status: DownloadStatus::Downloading,
             error: None,
@@ -60,12 +77,18 @@ impl DownloadState {
 
     /// A model that is already on disk.
     pub(crate) fn already_installed(model: &ModelInfo) -> Self {
-        Self::done(&model.name, model.bytes)
+        Self::done(&model.name, model.bytes, DownloadKind::Transcription)
     }
 
-    fn done(model: &str, total: u64) -> Self {
+    /// Any artifact that is already on disk.
+    pub(crate) fn artifact_installed(artifact: &Artifact, kind: DownloadKind) -> Self {
+        Self::done(&artifact.name, artifact.bytes, kind)
+    }
+
+    fn done(model: &str, total: u64, kind: DownloadKind) -> Self {
         Self {
             model: model.to_string(),
+            kind,
             downloaded_bytes: total,
             total_bytes: total,
             percent: 100,
@@ -74,9 +97,10 @@ impl DownloadState {
         }
     }
 
-    fn failed(model: &str, total: u64, downloaded: u64, error: String) -> Self {
+    fn failed(model: &str, total: u64, downloaded: u64, error: String, kind: DownloadKind) -> Self {
         Self {
             model: model.to_string(),
+            kind,
             downloaded_bytes: downloaded,
             total_bytes: total,
             percent: percent(downloaded, total),
@@ -116,9 +140,25 @@ impl DownloadManager {
     /// Idempotent on purpose: a double-clicked button, a retried request, and a second window
     /// must not each start their own transfer of the same 3 GB file.
     pub async fn start(&self, model: ModelInfo, store: ModelStore) -> DownloadState {
-        let mut active = self.active.lock().await;
+        self.start_artifact(model.artifact(), store, DownloadKind::Transcription)
+            .await
+    }
 
-        if let Some(sender) = active.get(&model.name.to_string()) {
+    /// Start a download of any artifact, or return the one already running.
+    ///
+    /// Keyed by kind *and* name. Keying on name alone would let a speaker model and a Whisper
+    /// model of the same name share one entry — and since the two are watched through different
+    /// routes, the wrong one would answer.
+    pub async fn start_artifact(
+        &self,
+        artifact: Artifact,
+        store: ModelStore,
+        kind: DownloadKind,
+    ) -> DownloadState {
+        let mut active = self.active.lock().await;
+        let key = Self::key(kind, &artifact.name);
+
+        if let Some(sender) = active.get(&key) {
             let current = sender.borrow().clone();
             // A finished or failed entry is not a running download; let it be retried.
             if !current.status.is_terminal() {
@@ -126,23 +166,31 @@ impl DownloadManager {
             }
         }
 
-        let initial = DownloadState::starting(&model);
+        let initial = DownloadState::starting(&artifact, kind);
         let (sender, _) = watch::channel(initial.clone());
         let sender = Arc::new(sender);
-        active.insert(model.name.to_string(), Arc::clone(&sender));
+        active.insert(key, Arc::clone(&sender));
 
         let task_sender = sender;
-        let name = model.name.to_string();
-        let total = model.bytes;
+        let name = artifact.name.clone();
+        let total = artifact.bytes;
 
         tokio::spawn(async move {
             let progress_sender = Arc::clone(&task_sender);
             let progress_name = name.clone();
 
             let result = store
-                .download_with_progress(&model, move |p| {
-                    let _ = progress_sender.send(DownloadState {
+                .fetch(&artifact, move |p| {
+                    // `send_replace`, not `send`: `watch::Sender::send` fails when no receiver
+                    // exists, leaving the stored value at whatever was last delivered. Progress
+                    // is read two ways — streamed to a subscriber *and* read back through
+                    // `borrow()` by `state`/`all` — so a state nobody is streaming must still be
+                    // recorded. With `send` a download that finished before anyone subscribed
+                    // stayed "downloading, 0%" forever, and the idempotency guard then refused to
+                    // restart it because that is not a terminal state.
+                    progress_sender.send_replace(DownloadState {
                         model: progress_name.clone(),
+                        kind,
                         downloaded_bytes: p.downloaded_bytes,
                         total_bytes: p.total_bytes,
                         percent: percent(p.downloaded_bytes, p.total_bytes),
@@ -155,31 +203,43 @@ impl DownloadManager {
             let final_state = match result {
                 Ok(_) => {
                     tracing::info!(model = %name, "download finished");
-                    DownloadState::done(&name, total)
+                    DownloadState::done(&name, total, kind)
                 }
                 Err(e) => {
                     tracing::error!(model = %name, error = %e, "download failed");
                     let downloaded = task_sender.borrow().downloaded_bytes;
-                    DownloadState::failed(&name, total, downloaded, e.to_string())
+                    DownloadState::failed(&name, total, downloaded, e.to_string(), kind)
                 }
             };
-            let _ = task_sender.send(final_state);
+            task_sender.send_replace(final_state);
         });
 
         initial
     }
 
-    /// Subscribe to a download's progress, if it exists.
-    pub async fn subscribe(&self, model: &str) -> Option<watch::Receiver<DownloadState>> {
-        self.active.lock().await.get(model).map(|s| s.subscribe())
+    /// How an entry is keyed, so the two catalogues cannot shadow each other.
+    fn key(kind: DownloadKind, name: &str) -> String {
+        match kind {
+            DownloadKind::Transcription => name.to_string(),
+            DownloadKind::Speaker => format!("speaker:{name}"),
+        }
     }
 
-    /// The current state of one download.
+    /// Subscribe to a Whisper model's progress, if it exists.
+    pub async fn subscribe(&self, model: &str) -> Option<watch::Receiver<DownloadState>> {
+        self.active
+            .lock()
+            .await
+            .get(&Self::key(DownloadKind::Transcription, model))
+            .map(|s| s.subscribe())
+    }
+
+    /// The current state of one Whisper model download.
     pub async fn state(&self, model: &str) -> Option<DownloadState> {
         self.active
             .lock()
             .await
-            .get(model)
+            .get(&Self::key(DownloadKind::Transcription, model))
             .map(|s| s.borrow().clone())
     }
 
@@ -221,7 +281,13 @@ mod tests {
     /// A failure must carry its reason. "It stopped" is not something a user can act on.
     #[test]
     fn a_failed_state_keeps_the_error_and_the_progress_it_reached() {
-        let state = DownloadState::failed("base.en", 1000, 400, "connection reset".into());
+        let state = DownloadState::failed(
+            "base.en",
+            1000,
+            400,
+            "connection reset".into(),
+            DownloadKind::Transcription,
+        );
         assert_eq!(state.status, DownloadStatus::Failed);
         assert_eq!(state.error.as_deref(), Some("connection reset"));
         assert_eq!(state.downloaded_bytes, 400);
@@ -234,5 +300,121 @@ mod tests {
         assert!(manager.state("nope").await.is_none());
         assert!(manager.subscribe("nope").await.is_none());
         assert!(manager.all().await.is_empty());
+    }
+
+    /// An artifact that cannot be fetched, for tests that must not touch the network.
+    fn unreachable(name: &str) -> Artifact {
+        Artifact {
+            name: name.into(),
+            filename: format!("{name}.bin"),
+            url: "https://notewise.invalid/nope.bin".into(),
+            bytes: 128,
+        }
+    }
+
+    /// Every tracked download must say which catalogue it belongs to.
+    ///
+    /// Regression: the shared registry listed a speaker-model download in `GET /v1/downloads`, the
+    /// desktop app watched whatever was running through `/v1/models/:name/download`, and the
+    /// engine answered `400 not in the registry` twice on every settings page load.
+    #[tokio::test]
+    async fn a_tracked_download_carries_its_catalogue() {
+        let manager = DownloadManager::new();
+        let dir = std::env::temp_dir().join(format!("notewise-kind-{}", std::process::id()));
+
+        manager
+            .start_artifact(
+                unreachable("campplus-voxceleb"),
+                ModelStore::new(&dir),
+                DownloadKind::Speaker,
+            )
+            .await;
+
+        let all = manager.all().await;
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].kind, DownloadKind::Speaker);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The two catalogues must not share an entry, or the wrong one answers.
+    ///
+    /// `state`/`subscribe` are the transcription-side lookups, so a speaker download of the same
+    /// name must be invisible to them — otherwise a client watching a Whisper model would be
+    /// handed a speaker model's progress.
+    #[tokio::test]
+    async fn a_speaker_download_does_not_shadow_a_whisper_one() {
+        let manager = DownloadManager::new();
+        let dir = std::env::temp_dir().join(format!("notewise-shadow-{}", std::process::id()));
+
+        // Deliberately the same name in both catalogues — the collision this keys against.
+        manager
+            .start_artifact(
+                unreachable("collide"),
+                ModelStore::new(&dir),
+                DownloadKind::Speaker,
+            )
+            .await;
+
+        assert!(
+            manager.state("collide").await.is_none(),
+            "the transcription lookup must not see a speaker download"
+        );
+        assert!(manager.subscribe("collide").await.is_none());
+
+        manager
+            .start_artifact(
+                unreachable("collide"),
+                ModelStore::new(&dir),
+                DownloadKind::Transcription,
+            )
+            .await;
+
+        assert_eq!(
+            manager.state("collide").await.map(|s| s.kind),
+            Some(DownloadKind::Transcription),
+            "now the transcription entry exists and is the one returned"
+        );
+        assert_eq!(manager.all().await.len(), 2, "both are tracked separately");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A download nobody is watching must still record how it ended.
+    ///
+    /// Regression, and the subtle one: `watch::Sender::send` returns `Err` when every receiver has
+    /// been dropped, so with no subscriber the stored value never advanced past `starting`. The
+    /// entry sat at "downloading, 0%" forever — and because that is not terminal, the idempotency
+    /// guard then refused to retry it, so the model could never be downloaded again either. It was
+    /// invisible for Whisper models only because that UI always opens the progress stream.
+    #[tokio::test]
+    async fn a_download_with_no_subscriber_still_reaches_a_terminal_state() {
+        let manager = DownloadManager::new();
+        let dir = std::env::temp_dir().join(format!("notewise-dl-{}", std::process::id()));
+
+        // A host that cannot resolve, so this fails quickly and offline.
+        manager
+            .start_artifact(
+                unreachable("unreachable"),
+                ModelStore::new(&dir),
+                DownloadKind::Transcription,
+            )
+            .await;
+
+        // Deliberately no `subscribe()` — that is the condition being tested.
+        let mut waited = 0;
+        loop {
+            let state = manager.state("unreachable").await.expect("an entry");
+            if state.status.is_terminal() {
+                assert_eq!(state.status, DownloadStatus::Failed);
+                assert!(state.error.is_some(), "a failure must carry its reason");
+                break;
+            }
+            assert!(waited < 100, "state never became terminal: {state:?}");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            waited += 1;
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

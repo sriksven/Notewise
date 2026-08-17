@@ -69,7 +69,12 @@ export function useModelDownload(onFinished: () => void | Promise<void>): ModelD
     void api
       .downloads()
       .then((states) => {
-        const running = states.find((s) => s.status === "downloading");
+        // Transcription models only. The engine tracks speaker-model downloads in the same
+        // registry, and `watchDownload` streams from `/v1/models/:name/download` — which does not
+        // know those names and answered 400 for each one.
+        const running = states.find(
+          (s) => s.status === "downloading" && s.kind === "transcription",
+        );
         if (!running) return;
 
         setDownloading(running.model);

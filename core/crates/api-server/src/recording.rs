@@ -484,7 +484,10 @@ mod imp {
                         .build()
                         .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
-                    let engine = WhisperEngine::new(model, store)
+                    // Cloned, not moved: the speaker model lives in the same store and is looked
+                    // up after the engine is built. `ModelStore` is a directory path, so this is
+                    // cheap.
+                    let engine = WhisperEngine::new(model, store.clone())
                         .map_err(|e| RecordingError::Failed(e.to_string()))?
                         .with_language(language);
 
@@ -503,7 +506,22 @@ mod imp {
                         })
                         .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
-                    let mut pipeline = Pipeline::new(Box::new(engine));
+                    // An import is the case acoustic separation exists for: one mono stream, no
+                    // platform timeline, so who spoke is only recoverable from the voices. Off
+                    // unless the user turned it on and the model is present — `diarizer_for_import`
+                    // returns `None` for every ordinary reason so the import still goes ahead.
+                    let mut pipeline = match crate::diarization::diarizer_for_import(&db, &store) {
+                        Some((diarizer, retain_ms)) => {
+                            tracing::info!(
+                                diarizer = diarizer.name(),
+                                retain_ms,
+                                "importing with acoustic speaker separation"
+                            );
+                            Pipeline::new(Box::new(engine)).with_audio_diarizer(diarizer, retain_ms)
+                        }
+                        None => Pipeline::new(Box::new(engine)),
+                    };
+
                     let stats = runtime
                         .block_on(pipeline.run(&db, meeting.id, &mut source, || false))
                         .map_err(|e| RecordingError::Failed(e.to_string()))?;

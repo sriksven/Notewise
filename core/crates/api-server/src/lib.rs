@@ -32,6 +32,7 @@
 mod agent;
 mod ask;
 mod connectors;
+pub mod diarization;
 pub mod downloads;
 mod error;
 pub mod indexing;

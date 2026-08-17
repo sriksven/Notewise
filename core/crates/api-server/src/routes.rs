@@ -62,6 +62,21 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             "/v1/meetings/:id/speakers/rename",
             post(crate::speakers::rename_speaker),
         )
+        // Acoustic separation: the setting, and the model it needs. Off by default — see
+        // `crate::diarization` for why a guess is not the default answer to "who spoke".
+        .route(
+            "/v1/diarization",
+            get(crate::diarization::get_status).put(crate::diarization::update_status),
+        )
+        .route("/v1/speaker-models", get(crate::diarization::list_models))
+        .route(
+            "/v1/speaker-models/:name/download",
+            post(crate::diarization::download_model),
+        )
+        .route(
+            "/v1/speaker-models/:name",
+            axum::routing::delete(crate::diarization::remove_model),
+        )
         .route("/v1/meetings/:id/summarize", post(summarize_meeting))
         .route("/v1/meetings/:id/summary", get(get_summary))
         .route("/v1/meetings/:id/related", get(related_to_meeting))
@@ -4228,5 +4243,267 @@ mod tests {
             !hits.as_array().unwrap().is_empty(),
             "renaming should have reindexed: {hits}"
         );
+    }
+
+    // ------------------------------------------------------------ acoustic separation
+
+    fn put(uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("PUT")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    }
+
+    /// A guess must never be the default answer to "who spoke".
+    #[tokio::test]
+    async fn acoustic_separation_is_off_until_someone_turns_it_on() {
+        let (status, body) = call(&app(), get("/v1/diarization")).await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["mode"], "off");
+        assert_eq!(body["effective"], false);
+        assert_eq!(body["blocked_by"], "Speaker separation is turned off.");
+        assert_eq!(body["retain_minutes"], 90);
+    }
+
+    /// Turning it on is allowed even when it cannot run yet — but it must say why it will not.
+    #[tokio::test]
+    async fn turning_it_on_reports_what_is_still_missing() {
+        let app = app();
+        let (status, body) = call(
+            &app,
+            put("/v1/diarization", serde_json::json!({"mode": "acoustic"})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["mode"], "acoustic");
+        assert_eq!(body["effective"], false, "nothing is downloaded: {body}");
+
+        // Whichever of the two conditions this build fails, it must name it rather than going
+        // quiet — "on, and nothing happens" is the state this field exists to prevent.
+        let reason = body["blocked_by"].as_str().expect("a reason");
+        assert!(
+            reason.contains("compiled without") || reason.contains("not been downloaded"),
+            "unhelpful reason: {reason}"
+        );
+        assert_eq!(body["supported"], cfg!(feature = "speaker-diarization"));
+    }
+
+    #[tokio::test]
+    async fn the_setting_survives_a_round_trip() {
+        let app = app();
+        call(
+            &app,
+            put(
+                "/v1/diarization",
+                serde_json::json!({"mode": "acoustic", "retain_minutes": 30}),
+            ),
+        )
+        .await;
+
+        let (_, body) = call(&app, get("/v1/diarization")).await;
+        assert_eq!(body["mode"], "acoustic");
+        assert_eq!(body["retain_minutes"], 30);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_speaker_model_is_rejected() {
+        let (status, _) = call(
+            &app(),
+            put("/v1/diarization", serde_json::json!({"model": "nonesuch"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// A zero budget would mean the pass silently never runs; a huge one would try to hold the
+    /// machine's whole memory.
+    #[tokio::test]
+    async fn an_out_of_range_retention_budget_is_rejected() {
+        for bad in [0, -1, 100_000] {
+            let (status, _) = call(
+                &app(),
+                put(
+                    "/v1/diarization",
+                    serde_json::json!({"retain_minutes": bad}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "for {bad}");
+        }
+    }
+
+    /// A rejected field must not leave half the change applied.
+    #[tokio::test]
+    async fn a_rejected_update_changes_nothing() {
+        let app = app();
+        let (status, _) = call(
+            &app,
+            put(
+                "/v1/diarization",
+                serde_json::json!({"mode": "acoustic", "model": "nonesuch"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (_, body) = call(&app, get("/v1/diarization")).await;
+        assert_eq!(body["mode"], "off", "the valid half must not have landed");
+    }
+
+    /// Against a temporary directory: asserting "nothing is installed" while reading the real
+    /// model directory makes the result depend on whatever the developer has downloaded.
+    #[tokio::test]
+    async fn speaker_models_are_listed_with_install_state_and_a_tradeoff() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (status, body) = call(&app_with_model_dir(dir.path()), get("/v1/speaker-models")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let models = body["models"].as_array().expect("models");
+        assert!(models.len() >= 3, "{body}");
+
+        for model in models {
+            assert!(model["bytes"].as_u64().unwrap() > 1_000_000, "{model}");
+            // A menu of three names and three sizes is a quiz, not a choice.
+            assert!(!model["tradeoff"].as_str().unwrap().is_empty(), "{model}");
+            assert_eq!(model["installed"], false, "nothing is downloaded in a test");
+        }
+
+        assert_eq!(
+            models.iter().filter(|m| m["recommended"] == true).count(),
+            1,
+            "exactly one model should be recommended"
+        );
+        assert_eq!(
+            models.iter().filter(|m| m["selected"] == true).count(),
+            1,
+            "the default should be selected when nothing has been chosen"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_speaker_model_cannot_be_downloaded_or_removed() {
+        let app = app();
+
+        let (status, _) = call(
+            &app,
+            post(
+                "/v1/speaker-models/nonesuch/download",
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (status, _) = call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/speaker-models/nonesuch")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// Removing a model that was never downloaded is a no-op, not an error — the caller's intent
+    /// is "make it not be there", and it already is not.
+    ///
+    /// Runs against a temporary model directory, and must stay that way. `app()` resolves the
+    /// *real* one, so this test deleted the developer's actual downloaded model every time the
+    /// suite ran — silently, since the assertion passes either way.
+    #[tokio::test]
+    async fn removing_a_model_that_is_not_installed_succeeds() {
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        let (status, body) = call(
+            &app_with_model_dir(dir.path()),
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/speaker-models/campplus-voxceleb")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["removed"], "campplus-voxceleb");
+    }
+
+    /// An installed model is reported as installed, and removing it actually removes it.
+    ///
+    /// Isolated for the same reason as above: these are real files.
+    #[tokio::test]
+    async fn an_installed_speaker_model_can_be_removed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let model = notewise_diarization::SpeakerModelRegistry::default_model();
+
+        // The store verifies by exact size, so the fixture has to be exactly that long.
+        std::fs::write(
+            dir.path().join(model.filename()),
+            vec![0u8; model.bytes as usize],
+        )
+        .expect("fixture");
+
+        let app = app_with_model_dir(dir.path());
+
+        let (_, listed) = call(&app, get("/v1/speaker-models")).await;
+        let entry = listed["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == model.name)
+            .unwrap()
+            .clone();
+        assert_eq!(entry["installed"], true, "{entry}");
+
+        call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri(&format!("/v1/speaker-models/{}", model.name))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert!(
+            !dir.path().join(model.filename()).exists(),
+            "the file should be gone"
+        );
+    }
+
+    /// Speaker models and Whisper models share a directory, so their listings must not bleed.
+    #[tokio::test]
+    async fn the_two_model_catalogues_stay_separate() {
+        let app = app();
+
+        let (_, whisper) = call(&app, get("/v1/models")).await;
+        let (_, speaker) = call(&app, get("/v1/speaker-models")).await;
+
+        let names = |body: &serde_json::Value| -> Vec<String> {
+            body["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+
+        let whisper_names = names(&whisper);
+        let speaker_names = names(&speaker);
+
+        assert!(whisper_names.contains(&"base.en".to_string()));
+        assert!(speaker_names.contains(&"campplus-voxceleb".to_string()));
+        for name in &speaker_names {
+            assert!(
+                !whisper_names.contains(name),
+                "{name} appears in both catalogues"
+            );
+        }
     }
 }

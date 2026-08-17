@@ -101,6 +101,16 @@ pub enum DiarizationError {
 
 pub type Result<T> = std::result::Result<T, DiarizationError>;
 
+/// Whether this build can run a speaker-embedding model at all.
+///
+/// [`SpeakerEmbedder`] compiles either way and returns [`DiarizationError::Unavailable`] without
+/// the `onnx` feature, which is what lets callers be written once. But a surface needs to say
+/// "this build cannot do that" *before* a user downloads 29 MB and turns on a setting that will
+/// never do anything — the same reason `/health` reports `can_record`.
+pub const fn acoustic_available() -> bool {
+    cfg!(feature = "onnx")
+}
+
 /// Assigns speaker labels to a transcript.
 pub trait Diarizer: std::fmt::Debug {
     fn name(&self) -> &str;

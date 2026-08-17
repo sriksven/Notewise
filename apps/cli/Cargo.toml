@@ -49,5 +49,16 @@ whisper-metal = [
     "notewise-recorder/whisper-metal",
     "notewise-api-server/whisper-metal",
 ]
+# Acoustic speaker separation on imports. Pulls ONNX Runtime.
+#
+# Forwarded to api-server for the same reason `record` is: otherwise `notewise serve` reports a
+# capability the engine behind it does not have, and the setting turns on to no effect.
+speaker-diarization = ["notewise-api-server/speaker-diarization"]
+# Same, but fetches ONNX Runtime at build time instead of expecting one on the system. Without
+# this the link fails on `_OrtGetApiBase`, which is not an obvious error to meet.
+speaker-diarization-download = [
+    "speaker-diarization",
+    "notewise-api-server/speaker-diarization-download",
+]
 # Everything needed to actually record a meeting on this machine.
 full = ["record", "whisper-metal"]

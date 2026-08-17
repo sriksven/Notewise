@@ -60,6 +60,22 @@ whisper-metal = [
     "notewise-transcription/whisper-metal",
     "notewise-recorder/whisper-metal",
 ]
+# Acoustic speaker separation. Pulls ONNX Runtime.
+#
+# Nothing in this crate is `#[cfg]`-gated on it: `SpeakerEmbedder` compiles either way and
+# reports `Unavailable` without it, so the routes and the settings exist in every build and say
+# so honestly. The feature only decides whether the model can actually run.
+speaker-diarization = ["notewise-diarization/onnx"]
+# The same, fetching the ONNX Runtime binaries rather than expecting a system install.
+#
+# Depends on `speaker-diarization` rather than only on the downstream feature: without that, a
+# build with just this flag has a working model while this crate's own feature reads as off, and
+# the two disagree about what the build can do.
+speaker-diarization-download = [
+    "speaker-diarization",
+    "notewise-diarization/onnx-download",
+]
+
 # Everything needed for the desktop app to actually record.
 full = ["record", "whisper"]
 full-metal = ["record", "whisper-metal"]

@@ -19,6 +19,7 @@ import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { SearchIndexSettings } from "./SearchIndexSettings";
+import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
 
 /** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
@@ -181,6 +182,11 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
         )}
 
         <SearchIndexSettings />
+
+        {/* Above voiceprints deliberately: separating voices is the anonymous, local step, and
+            recognising them across meetings is the one that identifies a person. Reading them in
+            that order is reading them from least to most consequential. */}
+        <SpeakerSeparationSettings />
 
         <VoiceprintSettings />
 

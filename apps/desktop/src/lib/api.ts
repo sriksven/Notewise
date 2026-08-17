@@ -34,6 +34,14 @@ export interface Health {
 
 export interface DownloadState {
   model: string;
+  /**
+   * Which catalogue this belongs to.
+   *
+   * One engine-side manager tracks both, but progress is streamed by per-catalogue routes — so a
+   * caller reading {@link ApiClient.downloads} must check this before watching an entry. Watching
+   * a `speaker` download through the transcription route answers 400.
+   */
+  kind: "transcription" | "speaker";
   downloaded_bytes: number;
   total_bytes: number;
   percent: number;
@@ -228,6 +236,30 @@ export interface Segment {
   start_ms: number;
   end_ms: number;
   confidence: number | null;
+}
+
+/** Whether acoustic speaker separation will run, and what is stopping it if not. */
+export interface DiarizationStatus {
+  mode: "off" | "acoustic";
+  model: string;
+  retain_minutes: number;
+  /** Whether this build has the feature compiled in at all. */
+  supported: boolean;
+  model_installed: boolean;
+  /** True only when all three conditions hold. */
+  effective: boolean;
+  /** Why it will not run. `null` when it will. */
+  blocked_by: string | null;
+}
+
+export interface SpeakerModel {
+  name: string;
+  bytes: number;
+  approx_mb: number;
+  installed: boolean;
+  selected: boolean;
+  recommended: boolean;
+  tradeoff: string;
 }
 
 /** One distinct voice in a meeting, with enough weight to judge it by. */
@@ -575,6 +607,41 @@ export const api = {
 
   forgetVoiceprints: () =>
     request<{ erased: number }>("/v1/voiceprints", { method: "DELETE" }),
+
+  diarization: () => request<DiarizationStatus>("/v1/diarization"),
+
+  /**
+   * Change the setting.
+   *
+   * Turning it on before the model has downloaded is allowed on purpose — the setting is intent,
+   * and `blocked_by` explains what is still missing.
+   */
+  setDiarization: (patch: {
+    mode?: "off" | "acoustic";
+    model?: string;
+    retain_minutes?: number;
+  }) =>
+    request<DiarizationStatus>("/v1/diarization", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+
+  speakerModels: () =>
+    request<{ models: SpeakerModel[]; directory: string; supported: boolean }>(
+      "/v1/speaker-models",
+    ),
+
+  downloadSpeakerModel: (name: string) =>
+    request<{ model: string; percent: number; status: string }>(
+      `/v1/speaker-models/${encodeURIComponent(name)}/download`,
+      { method: "POST" },
+    ),
+
+  removeSpeakerModel: (name: string) =>
+    request<{ removed: string }>(
+      `/v1/speaker-models/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    ),
 
   setPreferences: (prefs: Record<string, unknown>) =>
     request<Record<string, unknown>>("/v1/preferences", {

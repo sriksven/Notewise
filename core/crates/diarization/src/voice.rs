@@ -234,6 +234,109 @@ mod tests {
         }
     }
 
+    /// Diagnostic: what the acoustic pass actually labels, given known turn boundaries.
+    ///
+    /// The end-to-end shape of the feature without whisper in the way — a mono recording plus the
+    /// timings, which is what an import reduces to once transcription has run.
+    ///
+    /// ```sh
+    /// NOTEWISE_SPEAKER_MODEL=/path/model.onnx \
+    /// NOTEWISE_TURNS_WAV=/path/two_speakers.wav \
+    /// NOTEWISE_TURNS="0:5000:A,5500:11530:B,12030:16300:A,16800:22020:B" \
+    ///   cargo test -p notewise-diarization --features onnx-download -- --ignored --nocapture \
+    ///   print_the_turn_assignment
+    /// ```
+    ///
+    /// Prints rather than asserts a pass. Whether clustering *is* accurate is a measurement, and
+    /// one that depends entirely on whose voices are in the file — an assertion tuned to one
+    /// recording would report a threshold as a fact.
+    #[tokio::test]
+    #[cfg(feature = "onnx")]
+    #[ignore = "diagnostic; requires a model and a multi-speaker wav"]
+    async fn print_the_turn_assignment() {
+        use notewise_audio_capture::AudioSource;
+
+        let model = std::env::var("NOTEWISE_SPEAKER_MODEL").expect("NOTEWISE_SPEAKER_MODEL");
+        let wav = std::env::var("NOTEWISE_TURNS_WAV").expect("NOTEWISE_TURNS_WAV");
+        let turns = std::env::var("NOTEWISE_TURNS").expect("NOTEWISE_TURNS");
+
+        let expected: Vec<(i64, i64, String)> = turns
+            .split(',')
+            .map(|t| {
+                let parts: Vec<&str> = t.split(':').collect();
+                (
+                    parts[0].parse().expect("start"),
+                    parts[1].parse().expect("end"),
+                    parts[2].to_string(),
+                )
+            })
+            .collect();
+
+        let mut source = notewise_audio_capture::FileSource::open_wav(&wav).expect("wav");
+        let mut samples = Vec::new();
+        while let Some(frame) = source.next_frame().expect("frame") {
+            samples.extend_from_slice(&frame.to_transcription_format().samples);
+        }
+        println!(
+            "loaded {:.1}s of audio in {} turns",
+            samples.len() as f32 / 16_000.0,
+            expected.len()
+        );
+
+        let input = Transcript::new(
+            expected
+                .iter()
+                .enumerate()
+                .map(|(i, (start, end, _))| Segment::new(format!("turn {i}"), *start, *end))
+                .collect(),
+        );
+
+        let embedder = SpeakerEmbedder::load(&model).expect("speaker model");
+        let output = EmbeddingDiarizer::new(embedder)
+            .diarize(&input, &samples, 16_000)
+            .expect("diarize");
+
+        println!("\n  truth   assigned   span");
+        let mut correct_grouping = true;
+        let mut mapping: std::collections::HashMap<String, String> = Default::default();
+        for ((start, end, truth), segment) in expected.iter().zip(output.segments.iter()) {
+            let assigned = segment.speaker.clone().unwrap_or_default();
+            println!("  {truth:<7} {assigned:<10} {start}..{end}ms");
+
+            // Consistency, not label equality: cluster names are arbitrary, so what matters is
+            // whether one real speaker maps to exactly one cluster.
+            match mapping.get(truth) {
+                Some(existing) if *existing != assigned => correct_grouping = false,
+                None => {
+                    if mapping.values().any(|v| *v == assigned) {
+                        correct_grouping = false;
+                    }
+                    mapping.insert(truth.clone(), assigned);
+                }
+                _ => {}
+            }
+        }
+
+        let distinct: std::collections::HashSet<_> = output
+            .segments
+            .iter()
+            .filter_map(|s| s.speaker.clone())
+            .collect();
+        let truth_count: std::collections::HashSet<_> =
+            expected.iter().map(|(_, _, t)| t.clone()).collect();
+
+        println!(
+            "\nSUMMARY {} real speakers, {} clusters found, grouping {}",
+            truth_count.len(),
+            distinct.len(),
+            if correct_grouping {
+                "CORRECT"
+            } else {
+                "WRONG — a speaker was split or two were merged"
+            }
+        );
+    }
+
     /// Needs the ONNX feature and a downloaded speaker model, so it cannot run in a default
     /// build. Without it, a green suite must not suggest voice separation works.
     #[tokio::test]

@@ -102,3 +102,25 @@ jobs:
 
       - name: audio-capture without OS backends
         run: cargo check -p notewise-audio-capture --no-default-features
+
+      # The other direction, and the one that was missing: code behind an *enabled* feature is
+      # never compiled by the default build, so `cargo build --workspace` is green while a real
+      # desktop build is broken. That happened — the import path moved a `ModelStore` that a
+      # later line still needed, and only a `record` build could see it.
+      #
+      # ALSA headers are what `os-capture` needs on Linux; the feature is macOS-first but has to
+      # keep compiling here for this check to be worth running.
+      - name: linux audio headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: api-server with capture
+        run: cargo check -p notewise-api-server --features record --all-targets
+
+      # `onnx` without `onnx-download` expects a system ONNX Runtime, which would fail to *link* —
+      # `cargo check` stops before that, which is exactly the point: it type-checks the acoustic
+      # diarization path without a 50 MB download in CI.
+      - name: api-server with acoustic speaker separation
+        run: cargo check -p notewise-api-server --features speaker-diarization --all-targets
+
+      - name: diarization with onnx
+        run: cargo check -p notewise-diarization --features onnx --all-targets
