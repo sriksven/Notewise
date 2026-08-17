@@ -33,7 +33,7 @@ mod stream;
 pub use engine::{MockEngine, TranscriptionEngine, WhisperEngine};
 // Re-exported so downstream crates can implement the trait without adding the dependency.
 pub use async_trait::async_trait;
-pub use models::{DownloadProgress, ModelInfo, ModelRegistry, ModelSize, ModelStore};
+pub use models::{Artifact, DownloadProgress, ModelInfo, ModelRegistry, ModelSize, ModelStore};
 pub use parakeet::{ParakeetEngine, ParakeetPaths, Vocabulary};
 
 /// The name that selects Parakeet wherever a Whisper model name is accepted.

@@ -94,6 +94,16 @@ impl ModelInfo {
         format!("ggml-{}.bin", self.name)
     }
 
+    /// This model as a downloadable file.
+    pub fn artifact(&self) -> Artifact {
+        Artifact {
+            name: self.name.clone(),
+            filename: self.filename(),
+            url: self.url.clone(),
+            bytes: self.bytes,
+        }
+    }
+
     /// Rough working-set estimate, for warning a user before they pick a model their
     /// machine cannot run.
     pub fn approx_ram_mb(&self) -> u64 {
@@ -181,6 +191,23 @@ impl ModelRegistry {
     }
 }
 
+/// A file to fetch once and keep on disk.
+///
+/// Extracted from [`ModelInfo`] so the same resumable, size-verified download can serve models
+/// this crate knows nothing about. A speaker-embedding network belongs to `diarization`, and
+/// giving it its own downloader would mean two implementations of resume-and-verify drifting
+/// apart — with the interesting failures (a server that ignores `Range`, a truncated file that
+/// looks installed) fixed in only one of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    /// Used only in errors and logs.
+    pub name: String,
+    pub filename: String,
+    pub url: String,
+    /// Exact expected size. The integrity check, and the reason a resume knows what "partial" is.
+    pub bytes: u64,
+}
+
 /// How far a download has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DownloadProgress {
@@ -229,7 +256,11 @@ impl ModelStore {
     }
 
     pub fn path_for(&self, model: &ModelInfo) -> PathBuf {
-        self.dir.join(model.filename())
+        self.artifact_path(&model.artifact())
+    }
+
+    pub fn artifact_path(&self, artifact: &Artifact) -> PathBuf {
+        self.dir.join(&artifact.filename)
     }
 
     /// Whether the model is present and the right size.
@@ -237,24 +268,32 @@ impl ModelStore {
     /// Size is checked, not just existence: a download interrupted at 90% leaves a file that
     /// exists and fails at load time with a far less obvious error.
     pub fn is_available(&self, model: &ModelInfo) -> bool {
-        std::fs::metadata(self.path_for(model))
-            .map(|m| m.len() == model.bytes)
+        self.has_artifact(&model.artifact())
+    }
+
+    pub fn has_artifact(&self, artifact: &Artifact) -> bool {
+        std::fs::metadata(self.artifact_path(artifact))
+            .map(|m| m.len() == artifact.bytes)
             .unwrap_or(false)
     }
 
     /// Verify a downloaded model, returning a specific error if it is wrong.
     pub fn verify(&self, model: &ModelInfo) -> Result<()> {
-        let path = self.path_for(model);
+        self.verify_artifact(&model.artifact())
+    }
+
+    pub fn verify_artifact(&self, artifact: &Artifact) -> Result<()> {
+        let path = self.artifact_path(artifact);
 
         let metadata =
             std::fs::metadata(&path).map_err(|_| TranscriptionError::ModelNotDownloaded {
-                name: model.name.clone(),
+                name: artifact.name.clone(),
             })?;
 
-        if metadata.len() != model.bytes {
+        if metadata.len() != artifact.bytes {
             return Err(TranscriptionError::ModelCorrupt {
-                name: model.name.clone(),
-                expected: model.bytes,
+                name: artifact.name.clone(),
+                expected: artifact.bytes,
                 actual: metadata.len(),
             });
         }
@@ -272,7 +311,11 @@ impl ModelStore {
 
     /// Delete a downloaded model.
     pub fn remove(&self, model: &ModelInfo) -> Result<()> {
-        let path = self.path_for(model);
+        self.remove_artifact(&model.artifact())
+    }
+
+    pub fn remove_artifact(&self, artifact: &Artifact) -> Result<()> {
+        let path = self.artifact_path(artifact);
         if path.exists() {
             std::fs::remove_file(path)?;
         }
@@ -310,13 +353,22 @@ impl ModelStore {
     pub async fn download_with_progress(
         &self,
         model: &ModelInfo,
+        on_progress: impl FnMut(DownloadProgress),
+    ) -> Result<PathBuf> {
+        self.fetch(&model.artifact(), on_progress).await
+    }
+
+    /// Download any artifact, with the same resume, verification and progress reporting.
+    pub async fn fetch(
+        &self,
+        model: &Artifact,
         mut on_progress: impl FnMut(DownloadProgress),
     ) -> Result<PathBuf> {
         use futures_util::StreamExt;
         use std::io::Write;
 
-        let final_path = self.path_for(model);
-        if self.is_available(model) {
+        let final_path = self.artifact_path(model);
+        if self.has_artifact(model) {
             on_progress(DownloadProgress::complete(model.bytes));
             return Ok(final_path);
         }
@@ -415,7 +467,7 @@ impl ModelStore {
         // Verified after the rename so a corrupt artifact is reported rather than trusted.
         // A failed verify removes the file: leaving it would make `is_available` true and
         // every later run would load a broken model instead of re-downloading.
-        if let Err(e) = self.verify(model) {
+        if let Err(e) = self.verify_artifact(model) {
             let _ = std::fs::remove_file(&final_path);
             return Err(e);
         }

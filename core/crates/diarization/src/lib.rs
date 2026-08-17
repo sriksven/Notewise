@@ -37,6 +37,7 @@
 
 pub mod cluster;
 pub mod embedding;
+pub mod models;
 pub mod named;
 pub mod spans;
 pub mod timeline;
@@ -44,6 +45,7 @@ pub mod voice;
 
 pub use cluster::{cosine_distance, normalize, ClusterConfig};
 pub use embedding::{SpeakerEmbedder, MIN_EMBEDDING_MS};
+pub use models::{SpeakerModel, SpeakerModelRegistry};
 pub use named::{NamedClusterDiarizer, NamingConfig};
 pub use spans::{samples_for, select_spans, subtract_overlaps, Span, SpanConfig};
 pub use timeline::{
@@ -66,6 +68,11 @@ pub enum DiarizationError {
     /// Loading or running the model failed.
     #[error("speaker model: {0}")]
     Model(String),
+
+    /// No speaker model by that name. Named rather than silently falling back to the default:
+    /// a typo in a setting must not look like the chosen model performing badly.
+    #[error("unknown speaker model '{0}'")]
+    UnknownModel(String),
 
     /// Too little audio to identify anyone from.
     #[error("{got_ms} ms of audio is too short to identify a speaker; {needed_ms} ms is needed")]
