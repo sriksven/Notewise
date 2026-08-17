@@ -138,6 +138,135 @@ pub async fn post_speaker_events(
     }))
 }
 
+/// One voice in a meeting, as the UI sees it.
+#[derive(Debug, Serialize)]
+pub struct SpeakerView {
+    /// `null` for segments no diarizer labelled — nameable like any other.
+    pub label: Option<String>,
+    pub segments: u32,
+    pub speaking_ms: i64,
+    pub first_at_ms: i64,
+    /// Whether this label came from a diarizer rather than a person.
+    ///
+    /// The UI leads with "who is this?" for anonymous clusters and leaves named ones alone.
+    /// Inferred from the label's shape because nothing records provenance per segment — which
+    /// is a real limitation: someone who genuinely types "Speaker 2" as a name gets prompted
+    /// about it. The cost of being wrong is a prompt, so shape is good enough.
+    pub anonymous: bool,
+}
+
+impl From<notewise_storage::SpeakerSummary> for SpeakerView {
+    fn from(s: notewise_storage::SpeakerSummary) -> Self {
+        let anonymous = match s.label.as_deref() {
+            None => true,
+            Some(label) => label
+                .strip_prefix("Speaker ")
+                .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())),
+        };
+        Self {
+            label: s.label,
+            segments: s.segments,
+            speaking_ms: s.speaking_ms,
+            first_at_ms: s.first_at_ms,
+            anonymous,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpeakerList {
+    pub speakers: Vec<SpeakerView>,
+}
+
+/// The distinct voices in a meeting.
+pub async fn list_speakers(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<SpeakerList>> {
+    let meeting_id = parse_id(&id)?;
+    let db = state.db().await;
+    let repo = MeetingRepository::new(&db);
+    repo.get(meeting_id)?;
+
+    Ok(Json(SpeakerList {
+        speakers: repo
+            .speakers(meeting_id)?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameSpeaker {
+    /// The label to replace. `null` targets the unattributed segments.
+    #[serde(default)]
+    pub from: Option<String>,
+    pub to: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenamedSpeaker {
+    pub segments_changed: usize,
+    /// Whether this rename folded two labels into one.
+    ///
+    /// Returned so the UI can say "merged into Dana" rather than "renamed", which is the
+    /// difference between a user believing they fixed a name and knowing they fixed a split.
+    pub merged: bool,
+    /// The speaker list after the change, so the caller needs no follow-up request.
+    pub speakers: Vec<SpeakerView>,
+}
+
+/// Rename a speaker — which is also how two are merged.
+///
+/// Renaming `Speaker 3` to a fresh name renames. Renaming it to `Dana` when `Dana` already
+/// exists merges the two, which is the fix for a clustering pass having split one person in
+/// two. See [`MeetingRepository::rename_speaker`] for why those are deliberately one operation.
+pub async fn rename_speaker(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<RenameSpeaker>,
+) -> ApiResult<Json<RenamedSpeaker>> {
+    let meeting_id = parse_id(&id)?;
+    let db = state.db().await;
+    let repo = MeetingRepository::new(&db);
+    repo.get(meeting_id)?;
+
+    // Read before writing, so "did this merge?" is answered by what was there rather than by
+    // comparing counts afterwards — a rename onto an existing name and a rename of two separate
+    // labels can both reduce the speaker count.
+    let before = repo.speakers(meeting_id)?;
+    let target = body.to.trim();
+    let merged = before
+        .iter()
+        .any(|s| s.label.as_deref() == Some(target) && s.label.as_deref() != body.from.as_deref());
+
+    let segments_changed = repo.rename_speaker(meeting_id, body.from.as_deref(), &body.to)?;
+    if segments_changed == 0 {
+        // The label named nothing here. Usually a stale view — someone renamed it in another
+        // window — so it is the request that is out of date, not the meeting.
+        return Err(ApiError::NotFound(match body.from.as_deref() {
+            Some(from) => format!("no speaker labelled '{from}' in this meeting"),
+            None => "every segment in this meeting is already attributed".into(),
+        }));
+    }
+
+    Ok(Json(RenamedSpeaker {
+        segments_changed,
+        merged,
+        speakers: repo
+            .speakers(meeting_id)?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    }))
+}
+
+fn parse_id(id: &str) -> Result<Id, ApiError> {
+    id.parse()
+        .map_err(|_| ApiError::BadRequest(format!("'{id}' is not a valid id")))
+}
+
 /// A meeting's accumulated speaker evidence.
 #[derive(Debug, Default)]
 pub struct PendingTimeline {

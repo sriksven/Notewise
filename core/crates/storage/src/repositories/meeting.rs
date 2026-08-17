@@ -4,7 +4,7 @@ use rusqlite::Row;
 use crate::db::Database;
 use crate::error::{Result, StorageError};
 use crate::id::Id;
-use crate::models::{Meeting, MeetingSource, TranscriptSegment};
+use crate::models::{Meeting, MeetingSource, SpeakerSummary, TranscriptSegment};
 
 use super::decode_enum;
 
@@ -346,7 +346,78 @@ impl<'a> MeetingRepository<'a> {
         }
         Ok(())
     }
+
+    /// The distinct voices in a meeting, in the order they were first heard.
+    pub fn speakers(&self, meeting_id: Id) -> Result<Vec<SpeakerSummary>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            // The two-argument MAX is the scalar one — it floors durations at zero so a
+            // segment with inverted timings cannot subtract from a speaker's total.
+            "SELECT speaker, COUNT(*), SUM(MAX(end_ms - start_ms, 0)), MIN(start_ms)
+             FROM transcript_segments WHERE meeting_id = ?1
+             GROUP BY speaker ORDER BY MIN(start_ms)",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![meeting_id], |row| {
+            Ok(SpeakerSummary {
+                label: row.get(0)?,
+                segments: row.get(1)?,
+                speaking_ms: row.get(2)?,
+                first_at_ms: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Rename every segment attributed to one speaker, within a single meeting.
+    ///
+    /// # Renaming and merging are the same operation
+    ///
+    /// Renaming `Speaker 3` to a name nobody else has renames. Renaming it to `Dana` when
+    /// `Dana` already exists *merges* the two — which is the fix for clustering having split
+    /// one person in two, and the more common of the two actions in practice. Both are one
+    /// `UPDATE`, so they cannot disagree with each other, and the caller does not have to know
+    /// which one it is asking for.
+    ///
+    /// `from` is `None` to name the segments no diarizer ever labelled.
+    ///
+    /// # Why this is scoped to a meeting
+    ///
+    /// `Speaker 1` in Monday's standup and `Speaker 1` in Thursday's review are two anonymous
+    /// clusters that happen to share a label, not one person. A workspace-wide rename would
+    /// confidently attribute one person's words to another. Recognising a voice *across*
+    /// meetings is what voiceprints are for, and that is opt-in for its own reasons.
+    ///
+    /// Returns how many segments changed. Zero means `from` labelled nothing here — reported
+    /// rather than raised, so the boundary can decide whether a stale label is a 404 or a no-op.
+    pub fn rename_speaker(&self, meeting_id: Id, from: Option<&str>, to: &str) -> Result<usize> {
+        let to = to.trim();
+        if to.is_empty() {
+            return Err(StorageError::Invalid {
+                what: "speaker",
+                reason: "a speaker name cannot be blank".into(),
+            });
+        }
+        if to.chars().count() > MAX_SPEAKER_NAME_CHARS {
+            return Err(StorageError::Invalid {
+                what: "speaker",
+                reason: format!("a speaker name cannot exceed {MAX_SPEAKER_NAME_CHARS} characters"),
+            });
+        }
+
+        // `IS` rather than `=` so that `from = None` matches SQL NULL. With `=` it would match
+        // nothing and silently report zero changes.
+        Ok(self.db.conn().execute(
+            "UPDATE transcript_segments SET speaker = ?3
+             WHERE meeting_id = ?1 AND speaker IS ?2",
+            rusqlite::params![meeting_id, from, to],
+        )?)
+    }
 }
+
+/// Long enough for a full name with a role after it, short enough that a label cannot be used
+/// to smuggle a paragraph into a transcript's speaker column.
+pub const MAX_SPEAKER_NAME_CHARS: usize = 80;
 
 const SELECT_MEETING: &str =
     "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at, updated_at,
@@ -637,5 +708,217 @@ mod tests {
             .get(m.id)
             .expect_err("unrecognized enum should surface as an error");
         assert!(matches!(err, StorageError::Corrupt { .. }), "got {err:?}");
+    }
+
+    /// Add a segment, optionally attributed.
+    fn say(db: &Database, meeting_id: Id, speaker: Option<&str>, text: &str, start_ms: i64) {
+        MeetingRepository::new(db)
+            .add_segment(NewTranscriptSegment {
+                meeting_id,
+                speaker: speaker.map(str::to_string),
+                text: text.into(),
+                start_ms,
+                end_ms: start_ms + 1_000,
+                confidence: None,
+            })
+            .expect("add segment");
+    }
+
+    #[test]
+    fn speakers_are_listed_in_the_order_they_were_first_heard() {
+        let db = db();
+        let m = meeting(&db);
+        // Deliberately not in label order: Speaker 2 opens the meeting.
+        say(&db, m.id, Some("Speaker 2"), "morning", 0);
+        say(&db, m.id, Some("Speaker 1"), "morning", 2_000);
+        say(&db, m.id, Some("Speaker 2"), "shall we start", 4_000);
+
+        let speakers = MeetingRepository::new(&db).speakers(m.id).unwrap();
+        let labels: Vec<_> = speakers.iter().map(|s| s.label.as_deref()).collect();
+
+        assert_eq!(labels, vec![Some("Speaker 2"), Some("Speaker 1")]);
+        assert_eq!(speakers[0].segments, 2);
+        assert_eq!(speakers[0].speaking_ms, 2_000, "two one-second segments");
+        assert_eq!(speakers[0].first_at_ms, 0);
+    }
+
+    /// Speaking time sums the segments rather than spanning first to last — someone who said
+    /// two words an hour apart spoke for two seconds, not an hour.
+    #[test]
+    fn speaking_time_sums_segments_rather_than_spanning_them() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Dana"), "hello", 0);
+        say(&db, m.id, Some("Dana"), "bye", 3_600_000);
+
+        let speakers = MeetingRepository::new(&db).speakers(m.id).unwrap();
+        assert_eq!(speakers[0].speaking_ms, 2_000);
+    }
+
+    #[test]
+    fn unattributed_segments_are_a_nameable_group() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, None, "who said this", 0);
+
+        let repo = MeetingRepository::new(&db);
+        assert_eq!(repo.speakers(m.id).unwrap()[0].label, None);
+
+        assert_eq!(repo.rename_speaker(m.id, None, "Priya").unwrap(), 1);
+        assert_eq!(
+            repo.speakers(m.id).unwrap()[0].label.as_deref(),
+            Some("Priya")
+        );
+    }
+
+    #[test]
+    fn renaming_a_speaker_relabels_every_one_of_their_segments() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "first", 0);
+        say(&db, m.id, Some("Speaker 1"), "second", 2_000);
+        say(&db, m.id, Some("Speaker 2"), "other", 4_000);
+
+        let repo = MeetingRepository::new(&db);
+        assert_eq!(
+            repo.rename_speaker(m.id, Some("Speaker 1"), "Dana")
+                .unwrap(),
+            2
+        );
+
+        let by_speaker: Vec<_> = repo
+            .segments(m.id)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.speaker.unwrap())
+            .collect();
+        assert_eq!(by_speaker, vec!["Dana", "Dana", "Speaker 2"]);
+    }
+
+    /// The fix for clustering having split one person in two, and the reason rename and merge
+    /// are deliberately one operation.
+    #[test]
+    fn renaming_onto_an_existing_name_merges_the_two_speakers() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "a", 0);
+        say(&db, m.id, Some("Speaker 3"), "b", 2_000);
+        say(&db, m.id, Some("Speaker 1"), "c", 4_000);
+
+        let repo = MeetingRepository::new(&db);
+        repo.rename_speaker(m.id, Some("Speaker 1"), "Dana")
+            .unwrap();
+        // Speaker 3 was the same person all along.
+        repo.rename_speaker(m.id, Some("Speaker 3"), "Dana")
+            .unwrap();
+
+        let speakers = repo.speakers(m.id).unwrap();
+        assert_eq!(speakers.len(), 1, "the two clusters should have merged");
+        assert_eq!(speakers[0].label.as_deref(), Some("Dana"));
+        assert_eq!(speakers[0].segments, 3);
+    }
+
+    /// `Speaker 1` in two meetings is two anonymous clusters, not one person.
+    #[test]
+    fn renaming_is_scoped_to_one_meeting() {
+        let db = db();
+        let monday = meeting(&db);
+        let thursday = meeting(&db);
+        say(&db, monday.id, Some("Speaker 1"), "standup", 0);
+        say(&db, thursday.id, Some("Speaker 1"), "review", 0);
+
+        let repo = MeetingRepository::new(&db);
+        repo.rename_speaker(monday.id, Some("Speaker 1"), "Dana")
+            .unwrap();
+
+        assert_eq!(
+            repo.segments(thursday.id).unwrap()[0].speaker.as_deref(),
+            Some("Speaker 1"),
+            "another meeting's identically-labelled cluster must be untouched"
+        );
+    }
+
+    #[test]
+    fn renaming_a_label_nobody_has_changes_nothing_and_says_so() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "a", 0);
+
+        let changed = MeetingRepository::new(&db)
+            .rename_speaker(m.id, Some("Speaker 9"), "Dana")
+            .unwrap();
+        assert_eq!(changed, 0);
+    }
+
+    #[test]
+    fn a_blank_speaker_name_is_rejected() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "a", 0);
+
+        let err = MeetingRepository::new(&db)
+            .rename_speaker(m.id, Some("Speaker 1"), "   ")
+            .expect_err("blank should be rejected");
+        assert!(matches!(err, StorageError::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn an_overlong_speaker_name_is_rejected() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "a", 0);
+
+        let err = MeetingRepository::new(&db)
+            .rename_speaker(
+                m.id,
+                Some("Speaker 1"),
+                &"n".repeat(MAX_SPEAKER_NAME_CHARS + 1),
+            )
+            .expect_err("overlong should be rejected");
+        assert!(matches!(err, StorageError::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn a_speaker_name_is_trimmed() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "a", 0);
+
+        let repo = MeetingRepository::new(&db);
+        repo.rename_speaker(m.id, Some("Speaker 1"), "  Dana  ")
+            .unwrap();
+        assert_eq!(
+            repo.speakers(m.id).unwrap()[0].label.as_deref(),
+            Some("Dana")
+        );
+    }
+
+    /// Migration v9 put the speaker in the search index. A rename that did not reach the index
+    /// would leave the old name findable and the new one invisible — the sort of drift nobody
+    /// notices until a search for a colleague returns nothing.
+    #[test]
+    fn renaming_a_speaker_updates_the_search_index() {
+        let db = db();
+        let m = meeting(&db);
+        say(&db, m.id, Some("Speaker 1"), "the quarterly numbers", 0);
+
+        let hits = |term: &str| -> i64 {
+            db.conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM search_index WHERE search_index MATCH ?1",
+                    rusqlite::params![term],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        assert_eq!(hits("\"Speaker 1\""), 1);
+
+        MeetingRepository::new(&db)
+            .rename_speaker(m.id, Some("Speaker 1"), "Dana")
+            .unwrap();
+
+        assert_eq!(hits("Dana"), 1, "the new name should be findable");
+        assert_eq!(hits("\"Speaker 1\""), 0, "the old name should not be");
     }
 }

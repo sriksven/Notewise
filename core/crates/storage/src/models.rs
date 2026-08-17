@@ -142,6 +142,23 @@ pub struct TranscriptSegment {
     pub confidence: Option<f32>,
 }
 
+/// One distinct voice in a meeting's transcript, with enough weight to judge it by.
+///
+/// The counts are not decoration. Asked to name "Speaker 3", a user has no idea who that is
+/// until they see it spoke four times for eleven seconds — at which point it is obviously the
+/// person who joined late, or obviously a clustering error worth merging away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeakerSummary {
+    /// `None` for segments no diarizer has labelled. Nameable like any other.
+    pub label: Option<String>,
+    pub segments: u32,
+    /// Total time attributed to this speaker. Sums segment durations rather than spanning
+    /// first to last, so someone who spoke twice an hour apart reads as seconds, not an hour.
+    pub speaking_ms: i64,
+    /// When this voice was first heard, which is the order a transcript reads in.
+    pub first_at_ms: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Summary {
     pub id: Id,

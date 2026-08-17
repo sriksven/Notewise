@@ -31,6 +31,7 @@ import {
   type Health,
   type Meeting,
   type Segment,
+  type Speaker,
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
 import { useRoute } from "./lib/router";
@@ -75,6 +76,8 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
+  /** The distinct voices in the open meeting, so they can be named. */
+  const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
   /**
    * Why the engine had nothing to suggest, in its own words.
@@ -197,14 +200,23 @@ export default function App() {
   useEffect(() => {
     if (!transcriptId) {
       setSegments([]);
+      setSpeakers([]);
       return;
     }
 
     let cancelled = false;
     const load = async () => {
       try {
-        const next = await api.transcript(transcriptId);
-        if (!cancelled) setSegments(next);
+        // Together, so the names in the transcript and the list behind them cannot disagree —
+        // a rename popover offering to merge into a speaker who is no longer there would be
+        // the visible form of that drift.
+        const [next, roster] = await Promise.all([
+          api.transcript(transcriptId),
+          api.speakers(transcriptId),
+        ]);
+        if (cancelled) return;
+        setSegments(next);
+        setSpeakers(roster.speakers);
       } catch (e) {
         if (!cancelled) report(e);
       }
@@ -219,6 +231,30 @@ export default function App() {
       clearInterval(id);
     };
   }, [transcriptId, recordingId, report]);
+
+  /**
+   * Put a name to a voice — or fold two of them together.
+   *
+   * Rethrows rather than reporting, because the popover keeps the typed name on screen and can
+   * say what went wrong in place. Sending a failure to the global error banner would clear the
+   * popover and lose what the user typed.
+   */
+  const renameSpeaker = useCallback(
+    async (from: string | null, to: string) => {
+      if (!transcriptId) return;
+
+      const result = await api.renameSpeaker(transcriptId, from, to);
+      setSpeakers(result.speakers);
+      setSegments(await api.transcript(transcriptId));
+
+      setNotice(
+        result.merged
+          ? `Merged into ${to} — ${result.segments_changed} line(s) reattributed.`
+          : `Renamed to ${to} across ${result.segments_changed} line(s).`,
+      );
+    },
+    [transcriptId],
+  );
 
   // Ask for clarifying questions while recording.
   //
@@ -563,6 +599,8 @@ export default function App() {
                     segments={segments}
                     isRecording={isRecording && selectedId === recordingId}
                     hasMeeting={selectedId !== null}
+                    speakers={speakers}
+                    onRenameSpeaker={renameSpeaker}
                   />
                 )}
                 {tab === "summary" && (

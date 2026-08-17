@@ -52,6 +52,16 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             "/v1/meetings/:id/speaker-events",
             post(crate::speakers::post_speaker_events),
         )
+        // Naming a voice by hand. The floor under every automatic approach: clustering can
+        // prove there were three voices and can never learn one of them was Priya.
+        .route(
+            "/v1/meetings/:id/speakers",
+            get(crate::speakers::list_speakers),
+        )
+        .route(
+            "/v1/meetings/:id/speakers/rename",
+            post(crate::speakers::rename_speaker),
+        )
         .route("/v1/meetings/:id/summarize", post(summarize_meeting))
         .route("/v1/meetings/:id/summary", get(get_summary))
         .route("/v1/meetings/:id/related", get(related_to_meeting))
@@ -4029,5 +4039,194 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "unavailable");
         assert_eq!(body["required"], false);
+    }
+
+    // ------------------------------------------------------------ naming speakers by hand
+
+    /// Store segments with the labels a diarizer would have left.
+    async fn add_labelled(app: &AxumRouter, id: Id, spans: &[(&str, &str, i64, i64)]) {
+        let body: Vec<serde_json::Value> = spans
+            .iter()
+            .map(|(speaker, text, start, end)| {
+                serde_json::json!({
+                    "text": text, "start_ms": start, "end_ms": end, "speaker": speaker,
+                })
+            })
+            .collect();
+
+        let (status, json) = call(
+            app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::Value::Array(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+
+    #[tokio::test]
+    async fn listing_speakers_reports_weight_and_anonymity() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(
+            &app,
+            id,
+            &[
+                ("Speaker 1", "opening", 0, 4_000),
+                ("Speaker 2", "a word", 4_000, 5_000),
+                ("Speaker 1", "closing", 5_000, 9_000),
+            ],
+        )
+        .await;
+
+        let (status, json) = call(&app, get(&format!("/v1/meetings/{id}/speakers"))).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let speakers = json["speakers"].as_array().unwrap();
+        assert_eq!(speakers.len(), 2);
+        assert_eq!(speakers[0]["label"], "Speaker 1");
+        assert_eq!(speakers[0]["segments"], 2);
+        assert_eq!(speakers[0]["speaking_ms"], 8_000);
+        assert_eq!(
+            speakers[0]["anonymous"], true,
+            "a diarizer label must be flagged so the UI can ask who it is"
+        );
+        // The one-second speaker is the one a user needs the weight to judge.
+        assert_eq!(speakers[1]["speaking_ms"], 1_000);
+    }
+
+    #[tokio::test]
+    async fn a_named_speaker_is_not_flagged_anonymous() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(&app, id, &[("Speaker 1", "hello", 0, 2_000)]).await;
+
+        let (_, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speakers/rename"),
+                serde_json::json!({"from": "Speaker 1", "to": "Dana"}),
+            ),
+        )
+        .await;
+
+        assert_eq!(json["speakers"][0]["label"], "Dana");
+        assert_eq!(json["speakers"][0]["anonymous"], false);
+        assert_eq!(json["merged"], false);
+        assert_eq!(json["segments_changed"], 1);
+    }
+
+    /// The whole point of the feature, over HTTP: a split cluster becomes one person.
+    #[tokio::test]
+    async fn renaming_onto_an_existing_name_merges_and_reports_it() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(
+            &app,
+            id,
+            &[
+                ("Speaker 1", "a", 0, 2_000),
+                ("Speaker 3", "b", 2_000, 4_000),
+                ("Speaker 1", "c", 4_000, 6_000),
+            ],
+        )
+        .await;
+
+        let rename = |from: &str, to: &str| {
+            post(
+                &format!("/v1/meetings/{id}/speakers/rename"),
+                serde_json::json!({"from": from, "to": to}),
+            )
+        };
+
+        let (status, json) = call(&app, rename("Speaker 1", "Dana")).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert_eq!(json["merged"], false, "nothing to merge with yet");
+
+        // Speaker 3 was Dana all along — the clustering split one person in two.
+        let (status, json) = call(&app, rename("Speaker 3", "Dana")).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert_eq!(json["merged"], true);
+        assert_eq!(json["segments_changed"], 1);
+
+        let speakers = json["speakers"].as_array().unwrap();
+        assert_eq!(speakers.len(), 1, "got {speakers:?}");
+        assert_eq!(speakers[0]["label"], "Dana");
+        assert_eq!(speakers[0]["segments"], 3);
+    }
+
+    /// A stale label means the caller's view is out of date, not that the meeting is wrong.
+    #[tokio::test]
+    async fn renaming_a_label_that_is_not_there_is_a_404() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(&app, id, &[("Speaker 1", "hello", 0, 2_000)]).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speakers/rename"),
+                serde_json::json!({"from": "Speaker 7", "to": "Dana"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_blank_speaker_name_is_rejected_at_the_boundary() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(&app, id, &[("Speaker 1", "hello", 0, 2_000)]).await;
+
+        let (status, _) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speakers/rename"),
+                serde_json::json!({"from": "Speaker 1", "to": "  "}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn speakers_of_an_unknown_meeting_are_a_404() {
+        let app = app();
+        // A well-formed id that names nothing, so this tests absence rather than parsing.
+        let unknown = "00000000-0000-0000-0000-000000000000";
+
+        let (status, _) = call(&app, get(&format!("/v1/meetings/{unknown}/speakers"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    /// Renaming rewrites the search index, so a colleague's name finds what they said.
+    #[tokio::test]
+    async fn a_renamed_speaker_becomes_searchable_under_the_new_name() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        add_labelled(
+            &app,
+            id,
+            &[("Speaker 1", "the quarterly numbers", 0, 2_000)],
+        )
+        .await;
+
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/speakers/rename"),
+                serde_json::json!({"from": "Speaker 1", "to": "Dana"}),
+            ),
+        )
+        .await;
+
+        let (status, hits) = call(&app, get("/v1/search?q=Dana")).await;
+        assert_eq!(status, StatusCode::OK, "{hits}");
+        assert!(
+            !hits.as_array().unwrap().is_empty(),
+            "renaming should have reindexed: {hits}"
+        );
     }
 }

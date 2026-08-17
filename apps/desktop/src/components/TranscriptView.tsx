@@ -1,13 +1,17 @@
 import { useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 
-import type { Segment } from "../lib/api";
+import type { Segment, Speaker } from "../lib/api";
+import { SpeakerName } from "./SpeakerName";
 
 interface Props {
   segments: Segment[];
   isRecording: boolean;
   /** False when nothing is selected, which is a different emptiness from an empty meeting. */
   hasMeeting: boolean;
+  /** The distinct voices, for naming them. Empty until loaded, which only costs the affordance. */
+  speakers?: Speaker[];
+  onRenameSpeaker?: (from: string | null, to: string) => Promise<void>;
 }
 
 function timestamp(ms: number): string {
@@ -24,7 +28,13 @@ function timestamp(ms: number): string {
  * paragraphs rather than a timestamped log — a wall of per-segment speaker
  * labels is technically accurate and much harder to read back later.
  */
-export function TranscriptView({ segments, isRecording, hasMeeting }: Props) {
+export function TranscriptView({
+  segments,
+  isRecording,
+  hasMeeting,
+  speakers = [],
+  onRenameSpeaker,
+}: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   // Follow the tail while recording. Not while idle: a user scrolling back
@@ -65,14 +75,26 @@ export function TranscriptView({ segments, isRecording, hasMeeting }: Props) {
           const previous = segments[index - 1];
           const sameSpeaker =
             previous && previous.speaker === segment.speaker && segment.speaker !== null;
+          const speaker = speakers.find((s) => s.label === segment.speaker);
 
           return (
             <div key={segment.id} className={sameSpeaker ? "-mt-3.5" : ""}>
               {!sameSpeaker && (
                 <div className="mb-1 flex items-baseline gap-2">
-                  <span className="text-[13px] font-semibold text-ink">
-                    {segment.speaker ?? "Unattributed"}
-                  </span>
+                  {speaker && onRenameSpeaker ? (
+                    <SpeakerName
+                      speaker={speaker}
+                      all={speakers}
+                      onRename={onRenameSpeaker}
+                      // Not while recording: labels are still being assigned, and a name typed
+                      // onto a cluster that is about to be relabelled would be quietly undone.
+                      editable={!isRecording}
+                    />
+                  ) : (
+                    <span className="text-[13px] font-semibold text-ink">
+                      {segment.speaker ?? "Unattributed"}
+                    </span>
+                  )}
                   <span className="font-mono text-[11px] tabular-nums text-ink-faint">
                     {timestamp(segment.start_ms)}
                   </span>

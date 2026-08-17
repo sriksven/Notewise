@@ -230,6 +230,17 @@ export interface Segment {
   confidence: number | null;
 }
 
+/** One distinct voice in a meeting, with enough weight to judge it by. */
+export interface Speaker {
+  /** `null` for segments nothing ever labelled. Nameable like any other. */
+  label: string | null;
+  segments: number;
+  speaking_ms: number;
+  first_at_ms: number;
+  /** A diarizer label rather than a person's name — the UI offers to fix these. */
+  anonymous: boolean;
+}
+
 export interface ModelInfo {
   name: string;
   size: string;
@@ -371,6 +382,24 @@ export const api = {
     request<{ appended: number; ids: string[] }>(
       `/v1/meetings/${id}/transcript`,
       { method: "POST", body: JSON.stringify(segments) },
+    ),
+
+  speakers: (id: string) =>
+    request<{ speakers: Speaker[] }>(`/v1/meetings/${id}/speakers`),
+
+  /**
+   * Rename a speaker — which is also how two are merged.
+   *
+   * Passing a `to` that another speaker already has folds the two together. That is the fix
+   * for a diarizer having split one person in two, and the server reports `merged` so the UI
+   * can say which of the two things happened.
+   *
+   * `from: null` names the segments nothing ever labelled.
+   */
+  renameSpeaker: (id: string, from: string | null, to: string) =>
+    request<{ segments_changed: number; merged: boolean; speakers: Speaker[] }>(
+      `/v1/meetings/${id}/speakers/rename`,
+      { method: "POST", body: JSON.stringify({ from, to }) },
     ),
 
   summarize: (id: string) =>
