@@ -9,16 +9,25 @@ import {
   List,
   ListOrdered,
   Italic,
+  Image as ImageIcon,
   Minus,
   Quote,
   Strikethrough,
   SquareCheck,
+  Table,
   Type,
 } from "lucide-react";
 
 import {
   blockAfter,
   depthOf,
+  imageParts,
+  imageText,
+  isStructural,
+  newImage,
+  newTable,
+  tableRows,
+  tableText,
   indent,
   isListItem,
   isMultiline,
@@ -50,6 +59,8 @@ const MENU: Array<{ type: BlockType; label: string; hint: string; Icon: typeof T
   { type: "quote", label: "Quote", hint: ">", Icon: Quote },
   { type: "code", label: "Code", hint: "```", Icon: Code },
   { type: "divider", label: "Divider", hint: "---", Icon: Minus },
+  { type: "table", label: "Table", hint: "|", Icon: Table },
+  { type: "image", label: "Image", hint: "![]", Icon: ImageIcon },
 ];
 
 /**
@@ -189,10 +200,20 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
     const block = blocks[index];
     setMenuFor(null);
 
-    if (type === "divider") {
+    // Structural blocks have no editable line of their own, so each is inserted whole and
+    // followed by an empty paragraph — otherwise choosing one from the menu leaves the caret
+    // nowhere and typing stops.
+    if (isStructural(type)) {
+      const made =
+        type === "table"
+          ? newTable()
+          : type === "image"
+            ? newImage()
+            : { ...block, type: "divider" as const, text: "" };
+
       const fresh = newBlock();
       const next = [...blocks];
-      next.splice(index, 1, { ...block, type: "divider", text: "" }, fresh);
+      next.splice(index, 1, { ...made, id: block.id }, fresh);
       pending.current = { id: fresh.id, offset: 0 };
       onChange(next);
       return;
@@ -444,6 +465,15 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
   );
 }
 
+/**
+ * Sources an `<img>` in this window can actually fetch.
+ *
+ * Notes are stored as Markdown and may be edited elsewhere, so a body can easily arrive with
+ * `![x](/Users/me/shot.png)` in it — written by someone in Obsidian, where that works. It cannot
+ * work here, and saying so is better than rendering nothing.
+ */
+const LOADABLE = /^(https?:|data:|blob:)/i;
+
 /** Per-type presentation. Kept beside the editor so a new type is one place to change. */
 const STYLES: Record<BlockType, string> = {
   paragraph: "text-[14px] leading-relaxed",
@@ -456,6 +486,10 @@ const STYLES: Record<BlockType, string> = {
   quote: "text-[14px] leading-relaxed italic text-ink-muted",
   code: "font-mono text-[12.5px] leading-relaxed",
   divider: "",
+  // Both are drawn by the editor rather than shown as an editable line, so they have no text
+  // style of their own — see `isStructural`.
+  table: "",
+  image: "",
 };
 
 function Row({
@@ -511,6 +545,120 @@ function Row({
   // Code is shown raw: its content is not Markdown, and rendering `**` inside a shell snippet
   // as bold would be wrong rather than pretty.
   const rendered = !focused && block.type !== "code" && hasFormatting(block.text);
+
+  if (block.type === "table") {
+    const rows = tableRows(block);
+    const write = (r: number, c: number, value: string) => {
+      const next = rows.map((row) => row.slice());
+      next[r][c] = value;
+      onText(tableText(next));
+    };
+    const resize = (by: { rows?: number; columns?: number }) => {
+      let next = rows.map((row) => row.slice());
+      if (by.columns) next = next.map((row) => [...row, ...Array(by.columns).fill("")]);
+      if (by.rows) {
+        const width = next[0]?.length ?? 1;
+        next = [...next, ...Array.from({ length: by.rows }, () => Array(width).fill(""))];
+      }
+      onText(tableText(next));
+    };
+
+    return (
+      <div className="group relative my-1">
+        <div className="overflow-x-auto rounded-lg border border-hairline">
+          <table className="w-full border-collapse text-[13.5px]">
+            <tbody>
+              {rows.map((row, r) => (
+                <tr key={r} className={r === 0 ? "bg-overlay" : ""}>
+                  {row.map((cell, c) => (
+                    <td key={c} className="border border-hairline p-0">
+                      {/* An input per cell rather than one textarea: Tab moves between cells
+                          for free, which is how anyone expects to fill in a table. */}
+                      <input
+                        value={cell}
+                        onChange={(event) => write(r, c, event.target.value)}
+                        placeholder={r === 0 ? "Column" : ""}
+                        aria-label={`Row ${r + 1}, column ${c + 1}`}
+                        className={`w-full bg-transparent px-2.5 py-1.5 outline-none
+                                    placeholder:text-ink-faint focus:bg-overlay
+                                    ${r === 0 ? "font-medium text-ink" : "text-ink"}`}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => resize({ rows: 1 })}
+            className="rounded-md border border-hairline px-2 py-0.5 text-[11.5px] text-ink-muted hover:bg-overlay hover:text-ink"
+          >
+            + Row
+          </button>
+          <button
+            type="button"
+            onClick={() => resize({ columns: 1 })}
+            className="rounded-md border border-hairline px-2 py-0.5 text-[11.5px] text-ink-muted hover:bg-overlay hover:text-ink"
+          >
+            + Column
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "image") {
+    const { alt, src } = imageParts(block);
+    return (
+      <div className="group my-1">
+        {src ? (
+          <img
+            src={src}
+            alt={alt}
+            // A source that will not load must say so. The page is served over http, so a bare
+            // filesystem path resolves against that origin and 404s — silently, as a blank gap,
+            // which reads as the editor being broken rather than the path being unusable.
+            onLoad={(event) => event.currentTarget.classList.remove("hidden")}
+            onError={(event) => event.currentTarget.classList.add("hidden")}
+            className="max-h-[420px] max-w-full rounded-lg border border-hairline object-contain"
+          />
+        ) : (
+          <div className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center text-[12.5px] text-ink-faint">
+            Paste an image URL or file path below
+          </div>
+        )}
+        {src && !LOADABLE.test(src) && (
+          <p className="mt-1.5 rounded-lg border border-hairline px-3 py-2 text-[12px] leading-relaxed text-ink-muted">
+            A filesystem path cannot be shown here — the window is served over http, so{" "}
+            <code className="text-ink">{src}</code> is looked up on that server rather than on
+            disk. Use an <code className="text-ink">https://</code> address, or a{" "}
+            <code className="text-ink">data:</code> URL.
+          </p>
+        )}
+        <div className="mt-1.5 flex gap-1.5">
+          <input
+            value={src}
+            onChange={(event) => onText(imageText(alt, event.target.value))}
+            placeholder="https://… or data:image/png;base64,…"
+            aria-label="Image source"
+            className="min-w-0 flex-[2] rounded-md border border-hairline bg-bg px-2 py-1 text-[12px]
+                       text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+          />
+          <input
+            value={alt}
+            onChange={(event) => onText(imageText(event.target.value, src))}
+            placeholder="Describe it"
+            aria-label="Image description"
+            className="min-w-0 flex-1 rounded-md border border-hairline bg-bg px-2 py-1 text-[12px]
+                       text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (block.type === "divider") {
     return (

@@ -7,13 +7,19 @@ import {
   canOutdent,
   depthOf,
   emptyDocument,
+  imageParts,
+  imageText,
   indent,
   isListItem,
   newBlock,
+  newImage,
+  newTable,
   outdent,
   parse,
   serialize,
   shortcutFor,
+  tableRows,
+  tableText,
   toPlainText,
   type Block,
   type BlockType,
@@ -447,5 +453,89 @@ describe("nesting", () => {
   it("a block with no depth is top level", () => {
     expect(depthOf(newBlock("bullet"))).toBe(0);
     expect(depthOf({ id: "x", type: "paragraph", text: "", depth: 3 })).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------ tables and images
+
+describe("tables", () => {
+  const md = "| a | b |\n| --- | --- |\n| 1 | 2 |";
+
+  it("parses a table as one block", () => {
+    const blocks = parse(`${md}\n`);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("table");
+  });
+
+  it("round-trips", () => {
+    expect(serialize(parse(`${md}\n`))).toBe(`${md}\n`);
+  });
+
+  it("reads cells as a grid, without the alignment row", () => {
+    expect(tableRows(parse(`${md}\n`)[0])).toEqual([
+      ["a", "b"],
+      ["1", "2"],
+    ]);
+  });
+
+  // A ragged table would otherwise make the editor reason about missing cells.
+  it("squares off a ragged table", () => {
+    const rows = tableRows(parse("| a | b | c |\n| --- | --- | --- |\n| 1 |\n")[0]);
+    expect(rows).toEqual([
+      ["a", "b", "c"],
+      ["1", "", ""],
+    ]);
+  });
+
+  it("survives a pipe inside a cell", () => {
+    const block = { id: "t", type: "table" as const, text: tableText([["a|b"], ["c"]]) };
+    expect(tableRows(block)).toEqual([["a|b"], ["c"]]);
+  });
+
+  it("a new table has a header and one row", () => {
+    expect(tableRows(newTable())).toEqual([
+      ["", ""],
+      ["", ""],
+    ]);
+  });
+
+  // The alignment row is syntax, not content — treating it as a row would show `---` as data.
+  it("never returns the alignment row as data", () => {
+    for (const row of tableRows(parse(`${md}\n`)[0])) {
+      expect(row.join("")).not.toContain("---");
+    }
+  });
+
+  // A pipe line with no alignment row under it is not a table.
+  it("leaves a lone pipe line as a paragraph", () => {
+    expect(parse("| not a table |\n")[0].type).toBe("paragraph");
+  });
+});
+
+describe("images", () => {
+  it("parses a line that is only an image", () => {
+    const blocks = parse("![a cat](/tmp/cat.png)\n");
+    expect(blocks[0].type).toBe("image");
+    expect(imageParts(blocks[0])).toEqual({ alt: "a cat", src: "/tmp/cat.png" });
+  });
+
+  it("round-trips", () => {
+    const text = "![a cat](/tmp/cat.png)\n";
+    expect(serialize(parse(text))).toBe(text);
+  });
+
+  // Turning this into a block would drop the surrounding words.
+  it("leaves an image with text around it as a paragraph", () => {
+    expect(parse("see ![a](b) here\n")[0].type).toBe("paragraph");
+  });
+
+  it("handles an empty source and empty alt", () => {
+    expect(imageParts(newImage())).toEqual({ alt: "", src: "" });
+    expect(serialize([newImage("/x.png")])).toBe("![](/x.png)\n");
+  });
+
+  // Brackets in alt text would terminate the `![...]` early.
+  it("strips brackets from alt text", () => {
+    expect(imageText("a [b] c", "/x.png")).toBe("![a b c](/x.png)");
   });
 });

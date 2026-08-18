@@ -35,7 +35,9 @@ export type BlockType =
   | "todo"
   | "quote"
   | "code"
-  | "divider";
+  | "divider"
+  | "table"
+  | "image";
 
 export interface Block {
   /** Stable across edits, so React keys do not reorder and steal focus. */
@@ -92,6 +94,82 @@ export function emptyDocument(): Block[] {
 export function isMultiline(type: BlockType): boolean {
   return type === "code";
 }
+
+/** Types the editor draws itself rather than showing as an editable line of text. */
+export function isStructural(type: BlockType): boolean {
+  return type === "divider" || type === "table" || type === "image";
+}
+
+// ---------------------------------------------------------------- tables
+
+/**
+ * A table's cells, as a grid.
+ *
+ * Stored in the block's `text` as the Markdown table itself, so the body on disk stays a
+ * document anything can read — the same reason the whole editor keeps Markdown rather than
+ * JSON. This parses that text into a grid when the editor needs one and writes it back after.
+ *
+ * The first row is the header. Markdown tables have no way to express a table without one.
+ */
+export function tableRows(block: Block): string[][] {
+  const rows = block.text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && !ALIGNMENT_ROW.test(line))
+    .map((line) =>
+      line
+        // Only *unescaped* pipes delimit a cell. Splitting on every `|` first would cut a cell
+        // containing `\|` in two and leave a stray backslash behind — which is what happened.
+        .replace(/^\|/, "")
+        .replace(/(?<!\\)\|$/, "")
+        .split(/(?<!\\)\|/)
+        .map((cell) => cell.trim().replace(/\\\|/g, "|")),
+    );
+
+  if (rows.length === 0) return [["", ""], ["", ""]];
+
+  // Ragged input is normalised to the widest row, so the grid is always rectangular and the
+  // editor never has to reason about a missing cell.
+  const width = Math.max(...rows.map((r) => r.length));
+  return rows.map((row) => [...row, ...Array(width - row.length).fill("")]);
+}
+
+/** Write a grid back to Markdown table syntax. */
+export function tableText(rows: string[][]): string {
+  const width = Math.max(1, ...rows.map((r) => r.length));
+  const line = (cells: string[]) =>
+    `| ${Array.from({ length: width }, (_, i) => (cells[i] ?? "").replace(/\|/g, "\\|")).join(" | ")} |`;
+
+  const [header = [], ...body] = rows;
+  return [line(header), `|${" --- |".repeat(width)}`, ...body.map(line)].join("\n");
+}
+
+/** A fresh table: a header row and one empty row under it. */
+export function newTable(columns = 2, bodyRows = 1): Block {
+  const rows = Array.from({ length: bodyRows + 1 }, () => Array(columns).fill(""));
+  return { id: blockId(), type: "table", text: tableText(rows) };
+}
+
+/** The `| --- | --- |` line under a table's header. Never a row of data. */
+const ALIGNMENT_ROW = /^\|(\s*:?-{3,}:?\s*\|)+$/;
+
+// ---------------------------------------------------------------- images
+
+/** An image block's source and alt text, read from its `![alt](src)` body. */
+export function imageParts(block: Block): { alt: string; src: string } {
+  const match = block.text.match(IMAGE_LINE);
+  return { alt: match?.[1] ?? "", src: match?.[2] ?? "" };
+}
+
+export function imageText(alt: string, src: string): string {
+  return `![${alt.replace(/[[\]]/g, "")}](${src.trim()})`;
+}
+
+export function newImage(src = "", alt = ""): Block {
+  return { id: blockId(), type: "image", text: imageText(alt, src) };
+}
+
+const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)]*)\)$/;
 
 // ---------------------------------------------------------------- parsing
 
@@ -171,7 +249,26 @@ export function parse(markdown: string): Block[] {
       continue;
     }
 
+    // A table, taken whole: a pipe row followed by an alignment row. Checked before `index`
+    // advances because the run spans several lines.
+    if (line.trim().startsWith("|") && ALIGNMENT_ROW.test((lines[index + 1] ?? "").trim())) {
+      const body: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        body.push(lines[index].trim());
+        index += 1;
+      }
+      blocks.push({ id: blockId(), type: "table", text: body.join("\n") });
+      continue;
+    }
+
     index += 1;
+
+    // An image is a line that is nothing but an image. `![a](b)` with text around it stays a
+    // paragraph, because turning it into a block would drop that text.
+    if (IMAGE_LINE.test(line.trim())) {
+      blocks.push({ id: blockId(), type: "image", text: line.trim() });
+      continue;
+    }
 
     if (DIVIDER.test(line)) {
       blocks.push({ id: blockId(), type: "divider", text: "" });
@@ -232,6 +329,10 @@ function marker(block: Block): string {
       return `\`\`\`\n${block.text}\n\`\`\``;
     case "divider":
       return "---";
+    // Both keep their Markdown in `text`, so there is nothing to rebuild here.
+    case "table":
+    case "image":
+      return block.text;
     default:
       return block.text;
   }
