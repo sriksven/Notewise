@@ -34,4 +34,10 @@ default = []
 record = ["notewise-api-server/record"]
 whisper = ["notewise-api-server/whisper"]
 whisper-metal = ["notewise-api-server/whisper-metal"]
+# What a shipped macOS app is built with. Metal is an Apple GPU API, so this feature cannot be
+# used anywhere else — see `bundle-cpu`.
 bundle = ["record", "whisper-metal"]
+# The same for Windows and Linux: capture plus Whisper on the CPU. Metal has no equivalent here
+# that is safe to assume — CUDA needs an NVIDIA card and Vulkan needs a working loader, and a
+# release build that fails on machines without either is worse than one that is merely slower.
+bundle-cpu = ["record", "whisper"]

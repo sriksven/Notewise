@@ -67,3 +67,6 @@ Thumbs.db
 # genuinely needs to trust lives at the root (README, ARCHITECTURE, ROADMAP, SECURITY) or in
 # the code's own doc comments, which cannot drift from what they document.
 docs/
+
+# Release staging, written by the release workflow's artifact collector.
+/dist-release/
