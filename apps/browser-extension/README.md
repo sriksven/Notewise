@@ -18,6 +18,33 @@ The meeting platform knows. Meet, Zoom, and Teams route the audio, so they know 
 unmuted, and all three show it on screen. This extension reads that and posts it to the engine, which
 turns `Others` into four names.
 
+## It only works in a browser tab
+
+The content script runs on four **web** origins:
+
+| Works | Does not work |
+|---|---|
+| `meet.google.com` | The Zoom **desktop app** |
+| `*.zoom.us/wc/*` — the Zoom *web client* | The Teams **desktop app** |
+| `teams.microsoft.com` | Any native client, on any platform |
+| `teams.live.com` | Webex, Slack huddles, in-person meetings |
+
+Note the Zoom entry carefully: `/wc/` is the browser client. Someone who clicks a Zoom link and
+lets it open the installed app gets nothing from this extension, and there is no signal that
+anything is missing — the meeting records fine, the names simply never arrive.
+
+A native client has no page to read. There is no DOM, no roster, and no extension API that
+reaches it; the only way to obtain platform names there is a bot in the call, which this
+project does not do. So for native-app users the speaker options are:
+
+1. **Name them by hand** — click any speaker in a transcript. Renaming onto an existing name
+   merges the two. Always available, no model, no setup.
+2. **Acoustic separation** — Settings → *Separate speakers by voice*. Groups the audio into
+   distinct voices, which you then name once each. Anonymous but automatic, and its accuracy on
+   real meetings has not been measured here.
+
+Neither needs this extension. It is an accelerator for browser meetings, not a dependency.
+
 ## Why this replaced the audio-streaming design
 
 This directory previously specified `chrome.tabCapture` streaming tab audio to the desktop app. That

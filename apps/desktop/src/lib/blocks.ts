@@ -44,6 +44,25 @@ export interface Block {
   text: string;
   /** Only meaningful for `todo`. */
   checked?: boolean;
+  /**
+   * Nesting level for list items, `0` at the top. Ignored for every other type.
+   *
+   * Optional so that a block built before nesting existed — or by a test — is still a valid
+   * top-level block. {@link depthOf} is the only thing that should read it.
+   */
+  depth?: number;
+}
+
+/** How deep a list may nest. */
+export const MAX_DEPTH = 5;
+
+/** Spaces per level, on disk. Two is what every Markdown renderer accepts for `-` lists. */
+const INDENT = "  ";
+
+/** A block's nesting level, defaulting to top level and never out of range. */
+export function depthOf(block: Block): number {
+  if (!isListItem(block.type)) return 0;
+  return Math.min(Math.max(block.depth ?? 0, 0), MAX_DEPTH);
 }
 
 let counter = 0;
@@ -92,14 +111,30 @@ const RULES: Rule[] = [
   { type: "heading3", pattern: /^###\s+(.*)$/ },
   { type: "heading2", pattern: /^##\s+(.*)$/ },
   { type: "heading1", pattern: /^#\s+(.*)$/ },
-  { type: "todo", pattern: /^[-*]\s+\[[xX]\]\s*(.*)$/ },
-  { type: "todo", pattern: /^[-*]\s+\[\s?\]\s*(.*)$/ },
-  { type: "bullet", pattern: /^[-*]\s+(.*)$/ },
-  { type: "numbered", pattern: /^\d+[.)]\s+(.*)$/ },
+  // List markers may be indented; headings and quotes may not, because a leading space there
+  // is not meaningful and treating it as nesting would indent a heading nobody indented.
+  { type: "todo", pattern: /^[ \t]*[-*]\s+\[[xX]\]\s*(.*)$/ },
+  { type: "todo", pattern: /^[ \t]*[-*]\s+\[\s?\]\s*(.*)$/ },
+  { type: "bullet", pattern: /^[ \t]*[-*]\s+(.*)$/ },
+  { type: "numbered", pattern: /^[ \t]*\d+[.)]\s+(.*)$/ },
   { type: "quote", pattern: /^>\s?(.*)$/ },
 ];
 
-const CHECKED = /^[-*]\s+\[[xX]\]/;
+const CHECKED = /^[ \t]*[-*]\s+\[[xX]\]/;
+
+/**
+ * Nesting level implied by a line's leading whitespace.
+ *
+ * Two spaces per level, with a tab counting as one level. Four-space indentation — the other
+ * common convention, and what many editors insert — reads as two levels here, and is then
+ * brought back to one by the skipped-level clamp in {@link parse}, since nothing precedes it at
+ * that depth. The pair works out: either convention opens with the shape its author intended.
+ */
+function indentOf(line: string): number {
+  const lead = line.match(/^[ \t]*/)?.[0] ?? "";
+  const spaces = lead.replace(/\t/g, INDENT).length;
+  return Math.min(Math.floor(spaces / INDENT.length), MAX_DEPTH);
+}
 
 /** A horizontal rule: three or more `-`, `*` or `_`, optionally spaced. */
 const DIVIDER = /^\s*([-*_])(\s*\1){2,}\s*$/;
@@ -149,10 +184,23 @@ export function parse(markdown: string): Block[] {
     const rule = RULES.find((candidate) => candidate.pattern.test(line));
     if (rule) {
       const text = line.match(rule.pattern)?.[1] ?? "";
+
+      // A level may only be entered one at a time. A file indenting straight from top level to
+      // four is describing a shape no editor can produce, and honouring it would render a list
+      // item with no parent — so it is clamped to one deeper than what precedes it.
+      const previous = blocks[blocks.length - 1];
+      const ceiling = previous && isListItem(previous.type) ? depthOf(previous) + 1 : 0;
+      const depth = isListItem(rule.type) ? Math.min(indentOf(line), ceiling) : 0;
+
+      // Only carried when it is not zero. Stamping `depth: 0` onto every block would change
+      // the shape of every block the editor has ever produced, for no information — `depthOf`
+      // already reads a missing depth as top level.
+      const nesting = depth > 0 ? { depth } : {};
+
       blocks.push(
         rule.type === "todo"
-          ? { id: blockId(), type: "todo", text, checked: CHECKED.test(line) }
-          : { id: blockId(), type: rule.type, text },
+          ? { id: blockId(), type: "todo", text, checked: CHECKED.test(line), ...nesting }
+          : { id: blockId(), type: rule.type, text, ...nesting },
       );
       continue;
     }
@@ -166,6 +214,7 @@ export function parse(markdown: string): Block[] {
 // ---------------------------------------------------------------- serializing
 
 function marker(block: Block): string {
+  const pad = INDENT.repeat(depthOf(block));
   switch (block.type) {
     case "heading1":
       return `# ${block.text}`;
@@ -174,9 +223,9 @@ function marker(block: Block): string {
     case "heading3":
       return `### ${block.text}`;
     case "bullet":
-      return `- ${block.text}`;
+      return `${pad}- ${block.text}`;
     case "todo":
-      return `- [${block.checked ? "x" : " "}] ${block.text}`;
+      return `${pad}- [${block.checked ? "x" : " "}] ${block.text}`;
     case "quote":
       return `> ${block.text}`;
     case "code":
@@ -200,27 +249,95 @@ function marker(block: Block): string {
  */
 export function serialize(blocks: Block[]): string {
   const lines: string[] = [];
-  let ordinal = 0;
+  // One counter per level. Going deeper starts a fresh count; coming back up discards it, so a
+  // sub-list between `1.` and `2.` does not make the outer list read 1, 2, 3.
+  let ordinals: number[] = [];
 
   blocks.forEach((block, index) => {
+    const depth = depthOf(block);
+
     if (block.type === "numbered") {
-      ordinal += 1;
-      lines.push(`${ordinal}. ${block.text}`);
+      ordinals = ordinals.slice(0, depth + 1);
+      ordinals[depth] = (ordinals[depth] ?? 0) + 1;
+      lines.push(`${INDENT.repeat(depth)}${ordinals[depth]}. ${block.text}`);
     } else {
-      ordinal = 0;
+      // Any other block ends every run. A bullet nested under a numbered item does not
+      // continue its numbering, and a paragraph certainly does not.
+      ordinals = isListItem(block.type) ? ordinals.slice(0, depth) : [];
       lines.push(marker(block));
     }
 
     const next = blocks[index + 1];
     if (!next) return;
 
-    const bothListItems =
-      isListItem(block.type) && isListItem(next.type) && block.type === next.type;
-    if (!bothListItems) lines.push("");
+    // Blank lines break a list in most renderers. Consecutive items stay together when they are
+    // the same kind, *or* when the level changes — a bullet nested under a numbered item is a
+    // continuation of that list, and a blank line there would detach it from its parent. Two
+    // different kinds at the *same* level are genuinely separate lists and do get a break.
+    const continuesList =
+      isListItem(block.type) &&
+      isListItem(next.type) &&
+      (block.type === next.type || depthOf(next) !== depthOf(block));
+    if (!continuesList) lines.push("");
   });
 
   // A single trailing newline, and no leading or trailing blank lines.
   return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+/**
+ * Whether the block at `index` may be nested one level deeper.
+ *
+ * Only a list item can nest, and only under a list item that is already at least as deep. The
+ * first item of a list has nothing to nest under, so it cannot be indented — which is what
+ * stops a document from starting at depth 3 with no parent anywhere.
+ */
+export function canIndent(blocks: Block[], index: number): boolean {
+  const block = blocks[index];
+  if (!block || !isListItem(block.type)) return false;
+  if (depthOf(block) >= MAX_DEPTH) return false;
+
+  const previous = blocks[index - 1];
+  return !!previous && isListItem(previous.type) && depthOf(previous) >= depthOf(block);
+}
+
+export function canOutdent(blocks: Block[], index: number): boolean {
+  const block = blocks[index];
+  return !!block && isListItem(block.type) && depthOf(block) > 0;
+}
+
+/**
+ * Indent a list item and everything nested beneath it.
+ *
+ * Children move with the parent. Indenting a parent alone would leave its children at the same
+ * level as it, which silently flattens the structure the user built.
+ */
+export function indent(blocks: Block[], index: number): Block[] {
+  if (!canIndent(blocks, index)) return blocks;
+  return shift(blocks, index, +1);
+}
+
+/** Outdent a list item and everything nested beneath it. */
+export function outdent(blocks: Block[], index: number): Block[] {
+  if (!canOutdent(blocks, index)) return blocks;
+  return shift(blocks, index, -1);
+}
+
+/** Move a block and its descendants by one level, leaving everything else alone. */
+function shift(blocks: Block[], index: number, by: 1 | -1): Block[] {
+  const base = depthOf(blocks[index]);
+  const next = blocks.slice();
+
+  for (let i = index; i < next.length; i += 1) {
+    const block = next[i];
+    // The subtree ends at the first item that is not deeper than the one being moved.
+    if (i > index && (!isListItem(block.type) || depthOf(block) <= base)) break;
+
+    const moved = Math.min(Math.max(depthOf(block) + by, 0), MAX_DEPTH);
+    next[i] = { ...block, depth: moved };
+  }
+
+  return next;
 }
 
 export function isListItem(type: BlockType): boolean {

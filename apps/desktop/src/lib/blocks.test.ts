@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_DEPTH,
   blockAfter,
+  canIndent,
+  canOutdent,
+  depthOf,
   emptyDocument,
+  indent,
   isListItem,
   newBlock,
+  outdent,
   parse,
   serialize,
   shortcutFor,
@@ -322,5 +328,124 @@ describe("helpers", () => {
       newBlock("bullet", "point"),
     ];
     expect(toPlainText(blocks)).toBe("Title\npoint");
+  });
+});
+
+// ------------------------------------------------------------------ nesting
+
+describe("nesting", () => {
+  const bullets = (blocks: Block[]) =>
+    blocks.map((b) => `${"  ".repeat(depthOf(b))}${b.text}`);
+
+  it("reads indentation as depth", () => {
+    const blocks = parse("- one\n  - two\n    - three\n- four\n");
+    expect(blocks.map(depthOf)).toEqual([0, 1, 2, 0]);
+  });
+
+  // Four-space indentation is the other common convention. It reads as two levels, then the
+  // skipped-level clamp brings it back to one — which is the shape its author meant.
+  it("accepts four-space and tab indentation", () => {
+    expect(parse("- one\n    - two\n").map(depthOf)).toEqual([0, 1]);
+    expect(parse("- one\n\t- two\n").map(depthOf)).toEqual([0, 1]);
+    // Two genuine levels, written four-space, survive as two.
+    expect(parse("- a\n    - b\n        - c\n").map(depthOf)).toEqual([0, 1, 2]);
+  });
+
+  // Honouring a skipped level would render an item with no parent.
+  it("clamps a level that was skipped", () => {
+    expect(parse("- one\n      - deep\n").map(depthOf)).toEqual([0, 1]);
+    expect(parse("      - orphan\n").map(depthOf)).toEqual([0]);
+  });
+
+  it("round-trips nested lists", () => {
+    const text = "- one\n  - two\n    - three\n- four\n";
+    expect(serialize(parse(text))).toBe(text);
+  });
+
+  it("only nests list items", () => {
+    // A heading is never indented, so leading spaces there are not nesting.
+    const blocks = parse("  # heading\n");
+    expect(blocks[0].type).toBe("paragraph");
+    expect(depthOf(blocks[0])).toBe(0);
+  });
+
+  it("numbers each level independently and restarts on re-entry", () => {
+    const text = "1. one\n  1. a\n  2. b\n2. two\n  1. a\n";
+    expect(serialize(parse(text))).toBe(text);
+  });
+
+  // A blank line between a parent and its nested child detaches them in most renderers.
+  it("keeps a nested list attached to its parent", () => {
+    const out = serialize(parse("1. parent\n  - child\n"));
+    expect(out).toBe("1. parent\n  - child\n");
+    expect(out).not.toContain("\n\n");
+  });
+
+  // Two different kinds at the same level are separate lists and should be separated.
+  it("separates two sibling lists of different kinds", () => {
+    expect(serialize(parse("- a\n1. b\n"))).toContain("\n\n");
+  });
+
+  it("indents an item under the one above it", () => {
+    const blocks = parse("- one\n- two\n");
+    expect(canIndent(blocks, 1)).toBe(true);
+    expect(indent(blocks, 1).map(depthOf)).toEqual([0, 1]);
+  });
+
+  // The first item of a list has nothing to nest under.
+  it("refuses to indent the first item", () => {
+    const blocks = parse("- one\n- two\n");
+    expect(canIndent(blocks, 0)).toBe(false);
+    expect(indent(blocks, 0)).toBe(blocks);
+  });
+
+  it("refuses to indent past the maximum", () => {
+    // A chain already at the limit: each line one level deeper than the last.
+    const deep = Array.from({ length: MAX_DEPTH + 1 }, (_, i) => `${"  ".repeat(i)}- item${i}`);
+    const blocks = parse(`${deep.join("\n")}\n`);
+
+    expect(depthOf(blocks[blocks.length - 1])).toBe(MAX_DEPTH);
+    expect(canIndent(blocks, blocks.length - 1)).toBe(false);
+    expect(indent(blocks, blocks.length - 1)).toBe(blocks);
+  });
+
+  // Indenting is relative to the item directly above: you can only become its child or its
+  // sibling's child, never skip a level. So an item already nested under its parent cannot go
+  // deeper until something sits beside it at that depth.
+  it("refuses to indent an item already nested under its parent", () => {
+    const blocks = parse("- one\n  - a\n");
+    expect(canIndent(blocks, 1)).toBe(false);
+  });
+
+  it("refuses to outdent at the top level", () => {
+    const blocks = parse("- one\n");
+    expect(canOutdent(blocks, 0)).toBe(false);
+    expect(outdent(blocks, 0)).toBe(blocks);
+  });
+
+  // Moving a parent alone would flatten the structure the user built.
+  it("carries nested children when indenting", () => {
+    const blocks = parse("- one\n- two\n  - child\n    - grandchild\n- three\n");
+    const after = indent(blocks, 1);
+    expect(after.map(depthOf)).toEqual([0, 1, 2, 3, 0]);
+    expect(bullets(after)[4]).toBe("three");
+  });
+
+  it("carries nested children when outdenting", () => {
+    const blocks = parse("- one\n  - two\n    - child\n- three\n");
+    const after = outdent(blocks, 1);
+    expect(after.map(depthOf)).toEqual([0, 0, 1, 0]);
+  });
+
+  // A sibling at the same level is not a child and must not move.
+  it("leaves siblings alone", () => {
+    const blocks = parse("- one\n  - a\n  - b\n  - c\n");
+    // `b` nests under `a`; `c` is `b`'s sibling, not its child, so it stays put.
+    expect(indent(blocks, 2).map(depthOf)).toEqual([0, 1, 2, 1]);
+  });
+
+  it("a block with no depth is top level", () => {
+    expect(depthOf(newBlock("bullet"))).toBe(0);
+    expect(depthOf({ id: "x", type: "paragraph", text: "", depth: 3 })).toBe(0);
   });
 });

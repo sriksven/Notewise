@@ -18,9 +18,12 @@ import {
 
 import {
   blockAfter,
+  depthOf,
+  indent,
   isListItem,
   isMultiline,
   newBlock,
+  outdent,
   shortcutFor,
   type Block,
   type BlockType,
@@ -326,8 +329,25 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
       return;
     }
 
+    // Tab nests a list item under the one above it; Shift+Tab brings it back out. Only for
+    // list items — everywhere else Tab stays the browser's focus key, which is what a keyboard
+    // user needs to leave the editor at all.
+    if (event.key === "Tab" && isListItem(block.type)) {
+      const next = event.shiftKey ? outdent(blocks, index) : indent(blocks, index);
+      // Unchanged means the move was illegal — the first item of a list, or already at the
+      // limit. Let Tab fall through to the browser rather than swallowing it silently.
+      if (next === blocks) return;
+
+      event.preventDefault();
+      onChange(next);
+      // The row is replaced by a new object, so focus and caret have to be restored explicitly
+      // — otherwise nesting a line drops the cursor and Tab cannot be pressed twice.
+      pending.current = { id: block.id, offset: caret };
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
-      // Code blocks keep their newlines; Shift+Enter is the escape hatch everywhere else.
+      // Code blocks keep their newlines; Shift+Enter is the escape hatch everywhere else."""
       if (isMultiline(block.type)) return;
       event.preventDefault();
       splitAt(index, caret);
@@ -505,7 +525,13 @@ function Row({
   }
 
   return (
-    <div className="relative flex items-start gap-2">
+    <div
+      className="relative flex items-start gap-2"
+      // Indent the whole row, marker included, so a nested item reads as belonging to the one
+      // above it. `paddingLeft` rather than a margin: the row is a flex container and a margin
+      // here would collapse against the gap.
+      style={depthOf(block) > 0 ? { paddingLeft: `${depthOf(block) * 1.5}rem` } : undefined}
+    >
       {block.type === "bullet" && (
         <span
           className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-muted"
