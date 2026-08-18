@@ -168,8 +168,9 @@ export function SearchIndexSettings() {
       </div>
 
       <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-        Re-running only embeds what changed. It is worth doing after importing a batch of
-        meetings.
+        Once built, this keeps itself up to date — a note you write becomes answerable a few
+        seconds after you stop typing, with nothing to press. Updating by hand only matters after
+        restoring a backup, or if a pass failed.
       </p>
 
       {error && (

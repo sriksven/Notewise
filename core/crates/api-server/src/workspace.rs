@@ -120,10 +120,15 @@ async fn update_note(
     Json(req): Json<UpdateNoteRequest>,
 ) -> ApiResult<Json<notewise_storage::Note>> {
     let id = parse_id(&id)?;
-    let db = state.db().await;
-    Ok(Json(
-        NoteRepository::new(&db).update(id, &req.title, &req.body)?,
-    ))
+    let note = {
+        let db = state.db().await;
+        NoteRepository::new(&db).update(id, &req.title, &req.body)?
+    };
+
+    // The guard is dropped first: `touch` needs the lock itself, and `Database` is not `Sync`,
+    // so holding one across this would make the handler non-`Send`.
+    crate::indexing::touch(Arc::clone(&state));
+    Ok(Json(note))
 }
 
 /// Move a note to the trash, or destroy it.
@@ -146,10 +151,15 @@ async fn delete_note(
         // note's links survive it and point at a row that is gone.
         Graph::new(&db).detach(NodeRef::new(NodeKind::Note, id))?;
         repo.purge(id)?;
+        drop(db);
+        crate::indexing::touch(Arc::clone(&state));
         return Ok(Json(note));
     }
 
-    Ok(Json(repo.trash(id)?))
+    let note = repo.trash(id)?;
+    drop(db);
+    crate::indexing::touch(Arc::clone(&state));
+    Ok(Json(note))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -164,8 +174,12 @@ async fn restore_note(
     Path(id): Path<String>,
 ) -> ApiResult<Json<notewise_storage::Note>> {
     let id = parse_id(&id)?;
-    let db = state.db().await;
-    Ok(Json(NoteRepository::new(&db).restore(id)?))
+    let note = {
+        let db = state.db().await;
+        NoteRepository::new(&db).restore(id)?
+    };
+    crate::indexing::touch(Arc::clone(&state));
+    Ok(Json(note))
 }
 
 /// What is in the trash.

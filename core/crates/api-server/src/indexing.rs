@@ -102,6 +102,9 @@ impl IndexStatus {
 /// The one indexing run, if there is one.
 #[derive(Debug)]
 pub struct IndexManager {
+    /// Bumped by every [`touch`], so a debounced refresh can tell whether it is still the most
+    /// recent one. A counter rather than cancelling a task: nothing has to be held or aborted.
+    generation: std::sync::atomic::AtomicU64,
     status: RwLock<Option<IndexStatus>>,
 }
 
@@ -115,11 +118,23 @@ impl IndexManager {
     pub fn new() -> Self {
         Self {
             status: RwLock::new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
     pub async fn get(&self) -> Option<IndexStatus> {
         self.status.read().await.clone()
+    }
+
+    /// Record a change and return the generation it produced.
+    pub fn bump(&self) -> u64 {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub async fn is_running(&self) -> bool {
@@ -313,6 +328,58 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
 // ---------------------------------------------------------------- the run
 
 /// Start an indexing pass, or return the one already going.
+/// How long the workspace must be quiet before an automatic pass runs.
+///
+/// Long enough that typing a paragraph is one pass rather than twenty, short enough that a note
+/// is answerable by the time someone finishes writing it and switches to asking about it.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// Note that indexable content changed, and refresh the index once edits settle.
+///
+/// # Why this only maintains an index that already exists
+///
+/// Embedding sends the workspace to a local model. Choosing to do that is the user's, made by
+/// building the index once; this keeps that choice honoured afterwards rather than making it for
+/// them. On a workspace with no index, this returns without doing anything and without starting
+/// one.
+///
+/// # Why it is debounced rather than immediate
+///
+/// Every keystroke in a note is a save. Indexing on each one would re-embed the same paragraph
+/// repeatedly and keep a local model busy for the length of a writing session, so calls coalesce:
+/// the last one within [`QUIET`] wins and the rest are dropped.
+///
+/// Fire-and-forget on purpose. A write must not wait for, or fail because of, an index refresh —
+/// the note is saved either way, and a stale index is a worse outcome than a failed save only if
+/// the save was the thing that failed.
+pub fn touch(state: Arc<crate::state::AppState>) {
+    let generation = state.indexing().bump();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(QUIET).await;
+
+        // A later edit landed while this was waiting; that one owns the refresh.
+        if state.indexing().generation() != generation {
+            return;
+        }
+
+        let has_index = {
+            let model = state.embedder().model().to_string();
+            let db = state.db().await;
+            notewise_storage::EmbeddingRepository::new(&db)
+                .count(&model)
+                .unwrap_or(0)
+                > 0
+        };
+        if !has_index {
+            return;
+        }
+
+        tracing::debug!("workspace changed; refreshing the semantic index");
+        start(state).await;
+    });
+}
+
 pub async fn start(state: Arc<crate::state::AppState>) -> IndexStatus {
     let embedder = state.embedder();
     let model = embedder.model().to_string();
@@ -515,6 +582,15 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use notewise_storage::{MeetingSource, NewMeeting, NewNote, NewTranscriptSegment};
+
+    /// An engine with an in-memory workspace and a mock model.
+    fn test_state() -> Arc<crate::state::AppState> {
+        Arc::new(crate::state::AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            notewise_ai_router::Router::from_config(notewise_ai_router::RouterConfig::mock())
+                .expect("mock router"),
+        ))
+    }
 
     fn db() -> Database {
         Database::open_in_memory().expect("in-memory db")
@@ -793,6 +869,39 @@ mod tests {
         assert!(
             text.contains("Dana"),
             "speaker labels retrieve differently: {text}"
+        );
+    }
+    // ------------------------------------------------------- automatic refresh
+
+    /// Building an index is the user's decision. Keeping it fresh afterwards is not, but
+    /// *starting* one unprompted would send the workspace to a model they never opted into.
+    #[tokio::test]
+    async fn touch_does_nothing_when_no_index_has_been_built() {
+        let state = test_state();
+        crate::indexing::touch(Arc::clone(&state));
+
+        // Long enough to cover the debounce and then some.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            !state.indexing().is_running().await,
+            "an unasked-for index was started"
+        );
+    }
+
+    /// Repeated edits must coalesce. Every keystroke is a save, and a pass per keystroke would
+    /// re-embed the same paragraph for the length of a writing session.
+    #[test]
+    fn repeated_edits_coalesce_into_one_generation() {
+        let manager = IndexManager::new();
+        let first = manager.bump();
+        let second = manager.bump();
+        let third = manager.bump();
+
+        assert!(second > first && third > second, "each edit must be newer");
+        assert_eq!(
+            manager.generation(),
+            third,
+            "only the newest generation owns the refresh"
         );
     }
 }

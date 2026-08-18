@@ -251,14 +251,21 @@ pub async fn rename_speaker(
         }));
     }
 
+    let speakers = repo
+        .speakers(meeting_id)?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    // The speaker is part of a meeting's indexed text, so a rename changes what the index should
+    // hold — asking "what did Dana say about pricing" has to find the lines just renamed.
+    drop(db);
+    crate::indexing::touch(std::sync::Arc::clone(&state));
+
     Ok(Json(RenamedSpeaker {
         segments_changed,
         merged,
-        speakers: repo
-            .speakers(meeting_id)?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        speakers,
     }))
 }
 

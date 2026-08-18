@@ -1341,6 +1341,12 @@ async fn append_segments(
             .collect(),
     )?;
 
+    // During a live recording this fires several times a second and the debounce swallows all
+    // of it — the pass runs once the transcript stops growing, which is when the meeting is over
+    // and there is something worth indexing.
+    drop(db);
+    crate::indexing::touch(Arc::clone(&state));
+
     Ok(Json(AppendedSegments {
         appended: ids.len(),
         ids,
@@ -2098,6 +2104,10 @@ async fn create_note(
             NodeRef::new(NodeKind::Meeting, meeting_id),
         )?;
     }
+
+    // Released before `touch`, which takes the lock itself.
+    drop(db);
+    crate::indexing::touch(Arc::clone(&state));
 
     Ok(Json(note))
 }
