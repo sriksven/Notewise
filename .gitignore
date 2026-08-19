@@ -66,7 +66,15 @@ Thumbs.db
 # published document that disagrees with the source is worse than no document. What a reader
 # genuinely needs to trust lives at the root (README, ARCHITECTURE, ROADMAP, SECURITY) or in
 # the code's own doc comments, which cannot drift from what they document.
-docs/
+#
+# `docs/superpowers/` is the one exception, and for the opposite reason: a design spec records
+# *why* a decision was made and which alternatives were rejected, which the code cannot say and
+# which stops being recoverable once everyone who was there has forgotten. It is dated and
+# historical by construction, so it does not drift — a spec from August describes what was
+# decided in August whether or not the code still agrees. `docs/*` rather than `docs/` because
+# git will not descend into an excluded directory, so the negation below needs a traversable path.
+docs/*
+!docs/superpowers/
 
 # Release staging, written by the release workflow's artifact collector.
 /dist-release/
