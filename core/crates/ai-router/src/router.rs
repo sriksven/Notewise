@@ -434,12 +434,13 @@ impl Router {
         self.kind
     }
 
-    /// Whether the active backend keeps data on the user's machine.
+    /// Whether **everything** this router might do keeps data on the user's machine.
     ///
-    /// Asks the backend rather than the kind, so a custom endpoint pointing at localhost is
-    /// correctly reported as local.
+    /// Asks each backend rather than its kind, so a custom endpoint pointing at localhost is
+    /// correctly reported as local. False if any route is remote — see the trait impl for why
+    /// that has to be the answer rather than "the default is local".
     pub fn is_local(&self) -> bool {
-        self.backend.is_local()
+        self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
     }
 
     pub fn model_id(&self) -> &str {
@@ -465,11 +466,15 @@ impl Router {
     /// rather than in each caller — the decision depends on which backend is active, which
     /// callers should not have to know.
     pub fn effective_redaction(&self) -> RedactionPolicy {
-        if self.backend.is_local() {
-            RedactionPolicy::Off
-        } else {
-            self.redaction
-        }
+        // The strictest across every reachable destination. This is the whole-router answer, for
+        // a settings label; the per-call answer travels in `Selected::redaction`, because that is
+        // the one that decides what actually gets masked.
+        self.routes.iter().fold(
+            policy_for(self.backend.as_ref(), self.redaction),
+            |strictest, route| {
+                strictest.stricter(policy_for(route.backend.as_ref(), route.redaction))
+            },
+        )
     }
 
     /// Mask a transcript on its way out, logging what was masked but never what it was.
@@ -555,8 +560,12 @@ impl AiBackend for Router {
         self.backend.model_id()
     }
 
+    /// Whether **everything** this router might do stays on the machine.
+    ///
+    /// False if any route is remote. A policy that might send one summary to Anthropic is not
+    /// local, even if every other call stays put.
     fn is_local(&self) -> bool {
-        self.backend.is_local()
+        self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
     }
 
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
@@ -982,6 +991,50 @@ mod tests {
         assert!(
             transmitted.contains("[redacted:api_key]"),
             "{transmitted}"
+        );
+    }
+
+    #[test]
+    fn a_policy_with_any_remote_route_is_not_local() {
+        // `is_local` drives a claim the product presents as verifiable. A policy where anything
+        // may leave the machine is not local, even if most calls stay.
+        let router = Router::from_config(RouterConfig::ollama())
+            .expect("ollama router")
+            .with_route(
+                RouteSpec {
+                    name: "cloud".into(),
+                    when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+                },
+                Box::new(std::sync::Arc::new(SpyBackend::cloud())),
+                BackendKind::Anthropic,
+                RedactionPolicy::Secrets,
+            );
+
+        assert!(
+            !router.is_local(),
+            "a route to Anthropic means this router is not local"
+        );
+    }
+
+    #[test]
+    fn redaction_is_the_strictest_across_every_route() {
+        let router = Router::from_config(RouterConfig::anthropic("k"))
+            .expect("anthropic router")
+            .with_redaction(RedactionPolicy::Secrets)
+            .with_route(
+                RouteSpec {
+                    name: "strict".into(),
+                    when: vec![],
+                },
+                Box::new(std::sync::Arc::new(SpyBackend::cloud())),
+                BackendKind::Anthropic,
+                RedactionPolicy::SecretsAndContacts,
+            );
+
+        assert_eq!(
+            router.effective_redaction(),
+            RedactionPolicy::SecretsAndContacts,
+            "asked without a call context, it must not under-report masking"
         );
     }
 
