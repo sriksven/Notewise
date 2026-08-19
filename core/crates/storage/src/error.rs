@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// Errors produced by the storage layer.
@@ -38,6 +40,26 @@ pub enum StorageError {
 
     #[error("encryption is not available: this binary was built without the 'sqlcipher' feature")]
     EncryptionUnavailable,
+
+    /// No home directory, and no `NOTEWISE_DATA_DIR` to stand in for one. Named rather than
+    /// guessed: a workspace written to a fallback path is a workspace the user cannot find.
+    #[error("could not determine where to keep the workspace; set NOTEWISE_DATA_DIR or pass an explicit database path")]
+    NoDataDirectory,
+
+    #[error("could not prepare the workspace directory {path}: {source}")]
+    DataDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("could not move the workspace from {from} to {to}: {source}")]
+    WorkspaceMove {
+        from: PathBuf,
+        to: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;

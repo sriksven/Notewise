@@ -356,6 +356,11 @@ impl Router {
         self.backend.probe().await
     }
 
+    /// The model that will actually answer. See [`AiBackend::resolved_model_id`].
+    pub async fn resolved_model_id(&self) -> String {
+        self.backend.resolved_model_id().await
+    }
+
     /// What the active backend can run. See [`AiBackend::installed_models`].
     pub async fn installed_models(&self) -> Result<Vec<String>> {
         self.backend.installed_models().await

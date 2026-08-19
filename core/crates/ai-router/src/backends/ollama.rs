@@ -3,11 +3,15 @@
 //! This is the fully-local option: transcripts never leave the machine. It requires the user
 //! to be running Ollama and to have pulled a model.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::embed::is_embedding_model;
 use crate::error::{AiError, Result};
+use crate::tags;
 use crate::types::{
     ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
     TranscriptInput,
@@ -16,6 +20,12 @@ use crate::AiBackend;
 
 const BACKEND: &str = "ollama";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/chat";
+/// The preferred model when nobody has chosen one.
+///
+/// A *preference*, not an assertion. Ollama expands an untagged name to `:latest`, so this
+/// string alone is a claim that the user pulled `llama3.1:latest` specifically — and it is a
+/// 404 on a machine holding `llama3.1:8b`. It is resolved against the daemon's actual model
+/// list before any request; see [`OllamaBackend::resolve`] and `crate::tags`.
 const DEFAULT_MODEL: &str = "llama3.1";
 
 /// Whether a failed response means the configured model is absent, rather than the daemon
@@ -29,7 +39,20 @@ fn is_model_missing(status: u16, body: &str) -> bool {
 
 #[derive(Debug, Clone)]
 pub struct OllamaBackend {
+    /// The model asked for: either the user's choice or [`DEFAULT_MODEL`].
     model: String,
+    /// Whether a human picked `model`.
+    ///
+    /// The difference decides what happens when it is not installed. A name the user chose
+    /// must fail loudly — substituting another model would attribute output to a choice they
+    /// did not make. Our own default may fall back to whatever the daemon holds, because
+    /// "llama3.1 is missing" is not a useful thing to tell someone who never asked for it.
+    chosen: bool,
+    /// The tag actually sent, resolved once against the daemon's model list.
+    ///
+    /// Shared across clones rather than per-clone, so the resolution costs one `/api/tags`
+    /// per backend rather than one per caller that happened to clone it.
+    resolved: Arc<tokio::sync::OnceCell<String>>,
     endpoint: String,
     http: reqwest::Client,
 }
@@ -44,6 +67,8 @@ impl OllamaBackend {
     pub fn new() -> Self {
         Self {
             model: DEFAULT_MODEL.to_string(),
+            chosen: false,
+            resolved: Arc::new(tokio::sync::OnceCell::new()),
             endpoint: DEFAULT_ENDPOINT.to_string(),
             http: reqwest::Client::new(),
         }
@@ -51,6 +76,7 @@ impl OllamaBackend {
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self.chosen = true;
         self
     }
 
@@ -63,9 +89,9 @@ impl OllamaBackend {
     ///
     /// `stream: false` matters — Ollama streams by default, and a streaming response does not
     /// deserialize as a single JSON object.
-    fn body(&self, messages: Value, json_mode: bool) -> Value {
+    fn body(&self, model: &str, messages: Value, json_mode: bool) -> Value {
         let mut body = json!({
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "stream": false,
         });
@@ -79,11 +105,12 @@ impl OllamaBackend {
         body
     }
 
-    async fn send(&self, body: Value) -> Result<ChatCompletion> {
+    async fn send(&self, messages: Value, json_mode: bool) -> Result<ChatCompletion> {
+        let model = self.resolve().await;
         let response = self
             .http
             .post(&self.endpoint)
-            .json(&body)
+            .json(&self.body(&model, messages, json_mode))
             .send()
             .await
             .map_err(|source| AiError::Transport {
@@ -105,7 +132,10 @@ impl OllamaBackend {
                 let installed = self.installed_models().await.unwrap_or_default();
                 return Err(AiError::ModelNotInstalled {
                     backend: BACKEND,
-                    model: self.model.clone(),
+                    // The tag that was actually sent, not the name it was resolved from.
+                    // Naming a model the daemon never saw would send the user looking for the
+                    // wrong thing.
+                    model,
                     installed,
                 });
             }
@@ -128,7 +158,7 @@ impl OllamaBackend {
             { "role": "system", "content": system },
             { "role": "user", "content": user },
         ]);
-        let completion = self.send(self.body(messages, json_mode)).await?;
+        let completion = self.send(messages, json_mode).await?;
         Ok(completion.message.content)
     }
 }
@@ -145,8 +175,16 @@ fn transcript_prompt(input: &TranscriptInput) -> String {
 
 #[async_trait]
 impl AiBackend for OllamaBackend {
+    /// The tag in use, once it is known.
+    ///
+    /// Before the first request this is the *preferred* name, because nothing has asked the
+    /// daemon yet. Afterwards it is the tag that actually answered, which is what belongs
+    /// beside stored output.
     fn model_id(&self) -> &str {
-        &self.model
+        self.resolved
+            .get()
+            .map(String::as_str)
+            .unwrap_or(&self.model)
     }
 
     fn is_local(&self) -> bool {
@@ -165,7 +203,8 @@ impl AiBackend for OllamaBackend {
 
         Ok(SummaryOutput {
             text,
-            model: self.model.clone(),
+            // After `complete`, this is the resolved tag rather than the preference.
+            model: self.model_id().to_string(),
         })
     }
 
@@ -235,11 +274,17 @@ impl AiBackend for OllamaBackend {
             })
         }));
 
-        let completion = self.send(self.body(json!(messages), false)).await?;
+        let completion = self.send(json!(messages), false).await?;
         Ok(ChatResponse {
             text: completion.message.content,
-            model: completion.model.unwrap_or_else(|| self.model.clone()),
+            model: completion
+                .model
+                .unwrap_or_else(|| self.model_id().to_string()),
         })
+    }
+
+    async fn resolved_model_id(&self) -> String {
+        self.resolve().await
     }
 
     /// Ask the daemon for its model list.
@@ -272,6 +317,43 @@ impl AiBackend for OllamaBackend {
 }
 
 impl OllamaBackend {
+    /// The tag to send, resolved once against what the daemon actually holds.
+    ///
+    /// Costs one `/api/tags` on the first request of a process and nothing afterwards. That
+    /// is the whole price of never shipping a default that names a model the user does not
+    /// have — the daemon was already being asked this question to build the model picker.
+    async fn resolve(&self) -> String {
+        self.resolved
+            .get_or_init(|| self.resolve_uncached())
+            .await
+            .clone()
+    }
+
+    async fn resolve_uncached(&self) -> String {
+        let Ok(installed) = self.installed_models().await else {
+            // The daemon is unreachable or unwell. Sending the preferred name produces a
+            // transport error that names the daemon, which is the accurate complaint;
+            // inventing a model here would replace it with a misleading one.
+            return self.model.clone();
+        };
+
+        if let Some(tag) = tags::resolve_tag(&self.model, &installed) {
+            return tag;
+        }
+
+        if self.chosen {
+            // Their choice, and it is not installed. Sending it unchanged gets
+            // `ModelNotInstalled`, which names what *is* installed — a better answer than
+            // silently running a model they did not pick.
+            return self.model.clone();
+        }
+
+        // Nobody chose this and the preferred family is absent. A machine with only `mistral`
+        // should summarize the meeting rather than report that our preference is missing.
+        tags::first_acceptable(&installed, |model| !is_embedding_model(model))
+            .unwrap_or_else(|| self.model.clone())
+    }
+
     /// The daemon's base URL, recovered from the configured chat endpoint.
     fn base(&self) -> &str {
         self.endpoint
@@ -485,15 +567,39 @@ mod tests {
     #[test]
     fn streaming_is_disabled() {
         // Ollama streams by default, and a streamed body does not deserialize as one object.
-        let body = OllamaBackend::new().body(json!([]), false);
+        let body = OllamaBackend::new().body("llama3.1:8b", json!([]), false);
         assert_eq!(body["stream"], false);
     }
 
     #[test]
     fn json_mode_is_opt_in() {
         let backend = OllamaBackend::new();
-        assert!(backend.body(json!([]), false).get("format").is_none());
-        assert_eq!(backend.body(json!([]), true)["format"], "json");
+        assert!(backend
+            .body("llama3.1:8b", json!([]), false)
+            .get("format")
+            .is_none());
+        assert_eq!(
+            backend.body("llama3.1:8b", json!([]), true)["format"],
+            "json"
+        );
+    }
+
+    #[test]
+    fn the_shipped_default_is_a_preference_rather_than_a_claim() {
+        // `new()` names a model nobody asked for, so it may be resolved against the daemon or
+        // fall back. `with_model` records a decision, and a decision is not ours to override.
+        assert!(!OllamaBackend::new().chosen);
+        assert!(OllamaBackend::new().with_model("mistral:7b").chosen);
+    }
+
+    #[test]
+    fn the_reported_model_is_the_preference_until_something_resolves_it() {
+        // Nothing has asked the daemon yet, so the honest answer is what was asked for.
+        assert_eq!(OllamaBackend::new().model_id(), DEFAULT_MODEL);
+        assert_eq!(
+            OllamaBackend::new().with_model("mistral:7b").model_id(),
+            "mistral:7b"
+        );
     }
 
     #[test]

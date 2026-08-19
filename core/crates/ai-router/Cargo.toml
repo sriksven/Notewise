@@ -15,6 +15,10 @@ serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
+# For `sync::OnceCell` only: the default model is resolved against the daemon's model list
+# once per backend, and caching that needs a cell an async closure can initialise. tokio is
+# already in the tree via reqwest, so this adds no compile time.
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

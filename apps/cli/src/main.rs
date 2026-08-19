@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
     let config = Config::resolve(cli.db.clone(), cli.ephemeral)?;
 
     match cli.command {
-        Command::Status => status(&config),
+        Command::Status => status(&config).await,
         Command::Meetings { limit } => meetings(&config, limit),
         Command::Transcript { id } => transcript(&config, &id),
         Command::Summarize { id } => summarize(&config, &id).await,
@@ -229,8 +229,37 @@ fn open(config: &Config) -> Result<Database> {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("creating {}", parent.display()))?;
             }
+            adopt_legacy_workspace(path);
             Database::open(path).with_context(|| format!("opening {}", path.display()))
         }
+    }
+}
+
+/// Bring a workspace left by an earlier build into place before opening it.
+///
+/// Only for the canonical path. `--db` names an exact file, and moving another workspace into
+/// it would ignore the one instruction the user gave.
+///
+/// Never fatal. A legacy directory that cannot be read is a reason to say so, not a reason to
+/// refuse to open the workspace sitting right there.
+fn adopt_legacy_workspace(path: &std::path::Path) {
+    if !notewise_storage::database_path().is_ok_and(|canonical| canonical == path) {
+        return;
+    }
+
+    match notewise_storage::adopt_legacy_workspace(path) {
+        Ok(outcome) => {
+            if let notewise_storage::Adoption::Adopted { from } = &outcome {
+                tracing::info!(
+                    from = %from.display(),
+                    "adopted the workspace an earlier build left behind"
+                );
+            }
+            if let Some(warning) = outcome.warning() {
+                eprintln!("warning: {warning}");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "could not check for an earlier workspace"),
     }
 }
 
@@ -239,7 +268,7 @@ fn parse_id(raw: &str) -> Result<Id> {
         .with_context(|| format!("'{raw}' is not a valid id"))
 }
 
-fn status(config: &Config) -> Result<()> {
+async fn status(config: &Config) -> Result<()> {
     let db = open(config)?;
     let router = config.ai_router()?;
 
@@ -249,7 +278,16 @@ fn status(config: &Config) -> Result<()> {
         "meetings       {}",
         MeetingRepository::new(&db).list_recent(u32::MAX)?.len()
     );
-    println!("ai backend     {}", router.model_id());
+    // What will actually answer, not what was asked for. On a local daemon these differ
+    // whenever the configured name omits a tag — `llama3.1` is `llama3.1:8b` here — and
+    // printing only the request is what sends someone looking for a model they never pulled.
+    let requested = router.model_id().to_string();
+    let resolved = router.resolved_model_id().await;
+    if resolved == requested {
+        println!("ai backend     {resolved}");
+    } else {
+        println!("ai backend     {resolved} (resolved from {requested})");
+    }
     println!(
         "ai location    {}",
         if router.is_local() {
@@ -560,22 +598,18 @@ fn model_store_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("NOTEWISE_MODEL_DIR") {
         return Ok(PathBuf::from(dir));
     }
-    let base = match std::env::var("NOTEWISE_DATA_DIR") {
-        Ok(dir) => PathBuf::from(dir),
-        Err(_) => {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .map_err(|_| anyhow::anyhow!("could not determine the home directory"))?;
-            if cfg!(target_os = "macos") {
-                PathBuf::from(home).join("Library/Application Support/notewise")
-            } else if cfg!(target_os = "windows") {
-                PathBuf::from(home).join("AppData/Roaming/notewise")
-            } else {
-                PathBuf::from(home).join(".local/share/notewise")
-            }
-        }
-    };
-    Ok(base.join("models"))
+
+    // A third hand-written copy of the platform data path used to live here, which is how the
+    // app and the CLI came to keep their models — and their workspaces — in different places.
+    let data_dir = notewise_storage::data_dir()?;
+
+    // Models an earlier build downloaded beside the old workspace. Best effort: a model that
+    // will not move is re-downloadable, which is not a reason to refuse to transcribe.
+    if let Err(e) = notewise_storage::adopt_legacy_models(&data_dir) {
+        tracing::warn!(error = %e, "could not check for models from an earlier install");
+    }
+
+    Ok(notewise_storage::model_dir(&data_dir))
 }
 
 #[cfg(feature = "record")]

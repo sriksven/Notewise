@@ -62,14 +62,32 @@ fn main() {
 
 /// Start the engine on loopback and return the address it actually bound.
 fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error::Error>> {
-    let data_dir = data_dir(app)?;
+    let data_dir = data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
 
-    let db = Database::open(data_dir.join("notewise.db"))?;
+    let db_path = data_dir.join("notewise.db");
+    adopt_legacy_workspace(&db_path);
+
+    // The models directory moved with the workspace. Left behind, a gigabyte of already
+    // downloaded weights would be re-fetched on the next recording.
+    if std::env::var("NOTEWISE_MODEL_DIR").is_err() {
+        match notewise_storage::adopt_legacy_models(&data_dir) {
+            Ok(adopted) if !adopted.is_empty() => {
+                tracing::info!(
+                    count = adopted.len(),
+                    "adopted models from an earlier install"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "could not check for earlier models"),
+        }
+    }
+
+    let db = Database::open(&db_path)?;
     let ai = AiRouter::from_config(backend_config())?;
 
     tracing::info!(
-        db = %data_dir.join("notewise.db").display(),
+        db = %db_path.display(),
         backend = ai.model_id(),
         local = ai.is_local(),
         "engine configured"
@@ -124,13 +142,43 @@ fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error
 
 /// Where the database lives.
 ///
-/// Uses Tauri's resolved app-data directory, so it follows each platform's convention and
-/// stays inside the sandbox container if the app is ever sandboxed.
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(dir) = std::env::var("NOTEWISE_DATA_DIR") {
-        return Ok(PathBuf::from(dir));
+/// Asks `storage`, which owns the answer for every surface.
+///
+/// This used to be `app.path().app_data_dir()`, which Tauri derives from the bundle
+/// identifier — `~/Library/Application Support/dev.notewise.app` rather than the
+/// `.../notewise` the CLI composed for itself. Both are reasonable conventions and having
+/// both was the bug: the same user's meetings, notes and tickets lived in one of two
+/// databases depending on which surface created them, and neither could see the other's.
+///
+/// The sandbox-container argument for the identifier-derived path is real but points the
+/// wrong way here. A container is unreachable from the CLI and from `mcp-server`, so honouring
+/// it would make the split permanent rather than current.
+fn data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(notewise_storage::data_dir()?)
+}
+
+/// Bring a workspace left by an earlier build into place before opening it.
+///
+/// Never fatal, and never destructive. A lone workspace from the old location is moved once,
+/// silently — that is the case where nothing is lost and nobody needs telling. When both
+/// stores exist, neither is touched: reconciling two populated databases means remapping every
+/// id and edge, which is a feature rather than something a launch path may do on its own.
+fn adopt_legacy_workspace(path: &std::path::Path) {
+    match notewise_storage::adopt_legacy_workspace(path) {
+        Ok(outcome) => {
+            if let notewise_storage::Adoption::Adopted { from } = &outcome {
+                tracing::info!(
+                    from = %from.display(),
+                    to = %path.display(),
+                    "adopted the workspace an earlier build left behind"
+                );
+            }
+            if let Some(warning) = outcome.warning() {
+                tracing::warn!("{warning}");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "could not check for an earlier workspace"),
     }
-    Ok(app.path().app_data_dir()?)
 }
 
 /// Where transcription models live.
@@ -142,7 +190,7 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error
 fn model_dir(data_dir: &std::path::Path) -> PathBuf {
     std::env::var("NOTEWISE_MODEL_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| data_dir.join("models"))
+        .unwrap_or_else(|_| notewise_storage::model_dir(data_dir))
 }
 
 /// Where the built frontend lives.

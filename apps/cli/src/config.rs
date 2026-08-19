@@ -166,33 +166,15 @@ fn key_for(kind: BackendKind) -> Option<String> {
     std::env::var(name).ok().filter(|k| !k.trim().is_empty())
 }
 
-/// Default database path, following each platform's convention.
+/// Default database path.
+///
+/// Delegates to `storage`, which owns the answer. This used to be composed here by hand, and
+/// the desktop shell composed a different one from its bundle identifier — so a user's
+/// meetings landed in one of two databases depending on which surface they happened to open.
+/// One function, asked by every surface, is the only thing that keeps them from drifting
+/// apart again.
 fn default_database_path() -> Result<PathBuf> {
-    if let Ok(dir) = std::env::var("NOTEWISE_DATA_DIR") {
-        return Ok(PathBuf::from(dir).join("notewise.db"));
-    }
-
-    let base = if cfg!(target_os = "macos") {
-        home()?.join("Library/Application Support")
-    } else if cfg!(target_os = "windows") {
-        std::env::var("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or(home()?.join("AppData/Roaming"))
-    } else {
-        // XDG: honour the override before falling back to the spec's default.
-        std::env::var("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or(home()?.join(".local/share"))
-    };
-
-    Ok(base.join("notewise").join("notewise.db"))
-}
-
-fn home() -> Result<PathBuf> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .map_err(|_| anyhow::anyhow!("could not determine the home directory; pass --db"))
+    Ok(notewise_storage::database_path()?)
 }
 
 #[cfg(test)]

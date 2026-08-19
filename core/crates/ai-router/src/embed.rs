@@ -21,9 +21,12 @@
 //! obvious failure. [`Embedder::model`] is stored alongside every vector and checked before
 //! anything is compared.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AiError, Result};
+use crate::tags;
 
 const BACKEND: &str = "ollama";
 
@@ -35,6 +38,12 @@ const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/embed";
 /// `nomic-embed-text` rather than something larger: it is 274 MB, produces 768 dimensions, and
 /// is the model most people running Ollama already have. A better default that nobody has
 /// pulled is not a default, it is a failure with an extra step.
+///
+/// Untagged, and therefore a *family* rather than a model. Ollama expands a bare name to
+/// `:latest`, so sending this string unchanged asserts the user pulled that exact tag — true
+/// on most machines and false on any that pulled a pinned version. [`Embedder::available`]
+/// already answered the question by family; the request did not, so the two could disagree
+/// about the same daemon. Resolution happens in [`Embedder::wire_model`].
 pub const DEFAULT_MODEL: &str = "nomic-embed-text";
 
 /// Models known to produce embeddings rather than conversation.
@@ -86,7 +95,10 @@ fn prefixes(model: &str) -> (&'static str, &'static str) {
 #[derive(Debug, Clone)]
 pub struct Embedder {
     endpoint: String,
+    /// The model asked for, which may name a family rather than a tag.
     model: String,
+    /// The tag actually sent, resolved once against the daemon's model list.
+    resolved: Arc<tokio::sync::OnceCell<String>>,
     http: reqwest::Client,
 }
 
@@ -95,6 +107,7 @@ impl Embedder {
         Self {
             endpoint: DEFAULT_ENDPOINT.to_string(),
             model: model.into(),
+            resolved: Arc::new(tokio::sync::OnceCell::new()),
             http: reqwest::Client::new(),
         }
     }
@@ -109,8 +122,33 @@ impl Embedder {
     }
 
     /// Which model produces these vectors. Recorded with every one that is stored.
+    ///
+    /// Deliberately the name that was *asked for*, not the tag it resolves to on this machine.
+    /// This value is also what decides which chunks are already embedded, and it is read
+    /// before anything has spoken to the daemon — so a value that changed once resolution
+    /// happened would make every indexing run believe the whole workspace was pending, and
+    /// re-embed it forever.
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// The tag to actually send, resolved once against what the daemon holds.
+    ///
+    /// Only ever within the same family. Substituting a different embedder would be the one
+    /// mistake this module exists to prevent: vectors from two models are not slightly
+    /// inconsistent, they are incomparable, and the label stored beside them would say
+    /// otherwise. If the family is absent the requested name goes out unchanged and the
+    /// daemon's own 404 is the answer.
+    async fn wire_model(&self) -> String {
+        self.resolved
+            .get_or_init(|| async {
+                let Ok(installed) = self.installed().await else {
+                    return self.model.clone();
+                };
+                tags::resolve_tag(&self.model, &installed).unwrap_or_else(|| self.model.clone())
+            })
+            .await
+            .clone()
     }
 
     fn base(&self) -> &str {
@@ -163,7 +201,7 @@ impl Embedder {
             .http
             .post(&self.endpoint)
             .json(&EmbedRequest {
-                model: &self.model,
+                model: &self.wire_model().await,
                 input: texts,
             })
             // Generous: a cold model has to be loaded from disk first, and a large batch of
@@ -323,6 +361,21 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_recorded_model_is_the_name_that_was_asked_for() {
+        // Guards an infinite re-index. This value labels stored vectors *and* decides which
+        // chunks are still pending, and it is read before anything has spoken to the daemon.
+        // If it became the resolved tag once a request had happened, the label written would
+        // stop matching the label queried and every run would re-embed the whole workspace.
+        let embedder = Embedder::new("nomic-embed-text");
+        assert_eq!(embedder.model(), "nomic-embed-text");
+        assert_eq!(
+            embedder.clone().model(),
+            "nomic-embed-text",
+            "a clone must agree, since indexing builds a fresh embedder per pass"
+        );
+    }
 
     #[test]
     fn identical_vectors_are_maximally_similar() {

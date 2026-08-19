@@ -41,10 +41,11 @@ mod backends;
 mod clarify;
 mod email;
 mod embed;
-mod policy;
 mod error;
+mod policy;
 mod redact;
 mod router;
+mod tags;
 mod types;
 
 pub use backends::{
@@ -102,6 +103,16 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
     /// backends that depend on a separate daemon override this.
     async fn probe(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// The model that will actually answer, asking the backend if it must.
+    ///
+    /// Defaults to [`Self::model_id`], which is right for every hosted provider: the
+    /// configured name is the name, and there is nothing to resolve. A local daemon holds
+    /// specific tags, so a backend talking to one overrides this — reporting a name that is
+    /// not the one about to run is how a user ends up looking for a model they never had.
+    async fn resolved_model_id(&self) -> String {
+        self.model_id().to_string()
     }
 
     /// The model names this backend can actually run, if it can be asked.

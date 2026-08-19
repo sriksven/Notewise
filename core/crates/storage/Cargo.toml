@@ -22,3 +22,6 @@ default = []
 # for a bundled SQLCipher build, which is significantly slower to compile. See
 # Database::open_encrypted and docs/architecture/data-model.md.
 sqlcipher = ["rusqlite/bundled-sqlcipher"]
+
+[dev-dependencies]
+tempfile.workspace = true
