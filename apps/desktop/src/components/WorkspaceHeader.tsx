@@ -9,6 +9,13 @@ export type Tab = MeetingTab;
 
 interface Props {
   meeting: Meeting | null;
+  /**
+   * Rename the meeting.
+   *
+   * Optional so a caller with nowhere to persist it renders a plain heading rather than an edit
+   * that silently does nothing.
+   */
+  onRename?: (title: string) => Promise<void>;
   segments: Segment[];
   tab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -64,6 +71,7 @@ function duration(meeting: Meeting): string | null {
  */
 export function WorkspaceHeader({
   meeting,
+  onRename,
   segments,
   tab,
   onTabChange,
@@ -106,9 +114,13 @@ export function WorkspaceHeader({
                 aria-hidden
               />
             )}
-            <h1 className="truncate text-[17px] font-semibold tracking-tight text-ink">
-              {meeting?.title ?? "No meeting selected"}
-            </h1>
+            {meeting && onRename ? (
+              <EditableTitle key={meeting.id + meeting.title} title={meeting.title} onSave={onRename} />
+            ) : (
+              <h1 className="truncate text-[17px] font-semibold tracking-tight text-ink">
+                {meeting?.title ?? "No meeting selected"}
+              </h1>
+            )}
           </div>
 
           <p className="mt-0.5 h-[15px] text-[12px] text-ink-faint">
@@ -207,5 +219,77 @@ export function WorkspaceHeader({
         })}
       </nav>
     </header>
+  );
+}
+
+/**
+ * The meeting title, renameable in place.
+ *
+ * A recording started from a hotkey keeps whatever the caller guessed before the meeting happened,
+ * and until now that was permanent — `title` was set at `create` and never again.
+ *
+ * Empty is refused: an untitled meeting is unfindable, which is worse than a wrong title.
+ */
+function EditableTitle({
+  title,
+  onSave,
+}: {
+  title: string;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const [busy, setBusy] = useState(false);
+
+  async function commit() {
+    const next = draft.trim();
+    if (next === "" || next === title) {
+      setDraft(title);
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch {
+      // Keep the field open with what was typed rather than discarding it.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <h1
+        className="cursor-text truncate text-[17px] font-semibold tracking-tight text-ink"
+        title="Double-click to rename"
+        onDoubleClick={() => setEditing(true)}
+      >
+        {title}
+      </h1>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      disabled={busy}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          void commit();
+        }
+        if (e.key === "Escape") {
+          setDraft(title);
+          setEditing(false);
+        }
+      }}
+      aria-label="Meeting title"
+      className="w-full rounded-md border border-accent/40 bg-transparent px-2 py-0.5 text-[17px] font-semibold tracking-tight text-ink outline-none"
+    />
   );
 }

@@ -1,4 +1,5 @@
 import { FollowUpDrafts } from "../components/FollowUpDrafts";
+import { SummaryTemplatePicker } from "../components/SummaryTemplatePicker";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { Markdown } from "../components/Markdown";
@@ -13,6 +14,12 @@ interface Props {
   hasTranscript: boolean;
   summarizing: boolean;
   onSummarize: () => void;
+  /// Reload the summary without producing another one.
+  ///
+  /// Deliberately separate from `onSummarize`, which *runs* a default summarisation — passing that
+  /// as a completion callback would fire a second, default-prompt summary straight after a
+  /// templated one, and the default would win as the newest row.
+  onReload: () => void;
 }
 
 /**
@@ -33,6 +40,7 @@ export function SummaryView({
   hasTranscript,
   summarizing,
   onSummarize,
+  onReload,
 }: Props) {
   if (!meetingId) {
     return (
@@ -100,6 +108,12 @@ export function SummaryView({
             </p>
           </section>
         )}
+
+        <SummaryTemplatePicker
+          meetingId={meetingId}
+          hasTranscript={hasTranscript}
+          onDone={onReload}
+        />
 
         {/* Below the summary, because the engine drafts from the summary — offering it above would
             invite drafting from a transcript, which costs more tokens and reads worse. */}

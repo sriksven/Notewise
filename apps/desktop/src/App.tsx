@@ -381,6 +381,26 @@ export default function App() {
   };
 
   /** Run the model, then re-read the stored summary so every view of it agrees. */
+  /// Correct a mis-transcribed line, and reflect it without refetching the whole transcript.
+  ///
+  /// The engine drops the segment's stale embedding in the same transaction, so the next indexing
+  /// pass rebuilds it — nothing here has to know that.
+  const correctSegment = async (segmentId: string, text: string) => {
+    await api.setSegmentText(segmentId, text);
+    setSegments((current) =>
+      current.map((s) => (s.id === segmentId ? { ...s, text } : s)),
+    );
+  };
+
+  /// Rename the open meeting, updating the list so the sidebar agrees immediately.
+  const renameMeeting = async (title: string) => {
+    if (!selectedId) return;
+    await api.setMeetingTitle(selectedId, title);
+    setMeetings((current) =>
+      current.map((m) => (m.id === selectedId ? { ...m, title } : m)),
+    );
+  };
+
   const summarize = async () => {
     if (!selectedId) return;
     setSummarizing(true);
@@ -589,6 +609,7 @@ export default function App() {
               <>
                 <WorkspaceHeader
                   meeting={selectedMeeting}
+                  onRename={renameMeeting}
                   segments={segments}
                   tab={tab}
                   onTabChange={setTab}
@@ -608,6 +629,7 @@ export default function App() {
                     hasMeeting={selectedId !== null}
                     speakers={speakers}
                     onRenameSpeaker={renameSpeaker}
+                    onCorrectSegment={correctSegment}
                   />
                 )}
                 {tab === "summary" && (
@@ -619,6 +641,10 @@ export default function App() {
                     hasTranscript={segments.length > 0}
                     summarizing={summarizing}
                     onSummarize={() => void summarize()}
+                    onReload={() => {
+                      void summaryState.reload();
+                      setActionItemsToken((n) => n + 1);
+                    }}
                   />
                 )}
                 {tab === "notes" && (

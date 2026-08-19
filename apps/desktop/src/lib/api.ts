@@ -470,6 +470,14 @@ export interface EmailDraft {
   created_at: string;
 }
 
+export interface SummaryTemplate {
+  id: string;
+  name: string;
+  prompt: string;
+  /** Seeded. Editable, but not deletable — so the delete control is hidden rather than failing. */
+  is_builtin: boolean;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -518,6 +526,43 @@ export const api = {
       { method: "POST", body: JSON.stringify({ from, to }) },
     ),
 
+  /** Named prompts for summarising. Built-ins first, then the user's own. */
+  summaryTemplates: () => request<SummaryTemplate[]>("/v1/summary-templates"),
+
+  createSummaryTemplate: (name: string, prompt: string) =>
+    request<SummaryTemplate>("/v1/summary-templates", {
+      method: "POST",
+      body: JSON.stringify({ name, prompt }),
+    }),
+
+  updateSummaryTemplate: (id: string, name: string, prompt: string) =>
+    request<SummaryTemplate>(`/v1/summary-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, prompt }),
+    }),
+
+  deleteSummaryTemplate: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/summary-templates/${id}`, { method: "DELETE" }),
+
+  /** Rename a meeting. */
+  setMeetingTitle: (id: string, title: string) =>
+    request<{ title: string }>(`/v1/meetings/${id}/title`, {
+      method: "PUT",
+      body: JSON.stringify({ title }),
+    }),
+
+  /**
+   * Correct a mis-transcribed line.
+   *
+   * The engine refuses an empty string: blanking a line is a different operation from correcting
+   * one, and it would leave a gap with no record anything was there.
+   */
+  setSegmentText: (id: string, text: string) =>
+    request<{ text: string }>(`/v1/segments/${id}/text`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
+
   summarize: (id: string) =>
     request<{
       summary_id: string;
@@ -526,6 +571,16 @@ export const api = {
       decisions: number;
       action_items: number;
     }>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
+
+  /** Summarize using a template's prompt instead of the backend's default instruction. */
+  summarizeWithTemplate: (id: string, templateId: string) =>
+    request<{
+      summary: Summary;
+      decisions: unknown[];
+      action_items: unknown[];
+    }>(`/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`, {
+      method: "POST",
+    }),
 
   related: (id: string, depth = 2) =>
     request<RelatedNode[]>(`/v1/meetings/${id}/related?depth=${depth}`),

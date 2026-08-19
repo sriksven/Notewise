@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AudioLines } from "lucide-react";
 
 import type { Segment, Speaker } from "../lib/api";
@@ -12,6 +12,13 @@ interface Props {
   /** The distinct voices, for naming them. Empty until loaded, which only costs the affordance. */
   speakers?: Speaker[];
   onRenameSpeaker?: (from: string | null, to: string) => Promise<void>;
+  /**
+   * Correct a mis-transcribed line.
+   *
+   * Optional, so a caller with no way to persist a correction simply renders read-only text rather
+   * than offering an edit that silently does nothing.
+   */
+  onCorrectSegment?: (segmentId: string, text: string) => Promise<void>;
 }
 
 function timestamp(ms: number): string {
@@ -34,6 +41,7 @@ export function TranscriptView({
   hasMeeting,
   speakers = [],
   onRenameSpeaker,
+  onCorrectSegment,
 }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -100,14 +108,94 @@ export function TranscriptView({
                   </span>
                 </div>
               )}
-              <p className="text-[14px] leading-relaxed text-ink">
-                {segment.text}
-              </p>
+              {onCorrectSegment ? (
+                <CorrectableLine
+                  key={`${segment.id}:${segment.text}`}
+                  text={segment.text}
+                  onSave={(next) => onCorrectSegment(segment.id, next)}
+                />
+              ) : (
+                <p className="text-[14px] leading-relaxed text-ink">{segment.text}</p>
+              )}
             </div>
           );
         })}
         <div ref={endRef} />
       </div>
     </div>
+  );
+}
+
+/**
+ * One transcript line, correctable in place.
+ *
+ * Double-click to edit, Enter to save, Escape to abandon. Deliberately not a visible pencil on every
+ * line: a transcript is mostly read, and hundreds of edit affordances would drown the thing being
+ * read. The `title` says how, for anyone who does not guess.
+ *
+ * Empty is refused locally as well as by the engine — blanking a line leaves a gap with no record
+ * anything was there, which is a different operation from correcting one.
+ */
+function CorrectableLine({
+  text,
+  onSave,
+}: {
+  text: string;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const [busy, setBusy] = useState(false);
+
+  async function commit() {
+    const next = draft.trim();
+    if (next === "" || next === text) {
+      setDraft(text);
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch {
+      // Leave the field open with the attempted text, so a failure does not discard typing.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <p
+        className="cursor-text text-[14px] leading-relaxed text-ink"
+        title="Double-click to correct"
+        onDoubleClick={() => setEditing(true)}
+      >
+        {text}
+      </p>
+    );
+  }
+
+  return (
+    <textarea
+      autoFocus
+      disabled={busy}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          void commit();
+        }
+        if (e.key === "Escape") {
+          setDraft(text);
+          setEditing(false);
+        }
+      }}
+      rows={Math.max(1, Math.ceil(draft.length / 80))}
+      className="w-full resize-none rounded-md border border-accent/40 bg-transparent px-2 py-1 text-[14px] leading-relaxed text-ink outline-none"
+    />
   );
 }
