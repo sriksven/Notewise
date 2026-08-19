@@ -37,6 +37,76 @@ pub fn routes() -> AxumRouter<Shared> {
         .route("/v1/routing/explain", post(explain))
         .route("/v1/routing/default", post(install_default))
         .route("/v1/workspace/merge", post(merge_workspace))
+        .route("/v1/notifications/pending", get(pending_notifications))
+        .route("/v1/notifications/:id/delivered", post(mark_delivered))
+}
+
+#[derive(Debug, Serialize)]
+struct PendingNotification {
+    id: String,
+    /// What triggered it, matching `graph::NodeKind` naming — `meeting`, `action_item`, and so on.
+    ///
+    /// A `Notification` has no title field, and inventing one here would mean this endpoint
+    /// deciding wording that belongs to whatever displays it. The kind plus the body is what the
+    /// row actually holds.
+    source_kind: String,
+    source_id: String,
+    body: String,
+    created_at: String,
+}
+
+/// Desktop notifications waiting to be shown.
+///
+/// # Why the engine does not deliver them itself
+///
+/// `NotificationRepository` has had `pending_on` and `mark_delivered` since the comms layer
+/// landed, and nothing ever drained them. It could not: the engine has no way to raise an OS
+/// notification, and `apps/desktop/src-tauri` is excluded from the workspace on purpose so engine
+/// CI never pulls a GUI toolchain.
+///
+/// So the split is the same one `connector_outbox` already uses — the engine decides *that*
+/// something should be delivered, and the surface that can actually deliver it drains the queue
+/// and says so. Here that surface is the frontend, using the browser notification API, which works
+/// in the Tauri webview and in a browser. That also makes it testable, which a Tauri-only plugin
+/// would not have been.
+async fn pending_notifications(
+    State(state): State<Shared>,
+) -> ApiResult<Json<Vec<PendingNotification>>> {
+    let db = state.db().await;
+    let pending = notewise_storage::NotificationRepository::new(&db)
+        .pending_on(notewise_storage::NotificationChannel::Desktop)?;
+
+    Ok(Json(
+        pending
+            .into_iter()
+            .map(|n| PendingNotification {
+                id: n.id.to_string(),
+                source_kind: n.source_kind,
+                source_id: n.source_id.to_string(),
+                body: n.body,
+                created_at: n.created_at.to_rfc3339(),
+            })
+            .collect(),
+    ))
+}
+
+/// Record that a notification was actually shown.
+///
+/// Called by whoever displayed it, not by whoever queued it. A row marked delivered before anything
+/// appeared would be a queue that silently drops things — the failure mode hardest to notice,
+/// because the evidence is the absence of a notification nobody was expecting.
+async fn mark_delivered(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id: notewise_storage::Id = id
+        .parse()
+        .map_err(|_| ApiError::BadRequest(format!("'{id}' is not an id")))?;
+
+    let db = state.db().await;
+    notewise_storage::NotificationRepository::new(&db).mark_delivered(id, chrono::Utc::now())?;
+
+    Ok(Json(serde_json::json!({ "delivered": true })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,6 +447,102 @@ mod tests {
 
     /// The safe default matters more than the convenience here: a caller that forgets `dry_run`
     /// must preview, not mutate.
+    /// A queue nothing drains is the state this endpoint exists to end, so the round trip that
+    /// matters is: queued shows up, delivered stops showing up.
+    #[tokio::test]
+    async fn a_queued_desktop_notification_is_offered_then_stops_being_offered() {
+        let state = Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("mock router"),
+        ));
+        let app = routes().with_state(Arc::clone(&state));
+
+        let id = {
+            let db = state.db().await;
+            notewise_storage::NotificationRepository::new(&db)
+                .create(notewise_storage::NewNotification {
+                    source_kind: "meeting".into(),
+                    source_id: notewise_storage::Id::new(),
+                    recipient: "me".into(),
+                    channel: notewise_storage::NotificationChannel::Desktop,
+                    body: "your standup is starting".into(),
+                })
+                .expect("queue")
+                .id
+        };
+
+        let (status, body) = call(&app, get("/v1/notifications/pending")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body.as_array().expect("array").len(), 1, "{body}");
+        assert_eq!(body[0]["body"], "your standup is starting");
+        assert_eq!(body[0]["source_kind"], "meeting");
+
+        let (status, _) = call(
+            &app,
+            send(
+                "POST",
+                &format!("/v1/notifications/{id}/delivered"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, after) = call(&app, get("/v1/notifications/pending")).await;
+        assert_eq!(
+            after.as_array().expect("array").len(),
+            0,
+            "a delivered notification must not be offered again: {after}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_desktop_notifications_are_offered() {
+        let state = Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("mock router"),
+        ));
+        let app = routes().with_state(Arc::clone(&state));
+
+        {
+            let db = state.db().await;
+            // Slack and email have no delivery path in this product. Offering them to a frontend
+            // that can only raise a desktop notification would mark them delivered when nothing
+            // reached anyone.
+            for channel in [
+                notewise_storage::NotificationChannel::Slack,
+                notewise_storage::NotificationChannel::Email,
+            ] {
+                notewise_storage::NotificationRepository::new(&db)
+                    .create(notewise_storage::NewNotification {
+                        source_kind: "meeting".into(),
+                        source_id: notewise_storage::Id::new(),
+                        recipient: "me".into(),
+                        channel,
+                        body: "elsewhere".into(),
+                    })
+                    .expect("queue");
+            }
+        }
+
+        let (_, body) = call(&app, get("/v1/notifications/pending")).await;
+        assert_eq!(body.as_array().expect("array").len(), 0, "{body}");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_notification_id_is_a_client_error() {
+        let (status, _) = call(
+            &app(),
+            send(
+                "POST",
+                "/v1/notifications/not-an-id/delivered",
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
     #[tokio::test]
     async fn merge_defaults_to_a_dry_run() {
         let dir = tempfile::tempdir().expect("tempdir");

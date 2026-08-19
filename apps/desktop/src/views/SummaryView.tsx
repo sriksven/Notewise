@@ -1,3 +1,4 @@
+import { FollowUpDrafts } from "../components/FollowUpDrafts";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { Markdown } from "../components/Markdown";
@@ -99,6 +100,10 @@ export function SummaryView({
             </p>
           </section>
         )}
+
+        {/* Below the summary, because the engine drafts from the summary — offering it above would
+            invite drafting from a transcript, which costs more tokens and reads worse. */}
+        <FollowUpDrafts meetingId={meetingId} hasSource={summary !== null} />
       </div>
     </div>
   );

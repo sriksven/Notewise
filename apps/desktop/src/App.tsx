@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { startNotificationDelivery } from "./lib/notifications";
 import { AlertCircle } from "lucide-react";
 
 import { IntelPanel } from "./components/IntelPanel";
@@ -182,6 +184,11 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Drain the notification queue for as long as the app is open. The engine has queued desktop
+  // notifications since the comms layer landed and nothing has ever shown one — it cannot, having
+  // no way to raise an OS notification. See `lib/notifications`.
+  useEffect(() => startNotificationDelivery(), []);
 
   // The setup banner lives above this tree and cannot navigate on its own.
   useEffect(() => {

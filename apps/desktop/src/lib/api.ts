@@ -448,6 +448,28 @@ export interface MergeResult {
   skipped_conflicts: number;
 }
 
+export interface PendingNotification {
+  id: string;
+  /** What triggered it, matching graph node naming: `meeting`, `action_item`, and so on. */
+  source_kind: string;
+  source_id: string;
+  body: string;
+  created_at: string;
+}
+
+export interface EmailDraft {
+  id: string;
+  meeting_id: string | null;
+  subject: string;
+  body: string;
+  recipients: string[];
+  /** `draft` | `approved` | `sent` | `discarded`. Nothing here ever sets `sent`. */
+  status: string;
+  /** Which tone produced this variant. */
+  variant: string | null;
+  created_at: string;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -710,6 +732,35 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ from, dry_run: dryRun }),
     }),
+
+  /** Desktop notifications the engine has queued and nothing has shown yet. */
+  pendingNotifications: () => request<PendingNotification[]>("/v1/notifications/pending"),
+
+  /** Record that one was actually shown. Called after display, never before. */
+  markNotificationDelivered: (id: string) =>
+    request<{ delivered: boolean }>(`/v1/notifications/${id}/delivered`, { method: "POST" }),
+
+  /** Follow-up drafts for a meeting. */
+  emailDrafts: (meetingId: string) =>
+    request<EmailDraft[]>(`/v1/meetings/${meetingId}/emails`),
+
+  /** Draft one or more follow-ups. Tones are the variants to generate. */
+  draftEmails: (meetingId: string, tones: string[], sender?: string, audience?: string) =>
+    request<EmailDraft[]>(`/v1/meetings/${meetingId}/emails`, {
+      method: "POST",
+      body: JSON.stringify({ tones, sender, audience }),
+    }),
+
+  /**
+   * Mark a draft approved.
+   *
+   * Approving is not sending. There is no send endpoint anywhere in this product, so this records
+   * that a human read it and was happy — nothing leaves the machine as a result.
+   */
+  approveEmailDraft: (id: string) =>
+    request<EmailDraft>(`/v1/emails/${id}/approve`, { method: "POST" }),
+
+  discardEmailDraft: (id: string) => request<void>(`/v1/emails/${id}`, { method: "DELETE" }),
 
   diarization: () => request<DiarizationStatus>("/v1/diarization"),
 
