@@ -163,9 +163,101 @@ pub fn select_index(routes: &[RouteSpec], facts: &RequestFacts) -> Option<usize>
     routes.iter().position(|r| r.matches(facts))
 }
 
+/// Index of the first route that can never fire because an earlier one matches everything.
+///
+/// Worth detecting at save time. A rule listed below a catch-all looks active in the UI and never
+/// runs, and the symptom — work going to the wrong model — points at the wrong rule.
+pub fn unreachable_route(routes: &[RouteSpec]) -> Option<usize> {
+    let catch_all = routes.iter().position(|r| r.when.is_empty())?;
+    if catch_all + 1 < routes.len() {
+        Some(catch_all + 1)
+    } else {
+        None
+    }
+}
+
+/// Index of the first route whose token bounds cannot both hold.
+///
+/// Only the numeric bounds are checked. A general satisfiability check over every predicate pair
+/// is more machinery than this earns, and these two are the pair a user actually inverts.
+pub fn contradictory_route(routes: &[RouteSpec]) -> Option<usize> {
+    routes.iter().position(|route| {
+        let mut floor: Option<usize> = None;
+        let mut ceiling: Option<usize> = None;
+        for p in &route.when {
+            match p {
+                Predicate::InputTokensOver(n) => {
+                    floor = Some(floor.map_or(*n, |f: usize| f.max(*n)))
+                }
+                Predicate::InputTokensUnder(n) => {
+                    ceiling = Some(ceiling.map_or(*n, |c: usize| c.min(*n)))
+                }
+                _ => {}
+            }
+        }
+        matches!((floor, ceiling), (Some(f), Some(c)) if f + 1 >= c)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rule_set_round_trips_through_json() {
+        let original = vec![
+            spec(
+                "quality for summaries",
+                vec![Predicate::Task(vec![TaskKind::Summarize])],
+            ),
+            spec("overnight", vec![Predicate::HourBetween(22, 3)]),
+        ];
+
+        let json = serde_json::to_string(&original).expect("serializes");
+        let back: Vec<RouteSpec> = serde_json::from_str(&json).expect("deserializes");
+
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn an_unreachable_route_is_reported() {
+        // A catch-all followed by anything means the tail can never fire. Silently accepting it
+        // produces a rule the user believes is active.
+        let routes = vec![spec("catch all", vec![]), spec("never", vec![])];
+        assert_eq!(
+            unreachable_route(&routes),
+            Some(1),
+            "the route after a catch-all is dead"
+        );
+
+        let fine = vec![
+            spec("summaries", vec![Predicate::Task(vec![TaskKind::Summarize])]),
+            spec("catch all", vec![]),
+        ];
+        assert_eq!(unreachable_route(&fine), None);
+    }
+
+    #[test]
+    fn a_contradictory_route_is_reported() {
+        // Under 100 and over 1000 cannot both hold.
+        let routes = vec![spec(
+            "impossible",
+            vec![
+                Predicate::InputTokensOver(1000),
+                Predicate::InputTokensUnder(100),
+            ],
+        )];
+        assert_eq!(contradictory_route(&routes), Some(0));
+
+        let fine = vec![spec(
+            "mid",
+            vec![
+                Predicate::InputTokensOver(100),
+                Predicate::InputTokensUnder(1000),
+            ],
+        )];
+        assert_eq!(contradictory_route(&fine), None);
+    }
 
     fn spec(name: &str, when: Vec<Predicate>) -> RouteSpec {
         RouteSpec {
