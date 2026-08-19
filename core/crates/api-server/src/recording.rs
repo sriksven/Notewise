@@ -135,6 +135,20 @@ pub struct Outcome {
 ///
 /// At most one on purpose: two concurrent recordings would contend for the same microphone and
 /// produce two transcripts of the same room. A user who wants that can run a second engine.
+/// Where retained audio is kept: an `audio/` directory beside the database.
+///
+/// Beside it rather than in a separate configured location, so a workspace stays one thing to back
+/// up or move. `None` for an in-memory engine, which has no directory to be beside.
+///
+/// Gated with the transcription path it serves: without those features there is no capture to
+/// retain, and an unused helper is a clippy error at the strictness CI uses.
+#[cfg(all(feature = "record", feature = "whisper"))]
+fn audio_dir(db: &notewise_storage::Database) -> Option<std::path::PathBuf> {
+    db.path()
+        .and_then(|p| p.parent())
+        .map(|dir| dir.join("audio"))
+}
+
 #[derive(Debug, Default)]
 pub struct RecordingManager {
     #[cfg(all(feature = "record", feature = "whisper"))]
@@ -522,9 +536,36 @@ mod imp {
                         None => Pipeline::new(Box::new(engine)),
                     };
 
+                    // Keep the audio only if the user asked for it. Read here rather than passed in
+                    // so the answer is the one current when the recording happens, not when the
+                    // request was made.
+                    if notewise_storage::retention_policy(&db).keeps_anything() {
+                        if let Some(dir) = audio_dir(&db) {
+                            let path = notewise_storage::audio_path_for(&dir, meeting.id);
+                            match pipeline.retaining_audio(&path) {
+                                Ok(p) => pipeline = p,
+                                Err(e) => tracing::warn!(
+                                    error = %e,
+                                    "could not open a file for retained audio; transcribing without it"
+                                ),
+                            }
+                        }
+                    }
+
                     let stats = runtime
                         .block_on(pipeline.run(&db, meeting.id, &mut source, || false))
                         .map_err(|e| RecordingError::Failed(e.to_string()))?;
+
+                    // Before `end`, so a meeting is never briefly finished-with-no-audio.
+                    if let Some((path, bytes)) = stats.retained_audio.as_ref() {
+                        if let Some(path) = path.to_str() {
+                            if let Err(e) =
+                                notewise_storage::set_audio(&db, meeting.id, path, *bytes as i64)
+                            {
+                                tracing::warn!(error = %e, "could not record the retained audio path");
+                            }
+                        }
+                    }
 
                     MeetingRepository::new(&db)
                         .end(meeting.id, Utc::now())

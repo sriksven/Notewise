@@ -526,6 +526,34 @@ export const api = {
       { method: "POST", body: JSON.stringify({ from, to }) },
     ),
 
+  /** Whether a meeting has retained audio to play, and how large it is. */
+  audioInfo: (meetingId: string) =>
+    request<{ available: boolean; bytes: number }>(`/v1/meetings/${meetingId}/audio/info`),
+
+  /**
+   * URL the player loads.
+   *
+   * Not a `request` call: the browser fetches this itself so it can issue range requests and seek,
+   * which is the whole point of the endpoint.
+   */
+  audioUrl: (meetingId: string) => `/v1/meetings/${meetingId}/audio`,
+
+  /** How long retained audio is kept, and how much there is. */
+  audioRetention: () =>
+    request<{
+      policy: string;
+      retained: number;
+      bytes: number;
+      can_enable: boolean;
+      blocked_by: string | null;
+    }>("/v1/audio/retention"),
+
+  setAudioRetention: (policy: string) =>
+    request<{ policy: string; retained: number; bytes: number }>("/v1/audio/retention", {
+      method: "PUT",
+      body: JSON.stringify({ policy }),
+    }),
+
   /** Named prompts for summarising. Built-ins first, then the user's own. */
   summaryTemplates: () => request<SummaryTemplate[]>("/v1/summary-templates"),
 

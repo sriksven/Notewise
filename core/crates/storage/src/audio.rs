@@ -147,6 +147,30 @@ pub fn retained_totals(db: &Database) -> Result<(usize, i64)> {
     Ok((count as usize, bytes))
 }
 
+/// The audio kept for one meeting, if any: where it is and how large.
+pub fn audio_for(db: &Database, meeting_id: Id) -> Result<Option<(String, i64)>> {
+    use rusqlite::OptionalExtension;
+    let row = db
+        .conn()
+        .query_row(
+            "SELECT audio_path, COALESCE(audio_bytes, 0) FROM meetings WHERE id = ?1",
+            rusqlite::params![meeting_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+
+    Ok(row.and_then(|(path, bytes)| path.map(|p| (p, bytes))))
+}
+
+/// Record that a meeting's audio was kept.
+pub fn set_audio(db: &Database, meeting_id: Id, path: &str, bytes: i64) -> Result<()> {
+    db.conn().execute(
+        "UPDATE meetings SET audio_path = ?2, audio_bytes = ?3 WHERE id = ?1",
+        rusqlite::params![meeting_id, path, bytes],
+    )?;
+    Ok(())
+}
+
 /// A meeting whose audio has outlived the policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpiredAudio {

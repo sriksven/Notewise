@@ -630,6 +630,7 @@ export default function App() {
                     speakers={speakers}
                     onRenameSpeaker={renameSpeaker}
                     onCorrectSegment={correctSegment}
+                    audioMeetingId={selectedId}
                   />
                 )}
                 {tab === "summary" && (

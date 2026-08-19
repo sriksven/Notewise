@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AudioLines } from "lucide-react";
 
-import type { Segment, Speaker } from "../lib/api";
+import { api, type Segment, type Speaker } from "../lib/api";
 import { SpeakerName } from "./SpeakerName";
 
 interface Props {
@@ -19,6 +19,12 @@ interface Props {
    * than offering an edit that silently does nothing.
    */
   onCorrectSegment?: (segmentId: string, text: string) => Promise<void>;
+  /**
+   * The meeting whose retained audio can be played, when any was kept.
+   *
+   * Absent means no player and no seeking, which is the ordinary case: retention is off by default.
+   */
+  audioMeetingId?: string | null;
 }
 
 function timestamp(ms: number): string {
@@ -42,7 +48,46 @@ export function TranscriptView({
   speakers = [],
   onRenameSpeaker,
   onCorrectSegment,
+  audioMeetingId = null,
 }: Props) {
+  const player = useRef<HTMLAudioElement | null>(null);
+  const [hasAudio, setHasAudio] = useState(false);
+
+  // Asked rather than assumed. Retention is off by default, so a player rendered on the chance that
+  // audio exists would usually be a broken control.
+  useEffect(() => {
+    let cancelled = false;
+    setHasAudio(false);
+    if (!audioMeetingId) return;
+
+    void api
+      .audioInfo(audioMeetingId)
+      .then((info) => {
+        if (!cancelled) setHasAudio(info.available);
+      })
+      .catch(() => {
+        /* No audio is the ordinary answer, not an error worth showing. */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [audioMeetingId]);
+
+  /**
+   * Jump the player to the moment a line was said.
+   *
+   * A division rather than a guess: the retained file is written at the transcription sample rate,
+   * so a segment's millisecond bound maps straight onto a position in the file.
+   */
+  const seekTo = (ms: number) => {
+    const el = player.current;
+    if (!el) return;
+    el.currentTime = ms / 1000;
+    void el.play().catch(() => {
+      /* A browser that refuses autoplay still moved the position, which is the useful half. */
+    });
+  };
   const endRef = useRef<HTMLDivElement>(null);
 
   // Follow the tail while recording. Not while idle: a user scrolling back
@@ -103,9 +148,21 @@ export function TranscriptView({
                       {segment.speaker ?? "Unattributed"}
                     </span>
                   )}
-                  <span className="font-mono text-[11px] tabular-nums text-ink-faint">
-                    {timestamp(segment.start_ms)}
-                  </span>
+                  {hasAudio ? (
+                    <button
+                      type="button"
+                      onClick={() => seekTo(segment.start_ms)}
+                      title="Play from here"
+                      aria-label={`Play from ${timestamp(segment.start_ms)}`}
+                      className="font-mono text-[11px] tabular-nums text-accent-soft hover:underline"
+                    >
+                      {timestamp(segment.start_ms)}
+                    </button>
+                  ) : (
+                    <span className="font-mono text-[11px] tabular-nums text-ink-faint">
+                      {timestamp(segment.start_ms)}
+                    </span>
+                  )}
                 </div>
               )}
               {onCorrectSegment ? (
@@ -122,6 +179,25 @@ export function TranscriptView({
         })}
         <div ref={endRef} />
       </div>
+
+      {/* Below the transcript rather than above it: the transcript is what people read, and a
+          player is only reached for when a line needs checking. `preload="metadata"` so opening a
+          meeting does not pull tens of megabytes nobody asked to hear. */}
+      {hasAudio && audioMeetingId && (
+        <div className="border-t border-hairline p-3">
+          <audio
+            ref={player}
+            controls
+            preload="metadata"
+            src={api.audioUrl(audioMeetingId)}
+            className="w-full"
+            aria-label="Meeting audio"
+          />
+          <p className="mt-1.5 text-[11px] text-ink-faint">
+            Click any timestamp to play from that moment.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

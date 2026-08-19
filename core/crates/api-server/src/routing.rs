@@ -54,6 +54,161 @@ pub fn routes() -> AxumRouter<Shared> {
         )
         .route("/v1/audio/retention", get(get_retention).put(put_retention))
         .route("/v1/audio/sweep", post(sweep_audio))
+        .route("/v1/meetings/:id/audio", get(serve_audio))
+        .route("/v1/meetings/:id/audio/info", get(audio_info))
+}
+
+#[derive(Debug, Serialize)]
+struct AudioInfo {
+    available: bool,
+    bytes: i64,
+}
+
+/// Whether this meeting has audio to play.
+///
+/// A separate call rather than a field on the meeting: `Meeting` serialises straight from the model
+/// and its queries read columns positionally, so adding one there means touching five `SELECT`s for
+/// a fact only the transcript view asks about. Reports `available: false` rather than 404 so the
+/// caller can distinguish "no audio" from "no such meeting".
+async fn audio_info(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<AudioInfo>> {
+    let meeting_id = parse_storage_id(&id)?;
+    let db = state.db().await;
+
+    match notewise_storage::audio_for(&db, meeting_id)? {
+        // On disk, not merely pointed at: a player offered for a file that has gone shows a broken
+        // control, which is worse than showing none.
+        Some((path, bytes)) if std::path::Path::new(&path).is_file() => Ok(Json(AudioInfo {
+            available: true,
+            bytes,
+        })),
+        _ => Ok(Json(AudioInfo {
+            available: false,
+            bytes: 0,
+        })),
+    }
+}
+
+/// Serve a meeting's retained audio, honouring `Range`.
+///
+/// # Why ranges matter here
+///
+/// Clicking a transcript line seeks to a moment, and a browser cannot seek in a resource it has to
+/// download whole first. An hour of retained audio is over two hundred megabytes; without ranges,
+/// every seek would read all of it into memory on both sides. With them, the player fetches the few
+/// hundred kilobytes around the moment asked for.
+///
+/// Only the bytes asked for are read from disk — the file is never loaded whole, whatever the
+/// request.
+async fn serve_audio(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Result<axum::response::Response, ApiError> {
+    use axum::http::{header, StatusCode};
+    use std::io::{Read, Seek, SeekFrom};
+
+    let meeting_id = parse_storage_id(&id)?;
+    let (path, _) = {
+        let db = state.db().await;
+        notewise_storage::audio_for(&db, meeting_id)?
+    }
+    .ok_or_else(|| ApiError::NotFound("no audio was kept for this meeting".into()))?;
+
+    let mut file = std::fs::File::open(&path).map_err(|_| {
+        // The pointer outlived the file. That reads as "no audio", and the next sweep clears it.
+        ApiError::NotFound("the audio for this meeting is no longer on disk".into())
+    })?;
+    let total = file
+        .metadata()
+        .map_err(|e| ApiError::Internal(format!("could not read the audio file: {e}")))?
+        .len();
+
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|raw| parse_byte_range(raw, total));
+
+    let (start, end) = match range {
+        Some(r) => r,
+        None => (0, total.saturating_sub(1)),
+    };
+    if total == 0 || start > end || start >= total {
+        return Err(ApiError::BadRequest(
+            "that range is outside the audio file".into(),
+        ));
+    }
+
+    let length = end - start + 1;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| ApiError::Internal(format!("could not seek the audio file: {e}")))?;
+    let mut body = vec![0u8; length as usize];
+    file.read_exact(&mut body)
+        .map_err(|e| ApiError::Internal(format!("could not read the audio file: {e}")))?;
+
+    let partial = range.is_some();
+    let mut response = axum::response::Response::builder()
+        .status(if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(header::CONTENT_TYPE, "audio/wav")
+        .header(header::CONTENT_LENGTH, length)
+        // Advertised unconditionally: a player that does not see this will refuse to seek at all,
+        // and then the whole feature silently does not work.
+        .header(header::ACCEPT_RANGES, "bytes");
+
+    if partial {
+        response = response.header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{total}"),
+        );
+    }
+
+    response
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Internal(format!("could not build the audio response: {e}")))
+}
+
+/// Parse a single-range `bytes=` header against a known file length.
+///
+/// Pure, and the only part of range handling that can be subtly wrong, so it is tested directly.
+/// Multi-range requests are not supported: browsers do not send them for media, and answering one
+/// badly is worse than declining to.
+fn parse_byte_range(raw: &str, total: u64) -> Option<(u64, u64)> {
+    let spec = raw.strip_prefix("bytes=")?.trim();
+    if spec.contains(',') || total == 0 {
+        return None;
+    }
+
+    let (from, to) = spec.split_once('-')?;
+    let last = total - 1;
+
+    match (from.trim(), to.trim()) {
+        // `bytes=-500` — the final 500 bytes.
+        ("", suffix) => {
+            let len: u64 = suffix.parse().ok()?;
+            if len == 0 {
+                return None;
+            }
+            Some((total.saturating_sub(len), last))
+        }
+        // `bytes=500-` — from 500 to the end.
+        (start, "") => {
+            let start: u64 = start.parse().ok()?;
+            (start <= last).then_some((start, last))
+        }
+        (start, end) => {
+            let start: u64 = start.parse().ok()?;
+            let end: u64 = end.parse().ok()?;
+            // Clamped rather than rejected: a player asking past the end is asking for the tail,
+            // and every browser does it on the last chunk.
+            (start <= end && start <= last).then_some((start, end.min(last)))
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -827,6 +982,68 @@ mod tests {
         )
         .await;
         assert_ne!(status, StatusCode::OK, "{body}");
+    }
+
+    /// Range parsing is the only part of seeking that can be subtly wrong, so it is tested directly
+    /// rather than through a player.
+    #[test]
+    fn byte_ranges_are_parsed_the_way_players_send_them() {
+        let total = 1000;
+
+        assert_eq!(parse_byte_range("bytes=0-499", total), Some((0, 499)));
+        // Open-ended: from here to the end, which is what a player sends to stream on.
+        assert_eq!(parse_byte_range("bytes=500-", total), Some((500, 999)));
+        // Suffix: the last N bytes.
+        assert_eq!(parse_byte_range("bytes=-100", total), Some((900, 999)));
+        // Past the end is clamped, not refused — every browser asks for this on the last chunk.
+        assert_eq!(parse_byte_range("bytes=900-5000", total), Some((900, 999)));
+        assert_eq!(parse_byte_range("bytes=0-0", total), Some((0, 0)));
+
+        // Nonsense, and the cases this deliberately declines.
+        assert_eq!(parse_byte_range("bytes=1000-1001", total), None);
+        assert_eq!(parse_byte_range("bytes=500-100", total), None);
+        assert_eq!(parse_byte_range("bytes=abc-def", total), None);
+        assert_eq!(parse_byte_range("items=0-10", total), None);
+        assert_eq!(parse_byte_range("bytes=-0", total), None);
+        // Multi-range: browsers do not send it for media, and half-answering is worse than not.
+        assert_eq!(parse_byte_range("bytes=0-10,20-30", total), None);
+        // An empty file has no satisfiable range.
+        assert_eq!(parse_byte_range("bytes=0-10", 0), None);
+    }
+
+    #[tokio::test]
+    async fn asking_for_audio_that_was_never_kept_is_a_404() {
+        let id = notewise_storage::Id::new();
+        let (status, _) = call(&app(), get(&format!("/v1/meetings/{id}/audio"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    /// The pointer outliving the file reads as "no audio" rather than an error, because that is what
+    /// it means to the user and the next sweep tidies the row.
+    #[tokio::test]
+    async fn a_pointer_to_a_missing_file_is_a_404() {
+        let state = Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("mock router"),
+        ));
+        let app = routes().with_state(Arc::clone(&state));
+
+        let id = {
+            let db = state.db().await;
+            let meeting = notewise_storage::MeetingRepository::new(&db)
+                .create(notewise_storage::NewMeeting {
+                    project_id: None,
+                    title: "Standup".into(),
+                    source: notewise_storage::MeetingSource::Microphone,
+                    started_at: chrono::Utc::now(),
+                })
+                .expect("meeting");
+            notewise_storage::set_audio(&db, meeting.id, "/nowhere/gone.wav", 100).expect("attach");
+            meeting.id
+        };
+
+        let (status, _) = call(&app, get(&format!("/v1/meetings/{id}/audio"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
