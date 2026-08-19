@@ -14,6 +14,9 @@ notewise-graph.workspace = true
 notewise-ai-router.workspace = true
 notewise-transcription.workspace = true
 notewise-connectors.workspace = true
+cron.workspace = true
+iana-time-zone = "0.1"
+chrono-tz.workspace = true
 
 # Not optional, for the same reason `notewise-transcription` is not: the speaker-events endpoint
 # accepts a `SpeakerTimeline` and applies it to a stored meeting, which a build that cannot record

@@ -332,6 +332,72 @@ fn balanced_span(raw: &str, start: usize) -> Option<&str> {
 /// Detached rather than awaited: a run is a dozen model calls, which on a local backend is
 /// minutes. Holding an HTTP connection open for that is the same mistake the download
 /// endpoints exist to avoid.
+/// Why an unattended run did not produce anything.
+#[derive(Debug)]
+pub struct RunFailure {
+    pub message: String,
+    /// Distinguished from an ordinary failure because it means the schedule or the timeout is wrong,
+    /// not the task — and that is a different thing for a user to fix.
+    pub timed_out: bool,
+}
+
+/// Drive a run to completion, with a ceiling on how long it may take.
+///
+/// [`start`] returns as soon as the run is registered, which is right for a person watching a
+/// progress panel. A scheduled job has nobody watching and needs to know the outcome in order to
+/// record it, so this waits.
+///
+/// The timeout matters more here than anywhere else: a run that never finishes would leave a job
+/// permanently "already running" and silently stop its schedule forever.
+pub async fn run_to_completion(
+    state: &Arc<crate::state::AppState>,
+    task: &str,
+    timeout_secs: i64,
+) -> std::result::Result<Run, RunFailure> {
+    let run = Run::new(task.to_string());
+    let id = run.id;
+    state.agents().insert(run).await;
+
+    let ceiling = std::time::Duration::from_secs(timeout_secs.max(1) as u64);
+    let driven = tokio::time::timeout(ceiling, drive(state, id, task)).await;
+
+    match driven {
+        Ok(Ok(())) => state.agents().get(id).await.ok_or_else(|| RunFailure {
+            message: "the run finished but its record was gone".into(),
+            timed_out: false,
+        }),
+        Ok(Err(message)) => {
+            state
+                .agents()
+                .update(id, |run| {
+                    run.status = RunStatus::Failed;
+                    run.error = Some(message.clone());
+                    run.finished_at = Some(Utc::now());
+                })
+                .await;
+            Err(RunFailure {
+                message,
+                timed_out: false,
+            })
+        }
+        Err(_) => {
+            let message = format!("the run did not finish within {timeout_secs}s");
+            state
+                .agents()
+                .update(id, |run| {
+                    run.status = RunStatus::Failed;
+                    run.error = Some(message.clone());
+                    run.finished_at = Some(Utc::now());
+                })
+                .await;
+            Err(RunFailure {
+                message,
+                timed_out: true,
+            })
+        }
+    }
+}
+
 pub async fn start(state: Arc<crate::state::AppState>, task: String) -> Run {
     let run = Run::new(task.clone());
     let id = run.id;

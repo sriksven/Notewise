@@ -73,6 +73,10 @@ keyring = "3"
 # Verifying entitlement grants. Public-key so the client holds no secret capable of forging one —
 # an HMAC would mean shipping the signing key to every machine.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+# Cron parsing for scheduled jobs. Writing one is a bad use of effort and a good source of
+# off-by-one bugs around DST.
+cron = "0.17"
+chrono-tz = "0.10"
 tempfile = "3"
 
 [profile.release]

@@ -603,6 +603,50 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE meetings ADD COLUMN audio_bytes INTEGER;
     CREATE INDEX idx_meetings_audio ON meetings(audio_path) WHERE audio_path IS NOT NULL;
     "#,
+    // v13 — jobs that run without anybody watching, and a durable account of what they did.
+    //
+    // `agent.rs` keeps its runs in memory, arguing that a trace matters only while it is happening
+    // and that the note it wrote survives anyway. That argument assumes somebody was present. For a
+    // run at 6am nobody was, and "it failed on Tuesday and I need to know why" is the normal case —
+    // so the trace is persisted here.
+    //
+    // Bounded on write rather than swept: a job firing every fifteen minutes would otherwise grow
+    // this table forever, which is a disk-space bug with a slow fuse.
+    //
+    // `timezone` sits beside `cron` because "every Friday at 5pm" means the user's Friday. Storing
+    // it explicitly makes a DST transition or a relocation interpretable rather than mysterious.
+    //
+    // `job_allowed_tools` from the design is deliberately *not* here. It governs which external
+    // tools a run may propose, which needs the MCP tables that do not exist yet — so it belongs in
+    // that migration, next to the tables it relates to, rather than sitting empty here.
+    r#"
+    CREATE TABLE jobs (
+        id           TEXT PRIMARY KEY NOT NULL,
+        name         TEXT NOT NULL UNIQUE,
+        prompt       TEXT NOT NULL,
+        cron         TEXT NOT NULL,
+        timezone     TEXT NOT NULL,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        catch_up     INTEGER NOT NULL DEFAULT 0,
+        timeout_secs INTEGER NOT NULL DEFAULT 600,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+
+    CREATE TABLE job_runs (
+        id           TEXT PRIMARY KEY NOT NULL,
+        job_id       TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        status       TEXT NOT NULL,
+        trace        TEXT,
+        note_id      TEXT REFERENCES notes(id) ON DELETE SET NULL,
+        proposals    INTEGER NOT NULL DEFAULT 0,
+        error        TEXT,
+        started_at   TEXT NOT NULL,
+        finished_at  TEXT
+    );
+
+    CREATE INDEX idx_job_runs_job ON job_runs(job_id, started_at DESC);
+    "#,
 ];
 
 /// Schema version this build understands.

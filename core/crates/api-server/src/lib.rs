@@ -36,10 +36,12 @@ pub mod diarization;
 pub mod downloads;
 mod error;
 pub mod indexing;
+pub mod jobs;
 pub mod recording;
 mod retrieval;
 mod routes;
 mod routing;
+pub mod schedule;
 mod setup;
 pub mod speakers;
 mod state;
@@ -168,7 +170,11 @@ impl Server {
 
     /// Serve until the process is signalled.
     pub async fn serve(self, state: AppState) -> Result<(), ServeError> {
-        self.serve_router(app(Arc::new(state))).await
+        let state = Arc::new(state);
+        // The scheduler starts with the server, not with the router: `app` is also called by tests
+        // and by an embedder that only wants the route table, and neither wants a background loop.
+        crate::jobs::spawn(Arc::clone(&state));
+        self.serve_router(app(state)).await
     }
 
     /// Serve the API plus a frontend from `dir`.
@@ -177,8 +183,9 @@ impl Server {
         state: AppState,
         dir: impl AsRef<std::path::Path>,
     ) -> Result<(), ServeError> {
-        self.serve_router(app_with_frontend(Arc::new(state), dir))
-            .await
+        let state = Arc::new(state);
+        crate::jobs::spawn(Arc::clone(&state));
+        self.serve_router(app_with_frontend(state, dir)).await
     }
 
     async fn serve_router(self, router: AxumRouter) -> Result<(), ServeError> {
@@ -223,7 +230,9 @@ impl Server {
             })?;
 
         let bound = listener.local_addr()?;
-        let router = app_with_frontend(Arc::new(state), dir);
+        let state = Arc::new(state);
+        crate::jobs::spawn(Arc::clone(&state));
+        let router = app_with_frontend(state, dir);
 
         Ok((bound, async move {
             axum::serve(listener, router).await?;

@@ -8,6 +8,7 @@ mod connector_account;
 mod edge;
 mod embedding;
 mod external_item;
+mod job;
 mod meeting;
 mod note;
 mod outbox;
@@ -24,6 +25,7 @@ pub use connector_account::{AccountStatus, ConnectorAccount, ConnectorAccountRep
 pub use edge::{EdgeRecord, EdgeRepository, NewEdge};
 pub use embedding::{Embedding, EmbeddingRepository, IndexedEntity, NewEmbedding};
 pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};
+pub use job::{Job, JobRepository, JobRun, NewJob, RunStatus, RUNS_KEPT};
 pub use meeting::{MeetingRepository, NewMeeting, NewTranscriptSegment};
 pub use note::{NewNote, NoteRepository};
 pub use outbox::{NewOutboxEntry, OutboxRecord, OutboxRepository, OutboxStatus};
