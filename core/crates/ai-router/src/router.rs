@@ -282,6 +282,27 @@ struct Selected<'a> {
     redaction: RedactionPolicy,
 }
 
+/// A routing rule as it is stored, without any credential.
+///
+/// One JSON document under a single settings key holds a `Vec` of these. Ordering *is* the
+/// semantics, so they are read and written as a set — decomposing them into rows would mean an
+/// index column and a rewrite on every reorder, for nothing.
+///
+/// The api key is deliberately absent. A rule records which provider a route uses; the secret
+/// lives in the OS keychain, because the database is a plain file that ends up in backups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredRoute {
+    #[serde(flatten)]
+    pub spec: RouteSpec,
+    pub backend: BackendKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub redaction: RedactionPolicy,
+}
+
 /// One configured route: its conditions, its backend, and that backend's own privacy settings.
 #[derive(Debug)]
 pub struct Route {
@@ -307,53 +328,7 @@ impl Router {
     pub fn from_config(config: RouterConfig) -> Result<Self> {
         let kind = config.backend;
         let redaction = config.redaction;
-
-        let backend: Box<dyn AiBackend> = match kind {
-            BackendKind::Mock => Box::new(MockBackend::new()),
-
-            BackendKind::Ollama => {
-                let mut backend = OllamaBackend::new();
-                if let Some(model) = config.model {
-                    backend = backend.with_model(model);
-                }
-                if let Some(endpoint) = config.endpoint {
-                    backend = backend.with_endpoint(endpoint);
-                }
-                Box::new(backend)
-            }
-
-            BackendKind::Anthropic => {
-                let mut backend = AnthropicBackend::new(config.api_key.unwrap_or_default())?;
-                if let Some(model) = config.model {
-                    backend = backend.with_model(model);
-                }
-                if let Some(endpoint) = config.endpoint {
-                    backend = backend.with_endpoint(endpoint);
-                }
-                Box::new(backend)
-            }
-
-            BackendKind::Gemini => {
-                let mut backend = GeminiBackend::new(config.api_key.unwrap_or_default())?;
-                if let Some(model) = config.model {
-                    backend = backend.with_model(model);
-                }
-                Box::new(backend)
-            }
-
-            // Every remaining kind is the same client behind a different base URL.
-            _ => {
-                let preset = kind.preset(config.endpoint).ok_or_else(|| {
-                    AiError::InvalidRequest(format!("{} requires an endpoint URL", kind.label()))
-                })?;
-
-                let mut backend = OpenAiCompatBackend::new(preset, config.api_key)?;
-                if let Some(model) = config.model {
-                    backend = backend.with_model(model);
-                }
-                Box::new(backend)
-            }
-        };
+        let backend = build_backend(config)?;
 
         Ok(Self {
             backend,
@@ -362,7 +337,67 @@ impl Router {
             routes: Vec::new(),
         })
     }
+}
 
+/// Construct just the backend a config describes.
+///
+/// Split out of [`Router::from_config`] so a route target is built by exactly the same code as
+/// the default. Boxing a whole `Router` as a route would also have worked and would have applied
+/// its redaction a second time on top of the outer one — masking twice, confusingly, for no gain.
+fn build_backend(config: RouterConfig) -> Result<Box<dyn AiBackend>> {
+    let kind = config.backend;
+
+    let backend: Box<dyn AiBackend> = match kind {
+        BackendKind::Mock => Box::new(MockBackend::new()),
+
+        BackendKind::Ollama => {
+            let mut backend = OllamaBackend::new();
+            if let Some(model) = config.model {
+                backend = backend.with_model(model);
+            }
+            if let Some(endpoint) = config.endpoint {
+                backend = backend.with_endpoint(endpoint);
+            }
+            Box::new(backend)
+        }
+
+        BackendKind::Anthropic => {
+            let mut backend = AnthropicBackend::new(config.api_key.unwrap_or_default())?;
+            if let Some(model) = config.model {
+                backend = backend.with_model(model);
+            }
+            if let Some(endpoint) = config.endpoint {
+                backend = backend.with_endpoint(endpoint);
+            }
+            Box::new(backend)
+        }
+
+        BackendKind::Gemini => {
+            let mut backend = GeminiBackend::new(config.api_key.unwrap_or_default())?;
+            if let Some(model) = config.model {
+                backend = backend.with_model(model);
+            }
+            Box::new(backend)
+        }
+
+        // Every remaining kind is the same client behind a different base URL.
+        _ => {
+            let preset = kind.preset(config.endpoint).ok_or_else(|| {
+                AiError::InvalidRequest(format!("{} requires an endpoint URL", kind.label()))
+            })?;
+
+            let mut backend = OpenAiCompatBackend::new(preset, config.api_key)?;
+            if let Some(model) = config.model {
+                backend = backend.with_model(model);
+            }
+            Box::new(backend)
+        }
+    };
+
+    Ok(backend)
+}
+
+impl Router {
     /// Wrap an already-constructed backend. Mainly useful in tests.
     pub fn with_backend(backend: Box<dyn AiBackend>) -> Self {
         Self {
@@ -399,6 +434,63 @@ impl Router {
     /// Route names, in evaluation order. For the settings UI and the explain endpoint.
     pub fn route_names(&self) -> Vec<String> {
         self.routes.iter().map(|r| r.spec.name.clone()).collect()
+    }
+
+    /// What to show a human when asked which model is in use.
+    ///
+    /// Deliberately separate from [`AiBackend::model_id`], which stays the *default backend's*
+    /// model because that value is persisted and read back to construct a backend — it has to
+    /// name a real model, not describe a policy.
+    ///
+    /// With no routes the two are identical, so nothing changes for an install that has not
+    /// configured routing. With routes, saying only the default's name would be a claim that a
+    /// summary came from a model it may not have come from.
+    pub fn model_label(&self) -> String {
+        let default = self.backend.model_id();
+        match self.routes.len() {
+            0 => default.to_string(),
+            1 => format!("{default} + 1 route"),
+            n => format!("{default} + {n} routes"),
+        }
+    }
+
+    /// Build and attach every stored rule, in order.
+    ///
+    /// `key_for` supplies credentials, because a stored rule records *which* provider a route
+    /// uses and never the secret for it — the same split the single-backend path already makes.
+    ///
+    /// A rule whose backend cannot be constructed is **skipped with a warning**, not fatal. The
+    /// alternative is an app that will not start because one routing rule lost its API key, which
+    /// turns an optimisation into an outage — the reasoning `indexing.rs` applies to a missing
+    /// embedder. The remaining rules and the default still work.
+    pub fn with_stored_routes(
+        mut self,
+        stored: &[StoredRoute],
+        key_for: impl Fn(BackendKind) -> Option<String>,
+    ) -> Self {
+        for rule in stored {
+            let mut config = RouterConfig::new(rule.backend);
+            config.model = rule.model.clone();
+            config.endpoint = rule.endpoint.clone();
+            config.redaction = rule.redaction;
+            if rule.backend.requires_api_key() {
+                config.api_key = key_for(rule.backend);
+            }
+
+            match build_backend(config) {
+                Ok(backend) => {
+                    self =
+                        self.with_route(rule.spec.clone(), backend, rule.backend, rule.redaction);
+                }
+                Err(e) => tracing::warn!(
+                    route = %rule.spec.name,
+                    backend = rule.backend.as_str(),
+                    error = %e,
+                    "routing rule could not be built; skipping it"
+                ),
+            }
+        }
+        self
     }
 
     /// The backend a request with these facts goes to, with the masking that destination needs.
@@ -1161,6 +1253,126 @@ mod tests {
             router.effective_redaction(),
             RedactionPolicy::SecretsAndContacts,
             "asked without a call context, it must not under-report masking"
+        );
+    }
+
+    fn stored(name: &str, backend: BackendKind, when: Vec<Predicate>) -> StoredRoute {
+        StoredRoute {
+            spec: RouteSpec {
+                name: name.into(),
+                when,
+            },
+            backend,
+            model: None,
+            endpoint: None,
+            redaction: RedactionPolicy::Secrets,
+        }
+    }
+
+    #[test]
+    fn stored_rules_round_trip_and_carry_no_secret() {
+        let rules = vec![stored(
+            "quality",
+            BackendKind::Anthropic,
+            vec![Predicate::Task(vec![TaskKind::Summarize])],
+        )];
+
+        let json = serde_json::to_string(&rules).expect("serializes");
+        assert!(
+            !json.contains("api_key"),
+            "a stored rule must never carry a credential: {json}"
+        );
+
+        let back: Vec<StoredRoute> = serde_json::from_str(&json).expect("deserializes");
+        assert_eq!(back, rules);
+    }
+
+    #[test]
+    fn stored_rules_become_live_routes_in_order() {
+        let rules = vec![
+            stored("first", BackendKind::Mock, vec![]),
+            stored("second", BackendKind::Mock, vec![]),
+        ];
+
+        let router = Router::from_config(RouterConfig::mock())
+            .expect("mock router")
+            .with_stored_routes(&rules, |_| None);
+
+        assert_eq!(
+            router.route_names(),
+            vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_rule_whose_backend_cannot_be_built_is_skipped_not_fatal() {
+        // An app that will not start because one routing rule lost its API key has turned an
+        // optimisation into an outage. The rest of the policy, and the default, must survive.
+        let rules = vec![
+            stored("needs a key", BackendKind::Anthropic, vec![]),
+            stored("fine", BackendKind::Mock, vec![]),
+        ];
+
+        let router = Router::from_config(RouterConfig::mock())
+            .expect("mock router")
+            .with_stored_routes(&rules, |_| None);
+
+        assert_eq!(
+            router.route_names(),
+            vec!["fine".to_string()],
+            "the unbuildable rule should be skipped and the rest kept"
+        );
+    }
+
+    #[test]
+    fn a_rule_gets_its_credential_from_the_keychain_not_the_rule() {
+        let rules = vec![stored("cloud", BackendKind::Anthropic, vec![])];
+
+        let router = Router::from_config(RouterConfig::mock())
+            .expect("mock router")
+            .with_stored_routes(&rules, |kind| {
+                assert_eq!(kind, BackendKind::Anthropic);
+                Some("a-key".to_string())
+            });
+
+        assert_eq!(router.route_names(), vec!["cloud".to_string()]);
+        assert!(
+            !router.is_local(),
+            "a route to Anthropic makes the router non-local"
+        );
+    }
+
+    #[test]
+    fn the_model_label_is_honest_about_a_policy_but_model_id_stays_persistable() {
+        let bare = Router::with_backend(named("llama3.1:8b"));
+        assert_eq!(bare.model_label(), "llama3.1:8b");
+        assert_eq!(bare.model_id(), "llama3.1:8b");
+
+        let routed = Router::with_backend(named("llama3.1:8b"))
+            .with_route(
+                RouteSpec {
+                    name: "a".into(),
+                    when: vec![],
+                },
+                named("claude"),
+                BackendKind::Anthropic,
+                RedactionPolicy::Secrets,
+            )
+            .with_route(
+                RouteSpec {
+                    name: "b".into(),
+                    when: vec![],
+                },
+                named("gemini"),
+                BackendKind::Gemini,
+                RedactionPolicy::Secrets,
+            );
+
+        assert_eq!(routed.model_label(), "llama3.1:8b + 2 routes");
+        assert_eq!(
+            routed.model_id(),
+            "llama3.1:8b",
+            "model_id is persisted and read back to build a backend, so it must name a real model"
         );
     }
 

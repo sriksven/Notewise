@@ -49,7 +49,7 @@ pub use downloads::{DownloadManager, DownloadState, DownloadStatus};
 pub use error::{ApiError, ApiResult};
 pub use recording::{RecordingError, RecordingManager};
 pub use speakers::{PendingTimeline, PendingTimelines, SpeakerEvents};
-pub use state::{AppState, BACKEND_KIND_KEY, BACKEND_MODEL_KEY};
+pub use state::{stored_routes, AppState, BACKEND_KIND_KEY, BACKEND_MODEL_KEY, ROUTING_RULES_KEY};
 
 use std::net::SocketAddr;
 use std::sync::Arc;

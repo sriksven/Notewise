@@ -207,7 +207,18 @@ impl AppState {
             config = config.with_endpoint(endpoint);
         }
 
-        let router = Arc::new(AiRouter::from_config(config)?);
+        // Rules are applied to the freshly-built router before the swap, so a rule that cannot be
+        // built cannot leave the app with a half-configured policy.
+        let rules = {
+            let db = self.db().await;
+            stored_routes(&db)
+        };
+        let router =
+            Arc::new(AiRouter::from_config(config)?.with_stored_routes(&rules, api_key_for));
+
+        // The default backend's model, which is what a config round-trip needs. Deliberately not
+        // a description of the policy: this value is persisted below and read back to construct a
+        // backend, so it has to name a real model.
         let model_id = router.model_id().to_string();
         *self.ai.write().expect("ai router lock poisoned") = router;
 
@@ -238,6 +249,36 @@ pub const BACKEND_KIND_KEY: &str = "ai_backend_kind";
 
 /// Which local model produces embeddings. Stored so a preference survives a restart.
 pub const EMBEDDING_MODEL_KEY: &str = "embedding_model";
+
+/// The routing rule set, as one JSON array of [`StoredRoute`].
+///
+/// One key rather than a table: ordering is the semantics, the rules are always read and written
+/// as a set, and a table would mean an index column plus a rewrite on every reorder.
+pub const ROUTING_RULES_KEY: &str = "ai_routing_rules";
+
+/// The stored routing rules, or none.
+///
+/// A malformed rule set degrades to no routing rather than refusing to start. An app that will
+/// not launch because a routing rule is bad has turned an optimisation into an outage — the same
+/// reasoning `crate::indexing` applies to a missing embedder.
+pub fn stored_routes(db: &Database) -> Vec<notewise_ai_router::StoredRoute> {
+    let raw = match SettingsRepository::new(db).get(ROUTING_RULES_KEY) {
+        Ok(Some(raw)) => raw,
+        Ok(None) => return Vec::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read the routing rules; continuing without them");
+            return Vec::new();
+        }
+    };
+
+    match serde_json::from_str(&raw) {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!(error = %e, "the stored routing rules are malformed; ignoring them");
+            Vec::new()
+        }
+    }
+}
 pub const BACKEND_MODEL_KEY: &str = "ai_backend_model";
 
 /// The API key for a backend, from the environment.

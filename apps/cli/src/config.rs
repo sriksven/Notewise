@@ -96,7 +96,11 @@ impl Config {
             config = config.with_model(model);
         }
 
-        Ok(AiRouter::from_config(config)?)
+        // The same rule set the server applies. Without this, a policy configured through the app
+        // would silently not apply to `notewise` on the command line, which is the class of
+        // divergence `storage::location` exists to have ended.
+        let rules = notewise_api_server::stored_routes(db);
+        Ok(AiRouter::from_config(config)?.with_stored_routes(&rules, key_for))
     }
 }
 

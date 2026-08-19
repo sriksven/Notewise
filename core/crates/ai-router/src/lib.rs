@@ -65,7 +65,7 @@ pub use policy::{
     RouteSpec, TaskKind,
 };
 pub use redact::{redact, Category, RedactionPolicy, RedactionReport};
-pub use router::{BackendKind, Route, Router, RouterConfig};
+pub use router::{BackendKind, Route, Router, RouterConfig, StoredRoute};
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role,
     SummaryOutput, TranscriptInput,

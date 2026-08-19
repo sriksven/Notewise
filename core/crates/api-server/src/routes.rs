@@ -196,7 +196,10 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         version: env!("CARGO_PKG_VERSION"),
         schema_version,
         ai_local: state.ai().is_local(),
-        ai_model: state.ai().model_id().to_string(),
+        // The policy-aware label, not `model_id()`. A user with routing configured is not using
+        // one model, and this field is read by a human. `model_id()` stays the default's model
+        // because it is what gets persisted and read back to build a backend.
+        ai_model: state.ai().model_label(),
         // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
         // reports that it cannot record even in a build that otherwise could.
         can_record: recording::SUPPORTED && state.db_path().is_some(),
