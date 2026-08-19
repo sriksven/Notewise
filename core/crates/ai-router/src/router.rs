@@ -36,13 +36,21 @@ pub enum BackendKind {
     /// Groq's hosted inference.
     Groq,
     /// OpenRouter, which fronts many models behind one key.
+    #[serde(rename = "openrouter")]
     OpenRouter,
     /// LM Studio running on this machine.
+    #[serde(rename = "lmstudio")]
     LmStudio,
     /// Unsloth running on this machine.
     Unsloth,
     /// Any other endpoint speaking the OpenAI chat-completions shape.
     /// Requires `RouterConfig::endpoint`.
+    ///
+    /// Renamed explicitly because `rename_all = "snake_case"` would make this
+    /// `open_ai_compatible`, while [`BackendKind::as_str`] says `openai_compatible`. Two spellings
+    /// for one backend is a bug waiting to be found by whichever path serializes rather than
+    /// calling `as_str` — which is exactly how it was found.
+    #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
 }
 
@@ -1374,6 +1382,21 @@ mod tests {
             "llama3.1:8b",
             "model_id is persisted and read back to build a backend, so it must name a real model"
         );
+    }
+
+    /// Serde and `as_str` must name every backend identically. They did not, and a stored routing
+    /// rule spelled a backend one way while every other path in the API spelled it another.
+    #[test]
+    fn every_backend_serializes_as_the_name_it_parses_from() {
+        for kind in BackendKind::ALL {
+            let json = serde_json::to_string(kind).expect("serializes");
+            let quoted = format!("\"{}\"", kind.as_str());
+            assert_eq!(json, quoted, "{kind:?}");
+            assert_eq!(
+                serde_json::from_str::<BackendKind>(&quoted).expect("deserializes"),
+                *kind
+            );
+        }
     }
 
     #[test]

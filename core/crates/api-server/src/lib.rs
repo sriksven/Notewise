@@ -39,6 +39,7 @@ pub mod indexing;
 pub mod recording;
 mod retrieval;
 mod routes;
+mod routing;
 mod setup;
 pub mod speakers;
 mod state;

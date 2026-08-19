@@ -1,7 +1,8 @@
 # Rule-based model routing — design
 
 **Date:** 2026-08-18
-**Status:** draft, awaiting review
+**Status:** implemented. Reconciled against what shipped on 2026-08-19; see Predicates
+and "Default policy" for the two places the design changed during implementation.
 **Scope:** Spec 2 of the program map. Per-request backend selection inside `ai-router`.
 
 ---
@@ -202,10 +203,8 @@ pub enum Predicate {
     Task(Vec<TaskKind>),
     InputTokensOver(usize),
     InputTokensUnder(usize),
-    TranscriptMinutesOver(u32),
-    LocalBackendHealthy(bool),
-    HourOfDayBetween(u8, u8),
-    TitleOrPromptContains(Vec<String>),
+    TextContains(Vec<String>),
+    HourBetween(u8, u8),
 }
 ```
 
@@ -213,16 +212,34 @@ Token counts are estimated by character count over a divisor, not tokenized. An 
 needs a tokenizer per model family, and the predicate exists to separate "a title" from "a
 transcript" — a decision no plausible tokenizer disagreement changes.
 
-### Default policy shipped out of the box
+**Two predicates from an earlier draft of this spec were not built, and should not be.**
 
-Two routes, expressing the split the feature exists for:
+`TranscriptMinutesOver` is **dropped**. `TranscriptInput` carries a title, text and context, and
+no duration; adding one changes a type every backend consumes, to serve a predicate that
+`InputTokensOver` already answers — a longer meeting is a longer transcript. Two ways to express
+one condition is worse than one.
 
-1. `Summarize` **or** `InputTokensOver(8000)` → the user's configured quality backend.
-2. everything else → local.
+`LocalBackendHealthy` is **deferred, and named as follow-up work** rather than quietly missing.
+It is the predicate behind R7's "a route whose backend is unreachable is skipped at selection
+time", and it needs a probe result cached with a TTL inside `Router` plus a flag threaded into
+`RequestFacts` at the boundary the way the local hour already is. Without it, an unreachable
+route fails once and falls back — correct, just slower than skipping it would have been.
 
-If the user has configured no cloud backend, both collapse to local and the policy is a no-op.
-A fresh install therefore behaves exactly as today, and no meeting content leaves the machine
-until the user configures a backend that does.
+### Default policy, offered rather than seeded
+
+One rule, installed by an explicit action at `POST /v1/routing/default`:
+
+- `Summarize` → the backend the user names.
+- everything else → falls through to the default backend, which is what it already did.
+
+An earlier draft described two rules, the second being a catch-all to local. That second rule
+cannot change any outcome — falling through already goes to the default — and being a catch-all it
+would make every rule added after it unreachable, which the validation now rejects. So it is one
+rule.
+
+Not seeded at first launch either. A fresh install silently acquiring a rule that sends
+transcripts to a provider the user never chose is the wrong default, and with no cloud backend
+configured the rule would collapse to a no-op that only confuses the settings page.
 
 ---
 
@@ -281,8 +298,12 @@ Nothing here needs an API key or a GPU, so nothing here is `#[ignore]`d.
 2. Seven local predicates and a `TaskKind` derived from the trait method.
 3. A shipped default policy that routes summaries to quality and everything else to local, and
    that is a no-op until a cloud backend is configured.
-4. Settings CRUD plus an explain endpoint that answers "where would this call go, and why".
-5. Fallback-once semantics and probe-based route skipping.
+4. `GET`/`PUT /v1/routing/rules`, `POST /v1/routing/explain`, and `POST /v1/routing/default`.
+   Rules are validated before storage: an unnamed rule, a rule targeting a backend that runs no
+   model, a custom-endpoint backend with no URL, a rule below a catch-all, and a rule whose size
+   bounds contradict each other are all refused with a message naming the rule.
+5. Fallback-once semantics. Probe-based route skipping is deferred with `LocalBackendHealthy`.
+6. Five predicates, not seven — see Predicates for which two were dropped and why.
 
 ## Risks and open questions
 
