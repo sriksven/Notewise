@@ -30,6 +30,7 @@ mod error;
 mod export;
 mod id;
 mod location;
+mod merge;
 mod migrations;
 mod models;
 mod repositories;
@@ -42,6 +43,7 @@ pub use location::{
     adopt_legacy_models, adopt_legacy_workspace, data_dir, database_path, legacy_database_paths,
     model_dir, Adoption, DATA_DIR_ENV, DB_FILE,
 };
+pub use merge::{merge_from, MergeMode, MergeReport};
 pub use migrations::SUPPORTED_VERSION;
 pub use models::*;
 pub use repositories::*;

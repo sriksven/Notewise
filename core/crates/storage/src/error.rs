@@ -21,6 +21,12 @@ pub enum StorageError {
         source: rusqlite::Error,
     },
 
+    /// A merge could not proceed. Distinct from [`StorageError::Sqlite`] because every one of
+    /// these is a condition the user can act on — a missing file, a schema mismatch, the same
+    /// workspace twice — and the message says which.
+    #[error("cannot merge: {0}")]
+    Merge(String),
+
     #[error("database schema version {found} is newer than this build supports ({supported}); upgrade Notewise")]
     SchemaTooNew { found: u32, supported: u32 },
 

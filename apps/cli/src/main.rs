@@ -45,6 +45,23 @@ enum Command {
     /// Show engine status: database, schema version, and configured AI backend.
     Status,
 
+    /// Fold another workspace into this one.
+    ///
+    /// For workspaces split by an earlier build, where the app and the CLI each created their
+    /// own database. `status` names the other one if there is one.
+    ///
+    /// The source is opened read-only and is never modified. Nothing here overwrites: where both
+    /// workspaces configured the same setting or connector, this one wins.
+    Merge {
+        /// The workspace to merge in.
+        #[arg(long)]
+        from: PathBuf,
+
+        /// Report what would move, and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// List recent meetings.
     Meetings {
         #[arg(long, default_value_t = 20)]
@@ -184,6 +201,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Status => status(&config).await,
+        Command::Merge { from, dry_run } => merge(&config, &from, dry_run),
         Command::Meetings { limit } => meetings(&config, limit),
         Command::Transcript { id } => transcript(&config, &id),
         Command::Summarize { id } => summarize(&config, &id).await,
@@ -266,6 +284,36 @@ fn adopt_legacy_workspace(path: &std::path::Path) {
 fn parse_id(raw: &str) -> Result<Id> {
     raw.parse()
         .with_context(|| format!("'{raw}' is not a valid id"))
+}
+
+/// Fold another workspace into this one.
+///
+/// `--dry-run` is offered first in the help text on purpose. This is the one command here that
+/// changes a workspace in a way no other command undoes, so the shape of the interaction should be
+/// "look, then do".
+fn merge(config: &Config, from: &std::path::Path, dry_run: bool) -> Result<()> {
+    let db = open(config)?;
+
+    if dry_run {
+        // A real merge inside a transaction that is then rolled back. Counting rows by hand would
+        // be a second implementation of the merge rules, and the two would disagree — which is
+        // precisely the situation a dry run exists to prevent.
+        let report = notewise_storage::merge_from(&db, from, notewise_storage::MergeMode::Preview)?;
+        println!("would have {}", report.summary());
+        println!("\nnothing was changed. Re-run without --dry-run to apply it.");
+        return Ok(());
+    }
+
+    let report = notewise_storage::merge_from(&db, from, notewise_storage::MergeMode::Apply)?;
+    println!("{}", report.summary());
+    if report.skipped_conflicts > 0 {
+        println!(
+            "{} setting(s) or connector account(s) already configured here were left alone",
+            report.skipped_conflicts
+        );
+    }
+    println!("\n{} was not modified.", from.display());
+    Ok(())
 }
 
 async fn status(config: &Config) -> Result<()> {
