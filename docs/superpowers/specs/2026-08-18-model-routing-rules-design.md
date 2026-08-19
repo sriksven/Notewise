@@ -25,7 +25,8 @@ call site has to know about.
 ## Goals
 
 - Route each model call to a backend chosen by rules, not by one global setting.
-- Keep every existing caller unchanged. No signature churn above `ai-router`.
+- Keep every existing caller unchanged. No signature churn above `ai-router`, and no change to
+  `AppState`'s `Arc<Router>`.
 - Make the common case require no configuration and no LLM call to decide.
 - Preserve the redaction guarantee per destination, not per app.
 - Fail toward the configured default rather than toward an error.
@@ -81,27 +82,47 @@ kind of privacy bug that produces no error and no log line.
 
 Each configured route therefore builds a real `Router`, constructed once and reused.
 
-### R4 — `PolicyRouter` implements `AiBackend` and is a drop-in
+### R4 — Routing goes *inside* `Router`; there is no wrapper type
+
+**Corrected during planning.** An earlier draft of this spec proposed a `PolicyRouter` wrapping
+several `Router`s, on the claim that `api-server` holds `Arc<dyn AiBackend>` so a wrapper would be
+a drop-in. It does not: `AppState.ai` is `RwLock<Arc<Router>>`, the concrete type. A wrapper would
+have forced either a field-type change that breaks the `Router`-only methods, or a parallel type
+that every call site has to learn about.
+
+So `Router` gains the policy itself:
 
 ```rust
-pub struct PolicyRouter {
-    default: Arc<Router>,
-    routes: Vec<Route>,       // ordered; first match wins
+pub struct Router {
+    backend: Box<dyn AiBackend>,   // the default route
+    redaction: RedactionPolicy,
+    kind: BackendKind,
+    routes: Vec<Route>,            // ordered; first match wins; empty = today's behaviour
 }
 
 pub struct Route {
     pub name: String,
-    pub when: Vec<Predicate>, // all must hold
-    pub target: Arc<Router>,
+    pub when: Vec<Predicate>,      // all must hold
+    pub target: Box<dyn AiBackend>,
+    pub kind: BackendKind,
+    pub redaction: RedactionPolicy,
 }
 ```
 
-`PolicyRouter` implements `AiBackend` by selecting a `Router` and forwarding. `api-server`
-holds `Arc<dyn AiBackend>` already, so nothing above changes.
+An empty `routes` is exactly the current behaviour, so every existing construction path and all
+174 existing tests keep passing unchanged. No call site in `api-server` is touched.
 
-First match wins, evaluated in order, falling through to `default`. Ordering is explicit rather
-than scored: a user reading their rule list top to bottom should be able to predict the
-outcome, and a scoring system makes "why did this go to the expensive model" unanswerable.
+### R4a — The four whole-router questions get honest answers under a policy
+
+`Router` answers four things that have no single truth once several backends are reachable. Each
+gets the conservative answer, because each drives either a privacy claim or a UI label:
+
+| Method | Under a policy | Why |
+|---|---|---|
+| `is_local()` | true only if the default **and every route** is local | It drives a claim the product treats as verifiable. A policy where anything may leave the machine is not local. |
+| `effective_redaction()` | the **strictest** policy across default and routes | It is asked without a call context, so it must not under-report masking for the destination that needs it most. |
+| `kind()` | the default route's kind | Used for a settings label. Ambiguous by nature; the default is the honest single answer and the explain endpoint gives the full picture. |
+| `model_id()` | see R5 | |
 
 ### R5 — `model_id()` reports what actually ran, per call
 
@@ -155,23 +176,21 @@ name, exactly as the single-backend path already does. The JSON holds a referenc
 ## Architecture
 
 ```
-api-server holds Arc<dyn AiBackend>
+api-server holds Arc<Router>        ── unchanged
         │
         ▼
-  PolicyRouter                     ── implements AiBackend
-        ├─ select(TaskKind, &input) ── local predicates only
-        │     └─ first matching Route, else default
+  Router  (existing type, now policy-aware)
+        ├─ select(TaskKind, &input)  ── local predicates only
+        │     └─ first matching Route, else the default backend
         ▼
-  Router (existing, one per route) ── implements AiBackend
-        ▼
-  Backend (Ollama | Anthropic | …)
+  Box<dyn AiBackend>  (Ollama | Anthropic | …)
 ```
 
 | Location | Contents | New? |
 |---|---|---|
-| `ai-router/src/policy.rs` | `PolicyRouter`, `Route`, `Predicate`, `TaskKind`, selection | new |
+| `ai-router/src/policy.rs` | `Route`, `Predicate`, `TaskKind`, selection, rule (de)serialization | new |
 | `ai-router/src/lib.rs` | Re-exports | edit |
-| `api-server/src/state.rs` | Build a `PolicyRouter` from settings instead of a bare `Router` | edit |
+| `api-server/src/state.rs` | Load the stored rule set when building the `Router` | edit |
 | `api-server/src/routes.rs` | CRUD for the rule set, plus a dry-run explain endpoint | edit |
 
 No new crate. No schema migration.
@@ -240,7 +259,9 @@ outage — the same reasoning `indexing.rs` applies to a missing embedder.
 All of it runs in CI with no model, using `MockBackend` behind several `Router`s:
 
 - Selection: first-match-wins ordering, all-predicates-must-hold conjunction, fallthrough to
-  default, empty rule set behaves as the bare router.
+  default, empty rule set behaves as the bare router (the existing suite proves this).
+- `effective_redaction()` returns the strictest across routes; `is_local()` false if any route is
+  remote.
 - Every predicate, at and either side of its boundary.
 - `is_local()` false when any route is remote, true when all are local.
 - Unhealthy route skipped at selection without a call attempt.
@@ -255,7 +276,8 @@ Nothing here needs an API key or a GPU, so nothing here is `#[ignore]`d.
 
 ## What this delivers
 
-1. `PolicyRouter` in `ai-router`, a drop-in `AiBackend` doing per-request selection.
+1. Per-request selection inside the existing `Router`, with an empty rule set preserving
+   today's behaviour exactly.
 2. Seven local predicates and a `TaskKind` derived from the trait method.
 3. A shipped default policy that routes summaries to quality and everything else to local, and
    that is a no-op until a cloud backend is configured.
