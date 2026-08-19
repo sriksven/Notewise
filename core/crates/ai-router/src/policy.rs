@@ -135,9 +135,99 @@ impl Predicate {
     }
 }
 
+/// A route's conditions, without its backend.
+///
+/// Separate from the constructed route so selection is testable without building five backends,
+/// and so a rule set can be serialized without serializing a credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteSpec {
+    pub name: String,
+    /// All must hold. An empty list matches every request.
+    pub when: Vec<Predicate>,
+}
+
+impl RouteSpec {
+    pub fn matches(&self, facts: &RequestFacts) -> bool {
+        self.when.iter().all(|p| p.holds(facts))
+    }
+}
+
+/// Index of the first route whose conditions all hold.
+///
+/// First match rather than best match: ordering is the semantics, and "why did this go to the
+/// expensive model" has to be answerable by reading the list from the top.
+///
+/// Used by rule-set validation and the explain endpoint, which hold an owned slice. `Router`
+/// deliberately does not call this — see `Router::route_for` for why.
+pub fn select_index(routes: &[RouteSpec], facts: &RequestFacts) -> Option<usize> {
+    routes.iter().position(|r| r.matches(facts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn spec(name: &str, when: Vec<Predicate>) -> RouteSpec {
+        RouteSpec {
+            name: name.into(),
+            when,
+        }
+    }
+
+    #[test]
+    fn the_first_matching_route_wins_not_the_best() {
+        // Order is the semantics. A user reading their rules top to bottom must be able to
+        // predict the outcome, which a scoring system makes unanswerable.
+        let routes = vec![
+            spec("anything", vec![]),
+            spec("summaries", vec![Predicate::Task(vec![TaskKind::Summarize])]),
+        ];
+
+        assert_eq!(
+            select_index(&routes, &facts(TaskKind::Summarize, 0, 9, "")),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn every_predicate_in_a_route_must_hold() {
+        let routes = vec![spec(
+            "big summaries",
+            vec![
+                Predicate::Task(vec![TaskKind::Summarize]),
+                Predicate::InputTokensOver(1000),
+            ],
+        )];
+
+        assert_eq!(
+            select_index(&routes, &facts(TaskKind::Summarize, 5000, 9, "")),
+            Some(0)
+        );
+        // Right task, too small.
+        assert_eq!(
+            select_index(&routes, &facts(TaskKind::Summarize, 10, 9, "")),
+            None
+        );
+        // Big enough, wrong task.
+        assert_eq!(
+            select_index(&routes, &facts(TaskKind::Chat, 5000, 9, "")),
+            None
+        );
+    }
+
+    #[test]
+    fn no_routes_means_no_selection() {
+        assert_eq!(select_index(&[], &facts(TaskKind::Chat, 0, 9, "")), None);
+    }
+
+    #[test]
+    fn a_route_with_no_predicates_matches_everything() {
+        let routes = vec![spec("catch all", vec![])];
+        assert_eq!(
+            select_index(&routes, &facts(TaskKind::Chat, 0, 9, "")),
+            Some(0)
+        );
+    }
 
     fn facts(task: TaskKind, tokens: usize, hour: u8, text: &str) -> RequestFacts {
         RequestFacts {
