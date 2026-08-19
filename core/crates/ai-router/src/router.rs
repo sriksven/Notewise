@@ -421,6 +421,32 @@ impl Router {
         }
     }
 
+    /// The masking the default backend needs.
+    ///
+    /// A fallback re-masks from the original input rather than reusing what the route sent: if
+    /// the route was remote and the default is local, the local model should get the real text.
+    fn default_redaction(&self) -> RedactionPolicy {
+        policy_for(self.backend.as_ref(), self.redaction)
+    }
+
+    /// Whether a failed call is worth one retry on the default backend.
+    ///
+    /// One hop, not a cascade. A chain of failing backends turns one slow call into four, and a
+    /// user is better served by an error than by a ninety-second wait. A failure on the default
+    /// is never retried — it *is* the fallback — and a non-retryable error is not retried
+    /// anywhere, since the same input produces the same refusal.
+    fn should_fall_back(&self, selected: &Selected<'_>, err: &AiError) -> bool {
+        let retryable = selected.name.is_some() && err.is_retryable();
+        if retryable {
+            tracing::warn!(
+                route = selected.name.unwrap_or_default(),
+                error = %err,
+                "route failed retryably; falling back to the default backend"
+            );
+        }
+        retryable
+    }
+
     /// Which route a request would take. Answers "why did this cost money".
     pub fn explain(&self, facts: &RequestFacts) -> String {
         match self.route_for(facts).name {
@@ -577,10 +603,18 @@ impl AiBackend for Router {
             local_hour(),
         );
         let selected = self.route_for(&facts);
-        selected
+        match selected
             .backend
             .summarize(&self.guard_transcript(input, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .summarize(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
@@ -592,10 +626,18 @@ impl AiBackend for Router {
             local_hour(),
         );
         let selected = self.route_for(&facts);
-        selected
+        match selected
             .backend
             .extract_decisions(&self.guard_transcript(input, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .extract_decisions(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn extract_action_items(
@@ -610,10 +652,18 @@ impl AiBackend for Router {
             local_hour(),
         );
         let selected = self.route_for(&facts);
-        selected
+        match selected
             .backend
             .extract_action_items(&self.guard_transcript(input, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .extract_action_items(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
@@ -624,10 +674,18 @@ impl AiBackend for Router {
             .unwrap_or_default();
         let facts = RequestFacts::for_chat(&request.context, last, local_hour());
         let selected = self.route_for(&facts);
-        selected
+        match selected
             .backend
             .chat(&self.guard_chat(request, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .chat(&self.guard_chat(request, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 }
 
@@ -992,6 +1050,56 @@ mod tests {
             transmitted.contains("[redacted:api_key]"),
             "{transmitted}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_retryable_route_failure_retries_on_the_default() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "flaky".into(),
+                when: vec![],
+            },
+            Box::new(MockBackend::failing_retryably()),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let summary = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("should fall back to the default");
+        assert_eq!(summary.model, "default");
+    }
+
+    #[tokio::test]
+    async fn a_non_retryable_route_failure_does_not_fall_back() {
+        // A refusal is the same on any backend. Retrying elsewhere just spends another call.
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "refuses".into(),
+                when: vec![],
+            },
+            Box::new(MockBackend::failing("no")),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let err = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("a non-retryable failure must surface");
+        assert!(matches!(err, AiError::InvalidRequest(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failure_on_the_default_is_not_retried_against_itself() {
+        let router = Router::with_backend(Box::new(MockBackend::failing_retryably()));
+
+        let err = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("the default has nowhere to fall back to");
+        assert!(matches!(err, AiError::Provider { status: 503, .. }), "{err:?}");
     }
 
     #[test]
