@@ -52,6 +52,102 @@ pub fn routes() -> AxumRouter<Shared> {
             "/v1/segments/:id/text",
             axum::routing::put(set_segment_text),
         )
+        .route("/v1/audio/retention", get(get_retention).put(put_retention))
+        .route("/v1/audio/sweep", post(sweep_audio))
+}
+
+#[derive(Debug, Serialize)]
+struct RetentionBody {
+    /// `off`, `until_deleted`, or `days:N`.
+    policy: String,
+    /// How many meetings currently have audio, and how much space it is using.
+    retained: usize,
+    bytes: i64,
+    /// Whether retention can be enabled at all. False on an encrypted workspace.
+    can_enable: bool,
+    /// Why not, when it cannot.
+    blocked_by: Option<String>,
+}
+
+async fn get_retention(State(state): State<Shared>) -> ApiResult<Json<RetentionBody>> {
+    let db = state.db().await;
+    let policy = notewise_storage::retention_policy(&db);
+
+    let (retained, bytes) = notewise_storage::retained_totals(&db)?;
+
+    let encrypted = db.is_encrypted();
+    Ok(Json(RetentionBody {
+        policy: policy.as_str(),
+        retained,
+        bytes,
+        can_enable: !encrypted,
+        blocked_by: encrypted.then(|| {
+            "this workspace is encrypted, and retained audio would be written unencrypted \
+             beside it"
+                .to_string()
+        }),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct RetentionInput {
+    policy: String,
+}
+
+/// Change the retention policy.
+///
+/// Switching to `off` sweeps immediately rather than waiting for a later pass. A user who turns this
+/// off has said they do not want the recordings, and leaving them until some timer fires would mean
+/// the setting said one thing while the disk said another.
+async fn put_retention(
+    State(state): State<Shared>,
+    Json(body): Json<RetentionInput>,
+) -> ApiResult<Json<RetentionBody>> {
+    let policy = notewise_storage::RetentionPolicy::parse(&body.policy);
+    if policy == notewise_storage::RetentionPolicy::Off && body.policy.trim() != "off" {
+        return Err(ApiError::BadRequest(format!(
+            "'{}' is not a retention policy; expected off, until_deleted, or days:N",
+            body.policy
+        )));
+    }
+
+    {
+        let db = state.db().await;
+        notewise_storage::set_retention_policy(&db, policy)?;
+        if policy == notewise_storage::RetentionPolicy::Off {
+            notewise_storage::sweep(&db, policy, chrono::Utc::now())?;
+        }
+    }
+
+    get_retention(State(state)).await
+}
+
+#[derive(Debug, Serialize)]
+struct SweepBody {
+    deleted: usize,
+    bytes_freed: i64,
+    /// Files the policy covered that could not be removed. A later sweep tries again.
+    failed: Vec<String>,
+}
+
+/// Delete audio the policy no longer covers.
+async fn sweep_audio(State(state): State<Shared>) -> ApiResult<Json<SweepBody>> {
+    let db = state.db().await;
+    let policy = notewise_storage::retention_policy(&db);
+    let report = notewise_storage::sweep(&db, policy, chrono::Utc::now())?;
+
+    if !report.failed.is_empty() {
+        tracing::warn!(
+            count = report.failed.len(),
+            "some retained audio could not be deleted; a later sweep will retry"
+        );
+    }
+
+    Ok(Json(SweepBody {
+        deleted: report.deleted,
+        bytes_freed: report.bytes_freed,
+        failed: report.failed,
+    }))
 }
 
 #[derive(Debug, Serialize)]
@@ -731,6 +827,84 @@ mod tests {
         )
         .await;
         assert_ne!(status, StatusCode::OK, "{body}");
+    }
+
+    #[tokio::test]
+    async fn audio_retention_is_off_until_someone_turns_it_on() {
+        let (status, body) = call(&app(), get("/v1/audio/retention")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["policy"], "off");
+        assert_eq!(body["retained"], 0);
+        assert_eq!(
+            body["can_enable"], true,
+            "an unencrypted workspace can retain audio"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_retention_policy_round_trips() {
+        let app = app();
+        for (input, expected) in [("days:7", "days:7"), ("until_deleted", "until_deleted")] {
+            let (status, body) = call(
+                &app,
+                send(
+                    "PUT",
+                    "/v1/audio/retention",
+                    serde_json::json!({ "policy": input }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(body["policy"], expected);
+        }
+    }
+
+    /// A garbled value must never be read as permission to keep recordings, so it is refused here
+    /// rather than silently parsed as `off` and stored.
+    #[tokio::test]
+    async fn an_unrecognised_retention_policy_is_refused() {
+        for bad in ["forever", "days:0", "yes", ""] {
+            let (status, _) = call(
+                &app(),
+                send(
+                    "PUT",
+                    "/v1/audio/retention",
+                    serde_json::json!({ "policy": bad }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad:?}");
+        }
+    }
+
+    /// `off` is a real policy and must be accepted — it is how a user turns the feature back off.
+    #[tokio::test]
+    async fn off_is_accepted_and_sweeps() {
+        let app = app();
+        let (status, body) = call(
+            &app,
+            send(
+                "PUT",
+                "/v1/audio/retention",
+                serde_json::json!({ "policy": "off" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["policy"], "off");
+        assert_eq!(body["retained"], 0);
+    }
+
+    #[tokio::test]
+    async fn a_sweep_with_nothing_retained_reports_nothing() {
+        let (status, body) = call(
+            &app(),
+            send("POST", "/v1/audio/sweep", serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["deleted"], 0);
+        assert_eq!(body["bytes_freed"], 0);
     }
 
     #[tokio::test]

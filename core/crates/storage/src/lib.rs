@@ -37,8 +37,8 @@ mod models;
 mod repositories;
 
 pub use audio::{
-    audio_path_for, expired, retention_policy, set_retention_policy, sweep, ExpiredAudio,
-    RetentionPolicy, SweepReport, DEFAULT_RETENTION_DAYS, RETENTION_KEY,
+    audio_path_for, expired, retained_totals, retention_policy, set_retention_policy, sweep,
+    ExpiredAudio, RetentionPolicy, SweepReport, DEFAULT_RETENTION_DAYS, RETENTION_KEY,
 };
 pub use db::Database;
 pub use error::{Result, StorageError};

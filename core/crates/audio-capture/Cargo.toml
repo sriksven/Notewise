@@ -31,3 +31,7 @@ default = []
 # Real OS capture backends. Off by default: they pull platform audio SDKs and, on
 # macOS, require a signed bundle with a TCC grant that cannot be obtained headlessly.
 os-capture = ["dep:cpal", "dep:screencapturekit", "dep:notewise-macos-permissions"]
+
+[dev-dependencies]
+# Temporary directories for the WAV writer's round-trip tests.
+tempfile.workspace = true

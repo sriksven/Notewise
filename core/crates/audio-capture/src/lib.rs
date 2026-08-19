@@ -41,6 +41,7 @@ mod source;
 #[cfg(all(feature = "os-capture", target_os = "macos"))]
 mod system_audio;
 mod vad;
+mod wav;
 
 pub use convert::{resample_linear, rms, to_mono};
 pub use features::{Fbank, FbankConfig, FbankExtractor, Normalization, WindowType};
@@ -53,6 +54,7 @@ pub use source::{AudioSource, CaptureConfig, CaptureKind, FileSource, SyntheticS
 #[cfg(all(feature = "os-capture", target_os = "macos"))]
 pub use system_audio::SystemAudioSource;
 pub use vad::{Vad, VadConfig, VadReport};
+pub use wav::{repair, WavWriter};
 
 use thiserror::Error;
 

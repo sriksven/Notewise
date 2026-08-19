@@ -134,6 +134,19 @@ pub fn audio_path_for(dir: &Path, meeting_id: Id) -> PathBuf {
     dir.join(format!("{meeting_id}.wav"))
 }
 
+/// How much audio is currently retained: how many meetings, and how many bytes.
+///
+/// Here rather than in the surface that displays it, because SQL lives only in this crate.
+pub fn retained_totals(db: &Database) -> Result<(usize, i64)> {
+    let (count, bytes): (i64, i64) = db.conn().query_row(
+        "SELECT COUNT(*), COALESCE(SUM(audio_bytes), 0)
+           FROM meetings WHERE audio_path IS NOT NULL",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok((count as usize, bytes))
+}
+
 /// A meeting whose audio has outlived the policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpiredAudio {
