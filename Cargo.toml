@@ -70,6 +70,9 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 keyring = "3"
+# Verifying entitlement grants. Public-key so the client holds no secret capable of forging one —
+# an HMAC would mean shipping the signing key to every machine.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 tempfile = "3"
 
 [profile.release]

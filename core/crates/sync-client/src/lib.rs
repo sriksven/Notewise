@@ -21,9 +21,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod entitlements;
 mod resolve;
 mod version;
 
+pub use entitlements::{
+    EntitlementState, Entitlements, GrantPayload, PaidCapability, SignedGrant, GRACE,
+};
 pub use resolve::{ConflictPolicy, Resolution, SyncEngine};
 pub use version::{DeviceId, Ordering, Version};
 
@@ -39,6 +43,13 @@ pub enum SyncError {
 
     #[error("record '{0}' has no version and cannot be merged")]
     Unversioned(String),
+
+    /// A grant could not be read, verified, or made sense of.
+    ///
+    /// Never a reason to disable anything local — see [`entitlements`] for why a failure here
+    /// leaves the free product entirely untouched.
+    #[error("entitlement problem: {0}")]
+    Entitlement(String),
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;

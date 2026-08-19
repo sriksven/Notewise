@@ -13,3 +13,10 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 notewise-storage.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# Temporary directories for the grant-cache tests.
+tempfile.workspace = true
