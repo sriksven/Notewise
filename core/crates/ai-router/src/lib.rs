@@ -41,6 +41,7 @@ mod backends;
 mod clarify;
 mod email;
 mod embed;
+mod policy;
 mod error;
 mod redact;
 mod router;
