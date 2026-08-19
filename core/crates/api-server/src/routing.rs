@@ -39,6 +39,159 @@ pub fn routes() -> AxumRouter<Shared> {
         .route("/v1/workspace/merge", post(merge_workspace))
         .route("/v1/notifications/pending", get(pending_notifications))
         .route("/v1/notifications/:id/delivered", post(mark_delivered))
+        .route(
+            "/v1/summary-templates",
+            get(list_templates).post(create_template),
+        )
+        .route(
+            "/v1/summary-templates/:id",
+            axum::routing::put(update_template).delete(delete_template),
+        )
+        .route("/v1/meetings/:id/title", axum::routing::put(set_title))
+        .route(
+            "/v1/segments/:id/text",
+            axum::routing::put(set_segment_text),
+        )
+}
+
+#[derive(Debug, Serialize)]
+struct TemplateBody {
+    id: String,
+    name: String,
+    prompt: String,
+    /// Seeded, and therefore not deletable. The UI hides the delete control rather than offering
+    /// one that always fails.
+    is_builtin: bool,
+}
+
+impl From<notewise_storage::SummaryTemplate> for TemplateBody {
+    fn from(t: notewise_storage::SummaryTemplate) -> Self {
+        Self {
+            id: t.id.to_string(),
+            name: t.name,
+            prompt: t.prompt,
+            is_builtin: t.is_builtin,
+        }
+    }
+}
+
+async fn list_templates(State(state): State<Shared>) -> ApiResult<Json<Vec<TemplateBody>>> {
+    let db = state.db().await;
+    let templates = notewise_storage::SummaryRepository::new(&db).templates()?;
+    Ok(Json(templates.into_iter().map(Into::into).collect()))
+}
+
+#[derive(Debug, Deserialize)]
+struct TemplateInput {
+    name: String,
+    prompt: String,
+}
+
+async fn create_template(
+    State(state): State<Shared>,
+    Json(body): Json<TemplateInput>,
+) -> ApiResult<Json<TemplateBody>> {
+    let (name, prompt) = validated_template(&body)?;
+    let db = state.db().await;
+    let made = notewise_storage::SummaryRepository::new(&db)
+        .create_template(notewise_storage::NewSummaryTemplate { name, prompt })?;
+    Ok(Json(made.into()))
+}
+
+async fn update_template(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<TemplateInput>,
+) -> ApiResult<Json<TemplateBody>> {
+    let id = parse_storage_id(&id)?;
+    let (name, prompt) = validated_template(&body)?;
+    let db = state.db().await;
+    let updated =
+        notewise_storage::SummaryRepository::new(&db).update_template(id, &name, &prompt)?;
+    Ok(Json(updated.into()))
+}
+
+async fn delete_template(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id = parse_storage_id(&id)?;
+    let db = state.db().await;
+    notewise_storage::SummaryRepository::new(&db).delete_template(id)?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// An empty name or prompt is refused here rather than stored.
+///
+/// A template with no prompt would summarise with an empty instruction, which is not an error the
+/// model reports — it just returns something worse, and the user has no way to tell why.
+fn validated_template(body: &TemplateInput) -> ApiResult<(String, String)> {
+    let name = body.name.trim();
+    let prompt = body.prompt.trim();
+    if name.is_empty() {
+        return Err(ApiError::BadRequest("a template needs a name".into()));
+    }
+    if prompt.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a template needs a prompt; an empty one summarises with no instruction at all".into(),
+        ));
+    }
+    Ok((name.to_string(), prompt.to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+struct TitleInput {
+    title: String,
+}
+
+async fn set_title(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<TitleInput>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id = parse_storage_id(&id)?;
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a meeting needs a title; an untitled meeting is unfindable".into(),
+        ));
+    }
+
+    let db = state.db().await;
+    let meeting = notewise_storage::MeetingRepository::new(&db).set_title(id, title)?;
+    Ok(Json(serde_json::json!({ "title": meeting.title })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SegmentTextInput {
+    text: String,
+}
+
+/// Correct a mis-transcribed line.
+///
+/// Empty is refused: deleting a line by blanking it would leave a gap in the transcript with no
+/// record that anything was there, which is a different operation from correcting one.
+async fn set_segment_text(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<SegmentTextInput>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id = parse_storage_id(&id)?;
+    let text = body.text.trim();
+    if text.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a transcript line cannot be emptied; correct it or leave it".into(),
+        ));
+    }
+
+    let db = state.db().await;
+    notewise_storage::MeetingRepository::new(&db).set_segment_text(id, text)?;
+    Ok(Json(serde_json::json!({ "text": text })))
+}
+
+fn parse_storage_id(raw: &str) -> ApiResult<notewise_storage::Id> {
+    raw.parse()
+        .map_err(|_| ApiError::BadRequest(format!("'{raw}' is not an id")))
 }
 
 #[derive(Debug, Serialize)]
@@ -578,6 +731,121 @@ mod tests {
         )
         .await;
         assert_ne!(status, StatusCode::OK, "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_builtin_templates_are_listed() {
+        let (status, body) = call(&app(), get("/v1/summary-templates")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().expect("array").len(), 3, "{body}");
+        assert_eq!(body[0]["is_builtin"], true);
+    }
+
+    #[tokio::test]
+    async fn a_template_round_trips_and_can_be_edited_then_deleted() {
+        let app = app();
+        let (status, made) = call(
+            &app,
+            send(
+                "POST",
+                "/v1/summary-templates",
+                serde_json::json!({ "name": "Mine", "prompt": "decisions only" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{made}");
+        let id = made["id"].as_str().expect("id").to_string();
+        assert_eq!(made["is_builtin"], false);
+
+        let (status, edited) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/summary-templates/{id}"),
+                serde_json::json!({ "name": "Mine", "prompt": "decisions and owners" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(edited["prompt"], "decisions and owners");
+
+        let (status, _) = call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/summary-templates/{id}"))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, after) = call(&app, get("/v1/summary-templates")).await;
+        assert_eq!(after.as_array().expect("array").len(), 3);
+    }
+
+    /// An empty prompt is not an error the model reports — it just answers worse, and the user has
+    /// no way to tell why.
+    #[tokio::test]
+    async fn a_template_with_no_prompt_or_no_name_is_refused() {
+        let app = app();
+        for body in [
+            serde_json::json!({ "name": "x", "prompt": "   " }),
+            serde_json::json!({ "name": "  ", "prompt": "y" }),
+        ] {
+            let (status, _) = call(&app, send("POST", "/v1/summary-templates", body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_builtin_cannot_be_deleted_over_http() {
+        let app = app();
+        let (_, listed) = call(&app, get("/v1/summary-templates")).await;
+        let id = listed[0]["id"].as_str().expect("id").to_string();
+
+        let (status, body) = call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/summary-templates/{id}"))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK, "{body}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_title_or_transcript_line_is_refused() {
+        let app = app();
+        let id = notewise_storage::Id::new();
+
+        let (status, _) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/meetings/{id}/title"),
+                serde_json::json!({ "title": "   " }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (status, _) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/segments/{id}/text"),
+                serde_json::json!({ "text": "" }),
+            ),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "blanking a line is a different operation from correcting one"
+        );
     }
 
     #[tokio::test]

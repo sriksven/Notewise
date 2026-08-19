@@ -31,7 +31,9 @@ pub use person::{NewPerson, PersonRepository, VoicePrint};
 pub use search::{SearchHit, SearchRepository};
 pub use series::{MeetingSeriesRepository, NewMeetingSeries};
 pub use setting::SettingsRepository;
-pub use summary::{NewActionItem, NewDecision, NewSummary, SummaryRepository};
+pub use summary::{
+    NewActionItem, NewDecision, NewSummary, NewSummaryTemplate, SummaryRepository, SummaryTemplate,
+};
 pub use ticket::{NewTicket, TicketEdit, TicketRepository};
 pub use workspace::{NewProject, NewWorkspace, ProjectRepository, WorkspaceRepository};
 
