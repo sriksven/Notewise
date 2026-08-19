@@ -41,7 +41,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
     icon: "◑",
     title: "Speaker separation",
-    body: "The transcript reads as a conversation. Names come from the meeting app when the browser extension is running.",
+    body: "The transcript reads as a conversation. Name a voice once and it applies throughout, or merge two the diarizer split apart. Names arrive on their own when the browser extension is running.",
   },
   {
     icon: "✦",
@@ -57,6 +57,16 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
     icon: "❝",
     title: "Ask anything, with citations",
     body: "Question one meeting, one note, or the whole workspace. Answers cite their sources and admit when the answer is not there.",
+  },
+  {
+    icon: "◇",
+    title: "Questions while people can still answer",
+    body: "It watches a live meeting and flags what was left vague — a decision with no owner, a date nobody actually said. Learning that from a summary afterwards is too late to fix it.",
+  },
+  {
+    icon: "◫",
+    title: "Tickets without a tracker",
+    body: "Action items become work you can assign, date and close in the app. No Jira, no second tool to keep in sync, no account.",
   },
   {
     icon: "⬡",
@@ -111,8 +121,8 @@ const LIMITATIONS: Array<{ title: string; body: string }> = [
     body: "No release channel, no signed binaries, no auto-update. You build it from source — the install page has the commands.",
   },
   {
-    title: "Speakers are separated, not identified",
-    body: "Diarization splits on pauses rather than voices, so you get Speaker 1 and Speaker 2 unless the browser extension supplies real names.",
+    title: "Speakers are separated, not recognised",
+    body: "Voice-based separation exists but is off by default and needs a model download; without it, splitting is on pauses. Either way you get Speaker 1 and Speaker 2 until you name them, or the browser extension does.",
   },
   {
     title: "Cloud sync, mobile and teams are not built",
