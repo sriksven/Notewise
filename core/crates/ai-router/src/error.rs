@@ -39,6 +39,23 @@ pub enum AiError {
         category: Option<String>,
     },
 
+    /// The configured model is not present on the provider.
+    ///
+    /// Separate from [`AiError::Provider`] because the raw provider message — "model
+    /// 'llama3.1' not found" — names the problem and not the fix, and the fix is a choice only
+    /// this error can offer: the backend is the one thing that knows what *is* installed.
+    ///
+    /// The trap is specific to tags. Ollama resolves a bare `llama3.1` to `llama3.1:latest`,
+    /// so a machine holding `llama3.1:8b` genuinely has no such model, and a user staring at
+    /// "not found" has no way to discover that from the message alone.
+    #[error("{backend} has no model named {model:?}. Installed: {}", if .installed.is_empty() { "nothing that can hold a conversation. Pull one, e.g. `ollama pull llama3.1`".to_string() } else { format!("{}. Pick one in Settings", .installed.join(", ")) })]
+    ModelNotInstalled {
+        backend: &'static str,
+        model: String,
+        /// Exact tags, as the provider reports them. Empty when the list could not be read.
+        installed: Vec<String>,
+    },
+
     #[error("could not parse the {backend} response: {reason}")]
     MalformedResponse {
         backend: &'static str,
@@ -71,6 +88,18 @@ impl AiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_model_is_not_retryable() {
+        // Retrying sends the same absent model name to the same daemon. The fix is a choice,
+        // not a second attempt.
+        let err = AiError::ModelNotInstalled {
+            backend: "ollama",
+            model: "llama3.1".into(),
+            installed: vec!["llama3.1:8b".into()],
+        };
+        assert!(!err.is_retryable());
+    }
 
     #[test]
     fn server_errors_are_retryable_client_errors_are_not() {

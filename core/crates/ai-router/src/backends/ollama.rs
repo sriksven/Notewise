@@ -18,6 +18,15 @@ const BACKEND: &str = "ollama";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/chat";
 const DEFAULT_MODEL: &str = "llama3.1";
 
+/// Whether a failed response means the configured model is absent, rather than the daemon
+/// being unwell.
+///
+/// Pure, and separate from the request path, for two reasons: it is the part that can be wrong,
+/// and the async path should only pay for a model list when the answer is yes.
+fn is_model_missing(status: u16, body: &str) -> bool {
+    status == 404 && body.to_ascii_lowercase().contains("not found")
+}
+
 #[derive(Debug, Clone)]
 pub struct OllamaBackend {
     model: String,
@@ -88,6 +97,19 @@ impl OllamaBackend {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<unreadable error body>".into());
+
+            if is_model_missing(status.as_u16(), &message) {
+                // Best effort. If the daemon cannot even list its models we would be replacing
+                // one unhelpful error with a different one, so an empty list still produces a
+                // message that names the configured model and says to pull something.
+                let installed = self.installed_models().await.unwrap_or_default();
+                return Err(AiError::ModelNotInstalled {
+                    backend: BACKEND,
+                    model: self.model.clone(),
+                    installed,
+                });
+            }
+
             return Err(AiError::Provider {
                 backend: BACKEND,
                 status: status.as_u16(),
@@ -374,6 +396,82 @@ mod tests {
         let backend = OllamaBackend::new();
         assert_eq!(backend.endpoint, "http://localhost:11434/api/chat");
         assert_eq!(backend.model_id(), "llama3.1");
+    }
+
+    /// The bug this predicate exists for: Ollama resolves a bare `llama3.1` to
+    /// `llama3.1:latest`, so a machine holding only `llama3.1:8b` answers 404.
+    #[test]
+    fn a_404_naming_a_missing_model_is_recognised() {
+        assert!(is_model_missing(
+            404,
+            r#"{"error":"model 'llama3.1' not found"}"#
+        ));
+    }
+
+    #[test]
+    fn other_failures_are_not_mistaken_for_a_missing_model() {
+        // A sick daemon must not be reported as a model choice problem: the user would go
+        // change a setting that was never wrong.
+        assert!(!is_model_missing(500, "internal error"));
+        assert!(!is_model_missing(404, "endpoint does not exist"));
+        assert!(!is_model_missing(200, "model 'x' not found"));
+    }
+
+    #[test]
+    fn the_predicate_does_not_care_about_case() {
+        assert!(is_model_missing(404, r#"{"error":"Model 'x' NOT FOUND"}"#));
+    }
+
+    /// The message is what reaches the user — it is rendered verbatim in the Ask panel — so
+    /// it has to name both the model that failed and the ones that would work.
+    #[test]
+    fn the_missing_model_error_names_the_alternatives() {
+        let err = AiError::ModelNotInstalled {
+            backend: BACKEND,
+            model: "llama3.1".into(),
+            installed: vec!["llama3.1:8b".into(), "llama3:latest".into()],
+        };
+
+        let shown = err.to_string();
+        assert!(shown.contains("llama3.1:8b"), "{shown}");
+        assert!(shown.contains("Pick one in Settings"), "{shown}");
+    }
+
+    #[test]
+    fn with_nothing_installed_it_says_to_pull_something() {
+        let err = AiError::ModelNotInstalled {
+            backend: BACKEND,
+            model: "llama3.1".into(),
+            installed: Vec::new(),
+        };
+
+        assert!(err.to_string().contains("ollama pull"), "{err}");
+    }
+
+    /// Proves the fix against a real daemon: a bare `llama3.1` on a machine that holds
+    /// `llama3.1:8b` must come back naming the installed tags, not as a raw 404.
+    ///
+    /// `#[ignore]`d because it needs a running Ollama with at least one chat model pulled,
+    /// which a CI runner does not have. Run with
+    /// `cargo test -p notewise-ai-router -- --ignored missing_model_against_a_real_daemon`.
+    #[tokio::test]
+    #[ignore = "needs a running Ollama daemon with a chat model pulled"]
+    async fn missing_model_against_a_real_daemon() {
+        let backend = OllamaBackend::new().with_model("definitely-not-a-real-model");
+        let err = backend
+            .summarize(&TranscriptInput::new("t", "we agreed to ship"))
+            .await
+            .expect_err("a model that does not exist cannot summarize");
+
+        match err {
+            AiError::ModelNotInstalled { installed, .. } => {
+                assert!(
+                    !installed.is_empty(),
+                    "the daemon should have reported what it does hold"
+                );
+            }
+            other => panic!("expected ModelNotInstalled, got {other:?}"),
+        }
     }
 
     #[test]
