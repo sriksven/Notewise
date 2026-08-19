@@ -60,7 +60,11 @@ pub use email::{
 pub use embed::{cosine, is_embedding_model, Embedder, DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL};
 pub use error::{AiError, Result};
 pub use redact::{redact, Category, RedactionPolicy, RedactionReport};
-pub use router::{BackendKind, Router, RouterConfig};
+pub use policy::{
+    contradictory_route, estimate_tokens, select_index, unreachable_route, Predicate, RequestFacts,
+    RouteSpec, TaskKind,
+};
+pub use router::{BackendKind, Route, Router, RouterConfig};
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role,
     SummaryOutput, TranscriptInput,

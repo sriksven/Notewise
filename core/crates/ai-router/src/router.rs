@@ -15,6 +15,7 @@ use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
     TranscriptInput,
 };
+use crate::policy::{RequestFacts, RouteSpec};
 use crate::AiBackend;
 
 /// Which backend to use.
@@ -251,12 +252,24 @@ impl RouterConfig {
     }
 }
 
+/// One configured route: its conditions, its backend, and that backend's own privacy settings.
+#[derive(Debug)]
+pub struct Route {
+    spec: RouteSpec,
+    backend: Box<dyn AiBackend>,
+    kind: BackendKind,
+    redaction: RedactionPolicy,
+}
+
 /// The interface every feature depends on.
 #[derive(Debug)]
 pub struct Router {
     backend: Box<dyn AiBackend>,
     kind: BackendKind,
     redaction: RedactionPolicy,
+    /// Ordered. First match wins. Empty means every request goes to `backend`, which is exactly
+    /// the behaviour before routing existed.
+    routes: Vec<Route>,
 }
 
 impl Router {
@@ -316,6 +329,7 @@ impl Router {
             backend,
             kind,
             redaction,
+            routes: Vec::new(),
         })
     }
 
@@ -325,6 +339,7 @@ impl Router {
             backend,
             kind: BackendKind::Mock,
             redaction: RedactionPolicy::Secrets,
+            routes: Vec::new(),
         }
     }
 
@@ -332,6 +347,49 @@ impl Router {
     pub fn with_redaction(mut self, redaction: RedactionPolicy) -> Self {
         self.redaction = redaction;
         self
+    }
+
+    /// Add a route, evaluated after every route already added.
+    pub fn with_route(
+        mut self,
+        spec: RouteSpec,
+        backend: Box<dyn AiBackend>,
+        kind: BackendKind,
+        redaction: RedactionPolicy,
+    ) -> Self {
+        self.routes.push(Route {
+            spec,
+            backend,
+            kind,
+            redaction,
+        });
+        self
+    }
+
+    /// Route names, in evaluation order. For the settings UI and the explain endpoint.
+    pub fn route_names(&self) -> Vec<String> {
+        self.routes.iter().map(|r| r.spec.name.clone()).collect()
+    }
+
+    /// The backend a request with these facts would go to, and the route name if one matched.
+    ///
+    /// Borrowed rather than cloned: this runs before every model call.
+    fn route_for(&self, facts: &RequestFacts) -> (&dyn AiBackend, Option<&str>) {
+        // Iterate rather than reusing `policy::select_index`, which takes a `&[RouteSpec]` and
+        // would mean cloning every spec on a path that runs before every model call. The
+        // first-match rule is one line either way; the allocation is not.
+        match self.routes.iter().find(|r| r.spec.matches(facts)) {
+            Some(route) => (route.backend.as_ref(), Some(route.spec.name.as_str())),
+            None => (self.backend.as_ref(), None),
+        }
+    }
+
+    /// Which route a request would take. Answers "why did this cost money".
+    pub fn explain(&self, facts: &RequestFacts) -> String {
+        match self.route_for(facts).1 {
+            Some(name) => format!("route {name:?}"),
+            None => "the default backend".to_string(),
+        }
     }
 
     /// Which backend kind this router was built from.
@@ -778,6 +836,32 @@ mod tests {
             let router = Router::from_config(config.clone()).expect("should build");
             assert!(!router.is_local(), "{:?}", config.backend);
         }
+    }
+
+    #[test]
+    fn a_router_has_no_routes_until_given_some() {
+        let router = Router::from_config(RouterConfig::mock()).expect("mock router");
+        assert!(
+            router.route_names().is_empty(),
+            "an empty policy is today's behaviour and must be the default"
+        );
+    }
+
+    #[test]
+    fn routes_are_named_in_the_order_they_were_added() {
+        let router = Router::from_config(RouterConfig::mock())
+            .expect("mock router")
+            .with_route(
+                RouteSpec {
+                    name: "first".into(),
+                    when: vec![],
+                },
+                Box::new(MockBackend::new()),
+                BackendKind::Mock,
+                RedactionPolicy::Off,
+            );
+
+        assert_eq!(router.route_names(), vec!["first".to_string()]);
     }
 
     #[test]
