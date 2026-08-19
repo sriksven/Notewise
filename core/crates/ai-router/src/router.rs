@@ -15,7 +15,7 @@ use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
     TranscriptInput,
 };
-use crate::policy::{RequestFacts, RouteSpec};
+use crate::policy::{Predicate, RequestFacts, RouteSpec, TaskKind};
 use crate::AiBackend;
 
 /// Which backend to use.
@@ -252,6 +252,35 @@ impl RouterConfig {
     }
 }
 
+/// The local hour, read at the request boundary so [`RequestFacts`] stays pure and testable.
+fn local_hour() -> u8 {
+    use chrono::Timelike;
+    chrono::Local::now().hour() as u8
+}
+
+/// The masking a given destination needs.
+///
+/// A local backend is always `Off`: nothing leaves the machine, so masking would only degrade the
+/// input for no privacy benefit.
+fn policy_for(backend: &dyn AiBackend, configured: RedactionPolicy) -> RedactionPolicy {
+    if backend.is_local() {
+        RedactionPolicy::Off
+    } else {
+        configured
+    }
+}
+
+/// Where a request is going, and what has to be masked before it gets there.
+///
+/// The redaction travels with the choice on purpose. Computing it from the router's default
+/// backend would send an unmasked transcript to a remote route whenever the default is local —
+/// silently, with no error, which is the worst failure this crate could have.
+struct Selected<'a> {
+    backend: &'a dyn AiBackend,
+    name: Option<&'a str>,
+    redaction: RedactionPolicy,
+}
+
 /// One configured route: its conditions, its backend, and that backend's own privacy settings.
 #[derive(Debug)]
 pub struct Route {
@@ -371,22 +400,30 @@ impl Router {
         self.routes.iter().map(|r| r.spec.name.clone()).collect()
     }
 
-    /// The backend a request with these facts would go to, and the route name if one matched.
+    /// The backend a request with these facts goes to, with the masking that destination needs.
     ///
     /// Borrowed rather than cloned: this runs before every model call.
-    fn route_for(&self, facts: &RequestFacts) -> (&dyn AiBackend, Option<&str>) {
+    fn route_for(&self, facts: &RequestFacts) -> Selected<'_> {
         // Iterate rather than reusing `policy::select_index`, which takes a `&[RouteSpec]` and
         // would mean cloning every spec on a path that runs before every model call. The
         // first-match rule is one line either way; the allocation is not.
         match self.routes.iter().find(|r| r.spec.matches(facts)) {
-            Some(route) => (route.backend.as_ref(), Some(route.spec.name.as_str())),
-            None => (self.backend.as_ref(), None),
+            Some(route) => Selected {
+                backend: route.backend.as_ref(),
+                name: Some(route.spec.name.as_str()),
+                redaction: policy_for(route.backend.as_ref(), route.redaction),
+            },
+            None => Selected {
+                backend: self.backend.as_ref(),
+                name: None,
+                redaction: policy_for(self.backend.as_ref(), self.redaction),
+            },
         }
     }
 
     /// Which route a request would take. Answers "why did this cost money".
     pub fn explain(&self, facts: &RequestFacts) -> String {
-        match self.route_for(facts).1 {
+        match self.route_for(facts).name {
             Some(name) => format!("route {name:?}"),
             None => "the default backend".to_string(),
         }
@@ -436,8 +473,10 @@ impl Router {
     }
 
     /// Mask a transcript on its way out, logging what was masked but never what it was.
-    fn guard_transcript(&self, input: &TranscriptInput) -> TranscriptInput {
-        let policy = self.effective_redaction();
+    ///
+    /// Takes the policy rather than asking [`Self::effective_redaction`] for it, because with
+    /// routing the answer depends on which destination this particular call selected.
+    fn guard_transcript(&self, input: &TranscriptInput, policy: RedactionPolicy) -> TranscriptInput {
         if policy == RedactionPolicy::Off {
             return input.clone();
         }
@@ -467,8 +506,7 @@ impl Router {
         }
     }
 
-    fn guard_chat(&self, request: &ChatRequest) -> ChatRequest {
-        let policy = self.effective_redaction();
+    fn guard_chat(&self, request: &ChatRequest, policy: RedactionPolicy) -> ChatRequest {
         if policy == RedactionPolicy::Off {
             return request.clone();
         }
@@ -522,12 +560,32 @@ impl AiBackend for Router {
     }
 
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
-        self.backend.summarize(&self.guard_transcript(input)).await
+        let facts = RequestFacts::for_transcript(
+            TaskKind::Summarize,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        selected
+            .backend
+            .summarize(&self.guard_transcript(input, selected.redaction))
+            .await
     }
 
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
-        self.backend
-            .extract_decisions(&self.guard_transcript(input))
+        let facts = RequestFacts::for_transcript(
+            TaskKind::ExtractDecisions,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        selected
+            .backend
+            .extract_decisions(&self.guard_transcript(input, selected.redaction))
             .await
     }
 
@@ -535,13 +593,32 @@ impl AiBackend for Router {
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
-        self.backend
-            .extract_action_items(&self.guard_transcript(input))
+        let facts = RequestFacts::for_transcript(
+            TaskKind::ExtractActionItems,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        selected
+            .backend
+            .extract_action_items(&self.guard_transcript(input, selected.redaction))
             .await
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        self.backend.chat(&self.guard_chat(request)).await
+        let last = request
+            .messages
+            .last()
+            .map(|m| m.content.as_str())
+            .unwrap_or_default();
+        let facts = RequestFacts::for_chat(&request.context, last, local_hour());
+        let selected = self.route_for(&facts);
+        selected
+            .backend
+            .chat(&self.guard_chat(request, selected.redaction))
+            .await
     }
 }
 
@@ -836,6 +913,76 @@ mod tests {
             let router = Router::from_config(config.clone()).expect("should build");
             assert!(!router.is_local(), "{:?}", config.backend);
         }
+    }
+
+    /// A backend that reports a distinct model id, so a test can prove which one answered.
+    fn named(id: &'static str) -> Box<dyn AiBackend> {
+        Box::new(MockBackend::new().with_model_id(id))
+    }
+
+    #[tokio::test]
+    async fn a_summary_takes_the_summary_route_and_chat_does_not() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "quality".into(),
+                when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+            },
+            named("quality"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let summary = router
+            .summarize(&TranscriptInput::new("t", "we agreed"))
+            .await
+            .expect("summarizes");
+        assert_eq!(summary.model, "quality");
+
+        let answer = router
+            .chat(&ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .expect("chats");
+        assert_eq!(
+            answer.model, "default",
+            "chat does not match the summary route and must fall through"
+        );
+    }
+
+    /// The privacy-critical case. A local default with a remote route must mask for the *route*
+    /// that is actually being used — computing redaction from the default backend would send an
+    /// unmasked transcript to the remote one, silently and with no error.
+    #[tokio::test]
+    async fn a_remote_route_masks_even_when_the_default_is_local() {
+        let cloud = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(std::sync::Arc::new(SpyBackend::local())))
+            .with_redaction(RedactionPolicy::Off)
+            .with_route(
+                RouteSpec {
+                    name: "cloud".into(),
+                    when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+                },
+                Box::new(cloud.clone()),
+                BackendKind::Anthropic,
+                RedactionPolicy::Secrets,
+            );
+
+        router
+            .summarize(&TranscriptInput::new(
+                "Standup",
+                format!("Sam read out {SECRET} on the call"),
+            ))
+            .await
+            .expect("summarizes");
+
+        let transmitted = cloud.transmitted();
+        assert!(
+            !transmitted.contains(SECRET),
+            "an unmasked key reached a remote route: {transmitted}"
+        );
+        assert!(
+            transmitted.contains("[redacted:api_key]"),
+            "{transmitted}"
+        );
     }
 
     #[test]
