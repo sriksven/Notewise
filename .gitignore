@@ -4,6 +4,10 @@
 Cargo.lock.bak
 *.pdb
 
+# Agent worktrees. Full checkouts of this repository live here, so committing one would nest
+# the repo inside itself — and they are scratch space by definition.
+.claude/worktrees/
+
 # Node
 node_modules/
 .turbo/
