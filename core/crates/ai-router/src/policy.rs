@@ -231,7 +231,10 @@ mod tests {
         );
 
         let fine = vec![
-            spec("summaries", vec![Predicate::Task(vec![TaskKind::Summarize])]),
+            spec(
+                "summaries",
+                vec![Predicate::Task(vec![TaskKind::Summarize])],
+            ),
             spec("catch all", vec![]),
         ];
         assert_eq!(unreachable_route(&fine), None);
@@ -272,7 +275,10 @@ mod tests {
         // predict the outcome, which a scoring system makes unanswerable.
         let routes = vec![
             spec("anything", vec![]),
-            spec("summaries", vec![Predicate::Task(vec![TaskKind::Summarize])]),
+            spec(
+                "summaries",
+                vec![Predicate::Task(vec![TaskKind::Summarize])],
+            ),
         ];
 
         assert_eq!(
