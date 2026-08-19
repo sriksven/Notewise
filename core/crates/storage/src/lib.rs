@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod audio;
 mod db;
 mod error;
 mod export;
@@ -35,6 +36,10 @@ mod migrations;
 mod models;
 mod repositories;
 
+pub use audio::{
+    audio_path_for, expired, retention_policy, set_retention_policy, sweep, ExpiredAudio,
+    RetentionPolicy, SweepReport, DEFAULT_RETENTION_DAYS, RETENTION_KEY,
+};
 pub use db::Database;
 pub use error::{Result, StorageError};
 pub use export::{meeting_to_markdown, ExportOptions};

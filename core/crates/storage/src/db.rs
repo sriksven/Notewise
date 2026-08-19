@@ -17,6 +17,8 @@ pub struct Database {
     /// pipeline, which must write for the duration of a meeting without holding the API's
     /// lock — can open one without being told the path separately.
     path: Option<PathBuf>,
+    /// Whether this handle was opened with SQLCipher. See [`Database::is_encrypted`].
+    encrypted: bool,
 }
 
 // `rusqlite::Connection` is not `Debug`, so this is written by hand. Deliberately reports
@@ -61,7 +63,7 @@ impl Database {
             let conn = Connection::open(path)?;
             // Must be the first statement executed on the connection.
             conn.pragma_update(None, "key", key)?;
-            Self::from_connection(conn, Some(path.to_path_buf()))
+            Self::from_connection_with(conn, Some(path.to_path_buf()), true)
         }
         #[cfg(not(feature = "sqlcipher"))]
         {
@@ -69,7 +71,24 @@ impl Database {
         }
     }
 
+    /// Whether this database is encrypted at rest.
+    ///
+    /// Load-bearing beyond reporting: anything that writes a *separate* file alongside the database
+    /// — retained audio, for one — would be writing it in the clear next to an encrypted transcript,
+    /// silently weakening a choice the user made deliberately. Such a caller has to be able to ask.
+    pub fn is_encrypted(&self) -> bool {
+        self.encrypted
+    }
+
     fn from_connection(conn: Connection, path: Option<PathBuf>) -> Result<Self> {
+        Self::from_connection_with(conn, path, false)
+    }
+
+    fn from_connection_with(
+        conn: Connection,
+        path: Option<PathBuf>,
+        encrypted: bool,
+    ) -> Result<Self> {
         let persistent = path.is_some();
         // Cascading deletes are part of the schema's correctness, and SQLite leaves this
         // off by default. It must be set per-connection, not once per database.
@@ -82,7 +101,11 @@ impl Database {
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
         }
 
-        let mut db = Database { conn, path };
+        let mut db = Database {
+            conn,
+            path,
+            encrypted,
+        };
         migrations::migrate(&mut db.conn)?;
         Ok(db)
     }

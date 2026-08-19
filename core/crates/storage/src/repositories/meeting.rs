@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use rusqlite::Row;
+use rusqlite::{OptionalExtension, Row};
 
 use crate::db::Database;
 use crate::error::{Result, StorageError};
@@ -199,7 +199,26 @@ impl<'a> MeetingRepository<'a> {
     ///
     /// Callers must detach its graph edges and drop its embeddings first — neither cascades,
     /// because neither table has a foreign key that could.
+    /// Destroy a meeting and everything that cascades from it.
+    ///
+    /// Retained audio is unlinked first. It is a file rather than a row, so nothing cascades to it —
+    /// deleting the row without deleting the file would leave a recording on disk that the user
+    /// believes is gone and that no sweep will ever find, because the pointer to it went with the
+    /// row. This is the irreversible half of the trash; the reversible half is [`Self::trash`],
+    /// which deliberately keeps the audio so a restore is a whole restore.
     pub fn delete(&self, id: Id) -> Result<()> {
+        // Read before the delete: after it, the path is unrecoverable.
+        let audio: Option<String> = self
+            .db
+            .conn()
+            .query_row(
+                "SELECT audio_path FROM meetings WHERE id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
         let changed = self
             .db
             .conn()
@@ -207,6 +226,14 @@ impl<'a> MeetingRepository<'a> {
         if changed == 0 {
             return Err(StorageError::not_found("Meeting", id));
         }
+
+        if let Some(path) = audio {
+            // A file that is already gone is the outcome this wanted. Anything else is reported by
+            // leaving it: the row is gone either way, and failing the delete now would be a meeting
+            // that cannot be purged because of a file permission.
+            let _ = std::fs::remove_file(path);
+        }
+
         Ok(())
     }
 
@@ -533,6 +560,48 @@ mod tests {
                 started_at: ts(1_700_000_000),
             })
             .expect("create meeting")
+    }
+
+    /// Trash is reversible, so a restore has to be a whole restore. Purge is the irreversible half
+    /// and is the only thing that may destroy a recording.
+    #[test]
+    fn trash_keeps_the_audio_and_purge_destroys_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db();
+        let m = meeting(&db);
+        let repo = MeetingRepository::new(&db);
+
+        let path = dir.path().join("audio.wav");
+        std::fs::write(&path, b"samples").expect("write");
+        db.conn()
+            .execute(
+                "UPDATE meetings SET audio_path = ?2, audio_bytes = 7 WHERE id = ?1",
+                rusqlite::params![m.id, path.to_str().unwrap()],
+            )
+            .expect("attach");
+
+        repo.trash(m.id).expect("trash");
+        assert!(
+            path.exists(),
+            "a restore after trashing must get the recording back too"
+        );
+
+        repo.restore(m.id).expect("restore");
+        assert!(path.exists());
+
+        repo.delete(m.id).expect("purge");
+        assert!(
+            !path.exists(),
+            "purging is the irreversible half and must not leave a recording the user thinks is gone"
+        );
+    }
+
+    /// Nothing cascades to a file, so a purge that could not find the row must still not strand one.
+    #[test]
+    fn purging_a_meeting_with_no_audio_is_unaffected() {
+        let db = db();
+        let m = meeting(&db);
+        MeetingRepository::new(&db).delete(m.id).expect("purge");
     }
 
     #[test]

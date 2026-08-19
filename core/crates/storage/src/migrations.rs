@@ -586,6 +586,23 @@ const MIGRATIONS: &[&str] = &[
          'Summarise this engineering discussion. Cover: the decision reached, the alternatives rejected and why, any risk or unknown that was named, and follow-up work with owners. Prefer the reasoning over the conclusion.',
          1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00');
     "#,
+    // v12 — a pointer to retained audio, for the meetings whose owner asked for it.
+    //
+    // Audio was never kept: capture streamed into transcription and the samples were gone. That
+    // made two things impossible — hearing the moment a line was said, and re-transcribing with a
+    // better model when the first pass invented something.
+    //
+    // A path and a size rather than a blob. An hour of audio is tens of megabytes; in the database
+    // it would be copied by every backup, walked by every `VACUUM`, and read into memory by a
+    // range request. On disk, deletion is a filesystem operation that can be verified.
+    //
+    // Nullable, and null for every meeting that already exists, because retention is off by default
+    // and enabling it later must not make earlier meetings look broken.
+    r#"
+    ALTER TABLE meetings ADD COLUMN audio_path TEXT;
+    ALTER TABLE meetings ADD COLUMN audio_bytes INTEGER;
+    CREATE INDEX idx_meetings_audio ON meetings(audio_path) WHERE audio_path IS NOT NULL;
+    "#,
 ];
 
 /// Schema version this build understands.
