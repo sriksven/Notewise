@@ -793,6 +793,7 @@ mod tests {
                 meeting_id,
                 text: "Agreed to migrate.".into(),
                 model: "mock".into(),
+                template_id: None,
             })
             .unwrap();
         repo.add_decision(notewise_storage::NewDecision {

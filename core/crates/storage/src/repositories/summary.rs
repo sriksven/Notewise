@@ -14,6 +14,11 @@ pub struct NewSummary {
     pub text: String,
     /// Model that produced this, so a summary can be regenerated or audited later.
     pub model: String,
+    /// Which template's prompt produced this, when one did.
+    ///
+    /// `None` for a summary made before templates existed, or by a caller that does not use them.
+    /// Recorded so "regenerate with a different template" can show what the last one was.
+    pub template_id: Option<Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,17 +100,19 @@ impl<'a> SummaryRepository<'a> {
             meeting_id: new.meeting_id,
             text: new.text,
             model: new.model,
+            template_id: new.template_id,
             created_at: Utc::now(),
         };
 
         self.db.conn().execute(
-            "INSERT INTO summaries (id, meeting_id, text, model, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO summaries (id, meeting_id, text, model, template_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 summary.id,
                 summary.meeting_id,
                 summary.text,
                 summary.model,
+                summary.template_id,
                 summary.created_at
             ],
         )?;
@@ -117,7 +124,7 @@ impl<'a> SummaryRepository<'a> {
         self.db
             .conn()
             .query_row(
-                "SELECT id, meeting_id, text, model, created_at FROM summaries WHERE id = ?1",
+                "SELECT id, meeting_id, text, model, template_id, created_at FROM summaries WHERE id = ?1",
                 rusqlite::params![id],
                 map_summary,
             )
@@ -132,7 +139,7 @@ impl<'a> SummaryRepository<'a> {
     pub fn list_for_meeting(&self, meeting_id: Id) -> Result<Vec<Summary>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, text, model, created_at
+            "SELECT id, meeting_id, text, model, template_id, created_at
              FROM summaries WHERE meeting_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(rusqlite::params![meeting_id], map_summary)?;
@@ -429,13 +436,328 @@ impl<'a> SummaryRepository<'a> {
     }
 }
 
+/// A named prompt for summarising.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryTemplate {
+    pub id: Id,
+    pub name: String,
+    pub prompt: String,
+    /// Seeded by the migration. Cannot be deleted — see [`SummaryRepository::delete_template`].
+    pub is_builtin: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewSummaryTemplate {
+    pub name: String,
+    pub prompt: String,
+}
+
+impl SummaryRepository<'_> {
+    pub fn templates(&self) -> Result<Vec<SummaryTemplate>> {
+        let conn = self.db.conn();
+        // Built-ins first, then alphabetical: the list must not reorder itself between launches,
+        // and the three a user did not write are the ones they are choosing between on day one.
+        let mut stmt = conn.prepare(
+            "SELECT id, name, prompt, is_builtin, created_at, updated_at
+               FROM summary_templates ORDER BY is_builtin DESC, name",
+        )?;
+        let rows = stmt.query_map([], map_template)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn template(&self, id: Id) -> Result<SummaryTemplate> {
+        self.db
+            .conn()
+            .query_row(
+                "SELECT id, name, prompt, is_builtin, created_at, updated_at
+                   FROM summary_templates WHERE id = ?1",
+                rusqlite::params![id],
+                map_template,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    StorageError::not_found("SummaryTemplate", id)
+                }
+                other => other.into(),
+            })
+    }
+
+    pub fn create_template(&self, new: NewSummaryTemplate) -> Result<SummaryTemplate> {
+        let now = Utc::now();
+        let template = SummaryTemplate {
+            id: Id::new(),
+            name: new.name,
+            prompt: new.prompt,
+            is_builtin: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.db.conn().execute(
+            "INSERT INTO summary_templates (id, name, prompt, is_builtin, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?4)",
+            rusqlite::params![
+                template.id,
+                template.name,
+                template.prompt,
+                template.created_at
+            ],
+        )?;
+
+        Ok(template)
+    }
+
+    /// Change a template's name or prompt.
+    ///
+    /// Built-ins are editable. Only *deletion* is refused, because that is the operation that can
+    /// leave a user with no way to summarise anything.
+    pub fn update_template(&self, id: Id, name: &str, prompt: &str) -> Result<SummaryTemplate> {
+        let changed = self.db.conn().execute(
+            "UPDATE summary_templates SET name = ?2, prompt = ?3, updated_at = ?4 WHERE id = ?1",
+            rusqlite::params![id, name, prompt, Utc::now()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("SummaryTemplate", id));
+        }
+        self.template(id)
+    }
+
+    /// Delete a template a user wrote and nothing has used.
+    ///
+    /// Two refusals, both to protect something that cannot be recovered.
+    ///
+    /// A **built-in** cannot be deleted. Allowing it would let someone empty the list and reach a
+    /// state where summarising is impossible, recoverable only by reinstalling. `update_template`
+    /// already allows editing a built-in in place, so there is nothing this would enable.
+    ///
+    /// A template that **produced summaries** cannot be deleted either, because `summaries`
+    /// references it and the record of what produced a summary is the reason the column exists.
+    /// The alternative designs both lose something: `ON DELETE SET NULL` keeps the row and discards
+    /// the provenance, and `CASCADE` would delete the user's summaries. Refusing keeps both, and is
+    /// a rule the user can act on — rename it, or leave it.
+    pub fn delete_template(&self, id: Id) -> Result<()> {
+        if self.template(id)?.is_builtin {
+            return Err(StorageError::Refused(
+                "a built-in template cannot be deleted; edit it instead, or copy it".into(),
+            ));
+        }
+
+        let used: i64 = self.db.conn().query_row(
+            "SELECT COUNT(*) FROM summaries WHERE template_id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )?;
+        if used > 0 {
+            return Err(StorageError::Refused(format!(
+                "this template produced {used} summar{}; deleting it would erase the record of \
+                 what wrote them. Rename it instead.",
+                if used == 1 { "y" } else { "ies" }
+            )));
+        }
+
+        self.db.conn().execute(
+            "DELETE FROM summary_templates WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    fn db() -> Database {
+        Database::open_in_memory().expect("in-memory db")
+    }
+
+    #[test]
+    fn the_three_builtins_are_seeded_and_ordered_first() {
+        let db = db();
+        let repo = SummaryRepository::new(&db);
+        let all = repo.templates().expect("templates");
+
+        assert_eq!(all.len(), 3, "{all:?}");
+        assert!(all.iter().all(|t| t.is_builtin));
+        let names: Vec<_> = all.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Engineering review", "General meeting", "Sales call"],
+            "built-ins first, then alphabetical, so the list cannot reorder between launches"
+        );
+    }
+
+    #[test]
+    fn a_user_template_round_trips_and_sorts_after_the_builtins() {
+        let db = db();
+        let repo = SummaryRepository::new(&db);
+        let made = repo
+            .create_template(NewSummaryTemplate {
+                name: "Aardvark".into(),
+                prompt: "just the decisions".into(),
+            })
+            .expect("create");
+
+        assert!(!made.is_builtin);
+        let all = repo.templates().expect("templates");
+        assert_eq!(
+            all.last().expect("last").name,
+            "Aardvark",
+            "a user template sorts after every built-in even when its name sorts first"
+        );
+        assert_eq!(
+            repo.template(made.id).expect("get").prompt,
+            "just the decisions"
+        );
+    }
+
+    #[test]
+    fn two_templates_cannot_share_a_name() {
+        let db = db();
+        let repo = SummaryRepository::new(&db);
+        repo.create_template(NewSummaryTemplate {
+            name: "Mine".into(),
+            prompt: "a".into(),
+        })
+        .expect("first");
+
+        assert!(
+            repo.create_template(NewSummaryTemplate {
+                name: "Mine".into(),
+                prompt: "b".into(),
+            })
+            .is_err(),
+            "a duplicate name makes the picker ambiguous"
+        );
+    }
+
+    /// Deleting the last way of summarising anything would be recoverable only by reinstalling.
+    #[test]
+    fn a_builtin_cannot_be_deleted_but_can_be_edited() {
+        let db = db();
+        let repo = SummaryRepository::new(&db);
+        let builtin = repo.templates().expect("templates").remove(0);
+
+        let err = repo.delete_template(builtin.id).expect_err("must refuse");
+        assert!(matches!(err, StorageError::Refused(_)), "{err:?}");
+
+        let edited = repo
+            .update_template(builtin.id, &builtin.name, "my own wording")
+            .expect("editing a built-in is allowed");
+        assert_eq!(edited.prompt, "my own wording");
+        assert!(edited.is_builtin, "editing must not change what it is");
+    }
+
+    #[test]
+    fn a_user_template_can_be_deleted() {
+        let db = db();
+        let repo = SummaryRepository::new(&db);
+        let mine = repo
+            .create_template(NewSummaryTemplate {
+                name: "Mine".into(),
+                prompt: "a".into(),
+            })
+            .expect("create");
+
+        repo.delete_template(mine.id).expect("delete");
+        assert_eq!(repo.templates().expect("templates").len(), 3);
+    }
+
+    /// A template that wrote something cannot be deleted, because the record of what wrote a summary
+    /// is the reason the column exists. `SET NULL` would keep the summary and lose that; `CASCADE`
+    /// would delete the user's summaries. Refusing keeps both.
+    #[test]
+    fn a_template_that_produced_summaries_cannot_be_deleted() {
+        let db = db();
+        let meeting = crate::MeetingRepository::new(&db)
+            .create(crate::NewMeeting {
+                project_id: None,
+                title: "Standup".into(),
+                source: crate::MeetingSource::Microphone,
+                started_at: Utc::now(),
+            })
+            .expect("meeting");
+
+        let repo = SummaryRepository::new(&db);
+        let template = repo
+            .create_template(NewSummaryTemplate {
+                name: "Mine".into(),
+                prompt: "a".into(),
+            })
+            .expect("template");
+
+        let summary = repo
+            .create(NewSummary {
+                meeting_id: meeting.id,
+                text: "text".into(),
+                model: "mock".into(),
+                template_id: Some(template.id),
+            })
+            .expect("summary");
+
+        let err = repo
+            .delete_template(template.id)
+            .expect_err("a template that wrote something must not vanish");
+        match err {
+            StorageError::Refused(message) => {
+                assert!(
+                    message.contains("1 summary"),
+                    "the refusal should say how much is at stake: {message}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+
+        let still_there = repo.get(summary.id).expect("the summary must survive");
+        assert_eq!(still_there.template_id, Some(template.id));
+    }
+
+    #[test]
+    fn a_summary_made_without_a_template_records_none() {
+        let db = db();
+        let meeting = crate::MeetingRepository::new(&db)
+            .create(crate::NewMeeting {
+                project_id: None,
+                title: "Standup".into(),
+                source: crate::MeetingSource::Microphone,
+                started_at: Utc::now(),
+            })
+            .expect("meeting");
+
+        let summary = SummaryRepository::new(&db)
+            .create(NewSummary {
+                meeting_id: meeting.id,
+                text: "text".into(),
+                model: "mock".into(),
+                template_id: None,
+            })
+            .expect("summary");
+
+        assert_eq!(summary.template_id, None);
+    }
+}
+
+fn map_template(row: &Row<'_>) -> rusqlite::Result<SummaryTemplate> {
+    Ok(SummaryTemplate {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        prompt: row.get(2)?,
+        is_builtin: row.get::<_, i64>(3)? != 0,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
 fn map_summary(row: &Row<'_>) -> rusqlite::Result<Summary> {
     Ok(Summary {
         id: row.get(0)?,
         meeting_id: row.get(1)?,
         text: row.get(2)?,
         model: row.get(3)?,
-        created_at: row.get(4)?,
+        template_id: row.get(4)?,
+        created_at: row.get(5)?,
     })
 }
 
@@ -496,6 +818,7 @@ mod tests {
                 meeting_id: meeting.id,
                 text: "We agreed to ship Friday.".into(),
                 model: "mock".into(),
+                template_id: None,
             })
             .unwrap();
         (db, summary)
@@ -520,6 +843,7 @@ mod tests {
                 meeting_id: first.meeting_id,
                 text: "Regenerated with a better model.".into(),
                 model: "llama3".into(),
+                template_id: None,
             })
             .unwrap();
 

@@ -262,6 +262,7 @@ mod tests {
                 meeting_id: meeting.id,
                 text: "The team agreed to migrate to Postgres before launch.".into(),
                 model: "llama3.1".into(),
+                template_id: None,
             })
             .unwrap();
 

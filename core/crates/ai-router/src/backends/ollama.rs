@@ -194,8 +194,10 @@ impl AiBackend for OllamaBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .complete(
-                "Summarize this meeting transcript. Lead with the outcome. Cover what was \
+                input.system_prompt(
+                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
                  decided and what happens next. Omit small talk.",
+                ),
                 &transcript_prompt(input),
                 false,
             )

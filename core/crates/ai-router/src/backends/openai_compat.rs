@@ -281,8 +281,10 @@ impl AiBackend for OpenAiCompatBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                "Summarize this meeting transcript. Lead with the outcome. Cover what was \
+                input.system_prompt(
+                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
                  decided and what happens next. Omit small talk.",
+                ),
                 vec![json!({ "role": "user", "content": transcript_prompt(input) })],
                 false,
             ))

@@ -408,6 +408,7 @@ async fn summarize(config: &Config, id: &str) -> Result<()> {
         meeting_id,
         text: summary.text.clone(),
         model: summary.model.clone(),
+        template_id: None,
     })?;
 
     for decision in &decisions {

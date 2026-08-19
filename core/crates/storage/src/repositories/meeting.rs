@@ -347,6 +347,61 @@ impl<'a> MeetingRepository<'a> {
         Ok(())
     }
 
+    /// Correct a mis-transcribed line.
+    ///
+    /// # Both indexes have to stay right, and only one does so on its own
+    ///
+    /// The v9 migration added `segments_au AFTER UPDATE ON transcript_segments`, so the full-text
+    /// index re-indexes itself here. That was solved for the speaker column and generalises.
+    ///
+    /// The semantic index does not. `indexing` decides staleness by comparing an entity's
+    /// `updated_at` against the newest chunk stored for it, and `transcript_segments` has no such
+    /// column — so an edited segment would keep its old vector for ever, and search would keep
+    /// finding the text the user just corrected.
+    ///
+    /// So the segment's embedding is deleted in the same transaction. A missing vector is already a
+    /// state the indexing pass handles — it is what a never-indexed entity looks like — so the next
+    /// pass rebuilds it and nothing new has to be understood.
+    ///
+    /// Adding `updated_at` to the table is the more general fix and was rejected: it would be
+    /// written on every one of thousands of inserts per meeting to serve a rare update, and this
+    /// path reuses machinery that already exists.
+    pub fn set_segment_text(&self, segment_id: Id, text: &str) -> Result<()> {
+        let conn = self.db.conn();
+        let tx = conn.unchecked_transaction()?;
+
+        let changed = tx.execute(
+            "UPDATE transcript_segments SET text = ?2 WHERE id = ?1",
+            rusqlite::params![segment_id, text],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("TranscriptSegment", segment_id));
+        }
+
+        tx.execute(
+            "DELETE FROM embeddings WHERE entity_kind = 'transcript_segment' AND entity_id = ?1",
+            rusqlite::params![segment_id],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rename a meeting.
+    ///
+    /// `title` was set at `create` and never again, so a recording started from a hotkey kept
+    /// whatever the caller guessed before the meeting happened.
+    pub fn set_title(&self, id: Id, title: &str) -> Result<Meeting> {
+        let changed = self.db.conn().execute(
+            "UPDATE meetings SET title = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, title, Utc::now()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::not_found("Meeting", id));
+        }
+        self.get(id)
+    }
+
     /// The distinct voices in a meeting, in the order they were first heard.
     pub fn speakers(&self, meeting_id: Id) -> Result<Vec<SpeakerSummary>> {
         let conn = self.db.conn();
@@ -478,6 +533,105 @@ mod tests {
                 started_at: ts(1_700_000_000),
             })
             .expect("create meeting")
+    }
+
+    #[test]
+    fn a_meeting_can_be_renamed() {
+        let db = db();
+        let m = meeting(&db);
+        let repo = MeetingRepository::new(&db);
+
+        let renamed = repo.set_title(m.id, "Platform standup").expect("rename");
+        assert_eq!(renamed.title, "Platform standup");
+        assert_eq!(repo.get(m.id).expect("get").title, "Platform standup");
+    }
+
+    #[test]
+    fn renaming_something_that_is_not_there_is_reported_not_panicked() {
+        let db = db();
+        let err = MeetingRepository::new(&db)
+            .set_title(Id::new(), "x")
+            .expect_err("must not succeed");
+        assert!(matches!(err, StorageError::NotFound { .. }), "{err:?}");
+    }
+
+    /// Both indexes have to end up right, and only one manages that on its own.
+    #[test]
+    fn correcting_a_segment_updates_the_search_index_and_drops_its_vector() {
+        let db = db();
+        let m = meeting(&db);
+        let repo = MeetingRepository::new(&db);
+
+        let segment = repo
+            .add_segment(NewTranscriptSegment {
+                meeting_id: m.id,
+                speaker: Some("Sam".into()),
+                text: "we agreed to ship on Fryday".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                confidence: None,
+            })
+            .expect("segment");
+
+        // A vector as the indexing pass would have left one.
+        crate::EmbeddingRepository::new(&db)
+            .replace_for_entity(
+                "transcript_segment",
+                segment.id,
+                "nomic-embed-text:latest",
+                vec![crate::NewEmbedding {
+                    entity_kind: "transcript_segment".into(),
+                    entity_id: segment.id,
+                    chunk_index: 0,
+                    text: "we agreed to ship on Fryday".into(),
+                    vector: vec![0.1, 0.2],
+                    model: "nomic-embed-text:latest".into(),
+                    source_updated_at: ts(1_700_000_000),
+                }],
+            )
+            .expect("embed");
+
+        let search = crate::SearchRepository::new(&db);
+        assert!(
+            !search.search("Fryday", 10).expect("search").is_empty(),
+            "the typo should be findable before it is corrected"
+        );
+
+        repo.set_segment_text(segment.id, "we agreed to ship on Friday")
+            .expect("correct it");
+
+        // FTS: the v9 `segments_au` trigger does this without being asked.
+        assert!(
+            search.search("Fryday", 10).expect("search").is_empty(),
+            "the corrected text must not still be findable by the typo"
+        );
+        assert!(
+            !search.search("Friday", 10).expect("search").is_empty(),
+            "the correction must be findable"
+        );
+
+        // Semantic: nothing re-indexes on its own, so the stale vector has to be gone.
+        assert_eq!(
+            crate::EmbeddingRepository::new(&db)
+                .count("nomic-embed-text:latest")
+                .expect("count"),
+            0,
+            "a stale vector would keep answering with the text the user just corrected"
+        );
+
+        assert_eq!(
+            repo.segments(m.id).expect("segments")[0].text,
+            "we agreed to ship on Friday"
+        );
+    }
+
+    #[test]
+    fn correcting_a_segment_that_is_not_there_is_reported_not_panicked() {
+        let db = db();
+        let err = MeetingRepository::new(&db)
+            .set_segment_text(Id::new(), "x")
+            .expect_err("must not succeed");
+        assert!(matches!(err, StorageError::NotFound { .. }), "{err:?}");
     }
 
     #[test]

@@ -27,6 +27,13 @@ pub enum StorageError {
     #[error("cannot merge: {0}")]
     Merge(String),
 
+    /// The operation is valid SQL and deliberately not allowed.
+    ///
+    /// Separate from a constraint failure because the reason is a product decision rather than a
+    /// schema one, and the message explains the rule rather than naming a table.
+    #[error("{0}")]
+    Refused(String),
+
     #[error("database schema version {found} is newer than this build supports ({supported}); upgrade Notewise")]
     SchemaTooNew { found: u32, supported: u32 },
 

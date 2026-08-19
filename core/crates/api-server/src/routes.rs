@@ -1368,6 +1368,12 @@ struct SummarizeResponse {
     action_items: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct SummarizeParams {
+    /// Which summary template's prompt to use. Omitted means the backend's own instruction.
+    template: Option<String>,
+}
+
 /// Summarize a meeting, persist the results, and wire them into the graph.
 ///
 /// The database lock is deliberately released before the model call — summarization can take
@@ -1375,8 +1381,20 @@ struct SummarizeResponse {
 async fn summarize_meeting(
     State(state): State<Shared>,
     Path(id): Path<String>,
+    Query(params): Query<SummarizeParams>,
 ) -> ApiResult<Json<SummarizeResponse>> {
     let meeting_id = parse_id(&id)?;
+
+    // A query parameter rather than a body, so every existing caller keeps working and
+    // "summarize with the default prompt" stays a bare POST.
+    let template = match params.template.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(raw) => {
+            let template_id = parse_id(raw)?;
+            let db = state.db().await;
+            Some(SummaryRepository::new(&db).template(template_id)?)
+        }
+    };
 
     let (title, transcript) = {
         let db = state.db().await;
@@ -1391,7 +1409,12 @@ async fn summarize_meeting(
         ));
     }
 
-    let input = TranscriptInput::new(title, transcript);
+    let mut input = TranscriptInput::new(title, transcript);
+    if let Some(template) = &template {
+        input = input.with_instructions(template.prompt.clone());
+    }
+    // Only the summary honours the template. Decisions and action items are extractions with a
+    // fixed output shape, and a prompt written to change prose would break the parse.
     let summary = state.ai().summarize(&input).await?;
     let decisions = state.ai().extract_decisions(&input).await?;
     let action_items = state.ai().extract_action_items(&input).await?;
@@ -1402,6 +1425,7 @@ async fn summarize_meeting(
         meeting_id,
         text: summary.text.clone(),
         model: summary.model.clone(),
+        template_id: template.as_ref().map(|t| t.id),
     })?;
 
     for decision in &decisions {

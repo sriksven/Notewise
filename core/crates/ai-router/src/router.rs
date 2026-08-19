@@ -689,6 +689,10 @@ impl Router {
             title: input.title.clone(),
             text: text.into_owned(),
             context,
+            // Carried through unmasked, deliberately. This is the user's own template prompt, not
+            // meeting material — redacting it would mangle an instruction they wrote, and there is
+            // no transcript content in it to protect.
+            instructions: input.instructions.clone(),
         }
     }
 

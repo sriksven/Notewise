@@ -13,14 +13,39 @@ pub struct TranscriptInput {
     pub text: String,
     /// Optional extra context, e.g. the project this meeting belongs to.
     pub context: Option<String>,
+    /// A summary template's prompt, replacing the backend's default instruction.
+    ///
+    /// `None` means "use whatever this backend normally asks for", which is every caller that does
+    /// not care. Kept separate from `context`: that is *material* about the meeting, this is an
+    /// *instruction* about the output, and a backend has to treat them differently — one goes in the
+    /// user message, the other in the system prompt.
+    pub instructions: Option<String>,
 }
 
 impl TranscriptInput {
+    /// Replace the backend's default instruction with a template's prompt.
+    pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.instructions = Some(instructions.into());
+        self
+    }
+
+    /// The instruction to send: a template's prompt when one was chosen, else the backend's own.
+    ///
+    /// A method rather than each backend checking the field, so a backend that forgets is a backend
+    /// that never compiled — and so every backend's default stays written where that backend is.
+    pub fn system_prompt<'a>(&'a self, default: &'a str) -> &'a str {
+        match self.instructions.as_deref() {
+            Some(custom) if !custom.trim().is_empty() => custom,
+            _ => default,
+        }
+    }
+
     pub fn new(title: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             text: text.into(),
             context: None,
+            instructions: None,
         }
     }
 

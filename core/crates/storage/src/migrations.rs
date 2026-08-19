@@ -547,6 +547,45 @@ const MIGRATIONS: &[&str] = &[
          WHERE meeting_id = new.id AND new.deleted_at IS NULL;
     END;
     "#,
+    // v11 — summary templates, and the template recorded on what it produced.
+    //
+    // One prompt produced every summary, so a sales call and an architecture review got the same
+    // treatment and a user who wanted "decisions and owners only" had no way to ask.
+    //
+    // A table rather than a settings blob, unlike the routing rules: these are referenced by
+    // foreign key from `summaries`, queried individually, and edited one at a time. The opposite
+    // call to the routing rule set, for the opposite reasons.
+    //
+    // `template_id` is nullable because every summary that already exists was produced before
+    // templates did, and deleting a template must not erase the record of what produced a
+    // summary — which is why the reference does not cascade.
+    //
+    // The three built-ins are seeded rows rather than hardcoded constants, so a user can copy one
+    // and edit it. `is_builtin` exists so the repository can refuse to delete the last way of
+    // summarising anything.
+    r#"
+    CREATE TABLE summary_templates (
+        id          TEXT PRIMARY KEY NOT NULL,
+        name        TEXT NOT NULL UNIQUE,
+        prompt      TEXT NOT NULL,
+        is_builtin  INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+
+    ALTER TABLE summaries ADD COLUMN template_id TEXT REFERENCES summary_templates(id);
+
+    INSERT INTO summary_templates (id, name, prompt, is_builtin, created_at, updated_at) VALUES
+        ('00000000-0000-4000-8000-000000000001', 'General meeting',
+         'Summarise this meeting. Lead with what was decided and who owes what. Keep it to what was actually said — omit a section rather than filling it.',
+         1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00'),
+        ('00000000-0000-4000-8000-000000000002', 'Sales call',
+         'Summarise this sales call. Cover: what the customer asked for, objections raised, pricing discussed, and the agreed next step with its owner and date. Do not infer budget or intent that was not stated.',
+         1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00'),
+        ('00000000-0000-4000-8000-000000000003', 'Engineering review',
+         'Summarise this engineering discussion. Cover: the decision reached, the alternatives rejected and why, any risk or unknown that was named, and follow-up work with owners. Prefer the reasoning over the conclusion.',
+         1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00');
+    "#,
 ];
 
 /// Schema version this build understands.

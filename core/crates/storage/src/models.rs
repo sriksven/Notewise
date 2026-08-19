@@ -166,6 +166,8 @@ pub struct Summary {
     pub text: String,
     /// Which model produced this, so a summary can be regenerated or audited later.
     pub model: String,
+    /// Which template's prompt produced this, when one did.
+    pub template_id: Option<Id>,
     pub created_at: DateTime<Utc>,
 }
 

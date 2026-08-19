@@ -214,8 +214,10 @@ impl AiBackend for GeminiBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                "Summarize this meeting transcript. Lead with the outcome. Cover what was \
+                input.system_prompt(
+                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
                  decided and what happens next. Omit small talk.",
+                ),
                 user_turn(transcript_prompt(input)),
                 false,
             ))
