@@ -19,6 +19,9 @@ tracing.workspace = true
 # once per backend, and caching that needs a cell an async closure can initialise. tokio is
 # already in the tree via reqwest, so this adds no compile time.
 tokio = { workspace = true, features = ["sync"] }
+# For the local hour, read at the request boundary so `policy::RequestFacts` stays pure and
+# every selection rule is testable without a clock.
+chrono.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

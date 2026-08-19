@@ -34,6 +34,31 @@ pub enum RedactionPolicy {
     SecretsAndContacts,
 }
 
+impl RedactionPolicy {
+    /// How much this masks. Higher masks more.
+    fn strictness(self) -> u8 {
+        match self {
+            RedactionPolicy::Off => 0,
+            RedactionPolicy::Secrets => 1,
+            RedactionPolicy::SecretsAndContacts => 2,
+        }
+    }
+
+    /// The policy of the two that masks more.
+    ///
+    /// Used to answer "what does this router mask" when several destinations are reachable and
+    /// the question is asked without knowing which one a future call will take. Erring toward
+    /// more masking is the only safe direction: under-reporting would tell a user their contacts
+    /// are masked when a route exists that does not mask them.
+    pub fn stricter(self, other: Self) -> Self {
+        if other.strictness() > self.strictness() {
+            other
+        } else {
+            self
+        }
+    }
+}
+
 /// What kind of thing was masked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {

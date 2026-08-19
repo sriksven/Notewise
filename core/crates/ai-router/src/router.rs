@@ -10,6 +10,7 @@ use crate::backends::{
     AnthropicBackend, GeminiBackend, MockBackend, OllamaBackend, OpenAiCompatBackend, Preset,
 };
 use crate::error::{AiError, Result};
+use crate::policy::{RequestFacts, RouteSpec, TaskKind};
 use crate::redact::{RedactionPolicy, RedactionReport};
 use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
@@ -251,12 +252,54 @@ impl RouterConfig {
     }
 }
 
+/// The local hour, read at the request boundary so [`RequestFacts`] stays pure and testable.
+fn local_hour() -> u8 {
+    use chrono::Timelike;
+    chrono::Local::now().hour() as u8
+}
+
+/// The masking a given destination needs.
+///
+/// A local backend is always `Off`: nothing leaves the machine, so masking would only degrade the
+/// input for no privacy benefit.
+fn policy_for(backend: &dyn AiBackend, configured: RedactionPolicy) -> RedactionPolicy {
+    if backend.is_local() {
+        RedactionPolicy::Off
+    } else {
+        configured
+    }
+}
+
+/// Where a request is going, and what has to be masked before it gets there.
+///
+/// The redaction travels with the choice on purpose. Computing it from the router's default
+/// backend would send an unmasked transcript to a remote route whenever the default is local —
+/// silently, with no error, which is the worst failure this crate could have.
+struct Selected<'a> {
+    backend: &'a dyn AiBackend,
+    name: Option<&'a str>,
+    kind: BackendKind,
+    redaction: RedactionPolicy,
+}
+
+/// One configured route: its conditions, its backend, and that backend's own privacy settings.
+#[derive(Debug)]
+pub struct Route {
+    spec: RouteSpec,
+    backend: Box<dyn AiBackend>,
+    kind: BackendKind,
+    redaction: RedactionPolicy,
+}
+
 /// The interface every feature depends on.
 #[derive(Debug)]
 pub struct Router {
     backend: Box<dyn AiBackend>,
     kind: BackendKind,
     redaction: RedactionPolicy,
+    /// Ordered. First match wins. Empty means every request goes to `backend`, which is exactly
+    /// the behaviour before routing existed.
+    routes: Vec<Route>,
 }
 
 impl Router {
@@ -316,6 +359,7 @@ impl Router {
             backend,
             kind,
             redaction,
+            routes: Vec::new(),
         })
     }
 
@@ -325,6 +369,7 @@ impl Router {
             backend,
             kind: BackendKind::Mock,
             redaction: RedactionPolicy::Secrets,
+            routes: Vec::new(),
         }
     }
 
@@ -334,17 +379,102 @@ impl Router {
         self
     }
 
+    /// Add a route, evaluated after every route already added.
+    pub fn with_route(
+        mut self,
+        spec: RouteSpec,
+        backend: Box<dyn AiBackend>,
+        kind: BackendKind,
+        redaction: RedactionPolicy,
+    ) -> Self {
+        self.routes.push(Route {
+            spec,
+            backend,
+            kind,
+            redaction,
+        });
+        self
+    }
+
+    /// Route names, in evaluation order. For the settings UI and the explain endpoint.
+    pub fn route_names(&self) -> Vec<String> {
+        self.routes.iter().map(|r| r.spec.name.clone()).collect()
+    }
+
+    /// The backend a request with these facts goes to, with the masking that destination needs.
+    ///
+    /// Borrowed rather than cloned: this runs before every model call.
+    fn route_for(&self, facts: &RequestFacts) -> Selected<'_> {
+        // Iterate rather than reusing `policy::select_index`, which takes a `&[RouteSpec]` and
+        // would mean cloning every spec on a path that runs before every model call. The
+        // first-match rule is one line either way; the allocation is not.
+        match self.routes.iter().find(|r| r.spec.matches(facts)) {
+            Some(route) => Selected {
+                backend: route.backend.as_ref(),
+                name: Some(route.spec.name.as_str()),
+                kind: route.kind,
+                redaction: policy_for(route.backend.as_ref(), route.redaction),
+            },
+            None => Selected {
+                backend: self.backend.as_ref(),
+                name: None,
+                kind: self.kind,
+                redaction: policy_for(self.backend.as_ref(), self.redaction),
+            },
+        }
+    }
+
+    /// The masking the default backend needs.
+    ///
+    /// A fallback re-masks from the original input rather than reusing what the route sent: if
+    /// the route was remote and the default is local, the local model should get the real text.
+    fn default_redaction(&self) -> RedactionPolicy {
+        policy_for(self.backend.as_ref(), self.redaction)
+    }
+
+    /// Whether a failed call is worth one retry on the default backend.
+    ///
+    /// One hop, not a cascade. A chain of failing backends turns one slow call into four, and a
+    /// user is better served by an error than by a ninety-second wait. A failure on the default
+    /// is never retried — it *is* the fallback — and a non-retryable error is not retried
+    /// anywhere, since the same input produces the same refusal.
+    fn should_fall_back(&self, selected: &Selected<'_>, err: &AiError) -> bool {
+        let retryable = selected.name.is_some() && err.is_retryable();
+        if retryable {
+            tracing::warn!(
+                route = selected.name.unwrap_or_default(),
+                error = %err,
+                "route failed retryably; falling back to the default backend"
+            );
+        }
+        retryable
+    }
+
+    /// Which route a request would take, and to which provider.
+    ///
+    /// Answers "why did this cost money", which is the question that decides whether a user
+    /// trusts routing or turns it off. Naming the provider matters as much as naming the rule:
+    /// the rule explains the decision, the provider explains the bill.
+    pub fn explain(&self, facts: &RequestFacts) -> String {
+        let selected = self.route_for(facts);
+        match selected.name {
+            Some(name) => format!("route {:?} -> {}", name, selected.kind.label()),
+            None => format!("the default backend -> {}", selected.kind.label()),
+        }
+    }
+
     /// Which backend kind this router was built from.
     pub fn kind(&self) -> BackendKind {
         self.kind
     }
 
-    /// Whether the active backend keeps data on the user's machine.
+    /// Whether **everything** this router might do keeps data on the user's machine.
     ///
-    /// Asks the backend rather than the kind, so a custom endpoint pointing at localhost is
-    /// correctly reported as local.
+    /// Asks each backend rather than its kind, so a custom endpoint pointing at localhost is
+    /// correctly reported as local. False if any route is remote — see the trait impl for why
+    /// that has to be the answer rather than "the default is local".
     pub fn is_local(&self) -> bool {
-        self.backend.is_local()
+        self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
     }
 
     pub fn model_id(&self) -> &str {
@@ -375,16 +505,26 @@ impl Router {
     /// rather than in each caller — the decision depends on which backend is active, which
     /// callers should not have to know.
     pub fn effective_redaction(&self) -> RedactionPolicy {
-        if self.backend.is_local() {
-            RedactionPolicy::Off
-        } else {
-            self.redaction
-        }
+        // The strictest across every reachable destination. This is the whole-router answer, for
+        // a settings label; the per-call answer travels in `Selected::redaction`, because that is
+        // the one that decides what actually gets masked.
+        self.routes.iter().fold(
+            policy_for(self.backend.as_ref(), self.redaction),
+            |strictest, route| {
+                strictest.stricter(policy_for(route.backend.as_ref(), route.redaction))
+            },
+        )
     }
 
     /// Mask a transcript on its way out, logging what was masked but never what it was.
-    fn guard_transcript(&self, input: &TranscriptInput) -> TranscriptInput {
-        let policy = self.effective_redaction();
+    ///
+    /// Takes the policy rather than asking [`Self::effective_redaction`] for it, because with
+    /// routing the answer depends on which destination this particular call selected.
+    fn guard_transcript(
+        &self,
+        input: &TranscriptInput,
+        policy: RedactionPolicy,
+    ) -> TranscriptInput {
         if policy == RedactionPolicy::Off {
             return input.clone();
         }
@@ -414,8 +554,7 @@ impl Router {
         }
     }
 
-    fn guard_chat(&self, request: &ChatRequest) -> ChatRequest {
-        let policy = self.effective_redaction();
+    fn guard_chat(&self, request: &ChatRequest, policy: RedactionPolicy) -> ChatRequest {
         if policy == RedactionPolicy::Off {
             return request.clone();
         }
@@ -464,37 +603,113 @@ impl AiBackend for Router {
         self.backend.model_id()
     }
 
+    /// Whether **everything** this router might do stays on the machine.
+    ///
+    /// False if any route is remote. A policy that might send one summary to Anthropic is not
+    /// local, even if every other call stays put.
     fn is_local(&self) -> bool {
-        self.backend.is_local()
+        self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
     }
 
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
-        self.backend.summarize(&self.guard_transcript(input)).await
+        let facts = RequestFacts::for_transcript(
+            TaskKind::Summarize,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        match selected
+            .backend
+            .summarize(&self.guard_transcript(input, selected.redaction))
+            .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .summarize(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
-        self.backend
-            .extract_decisions(&self.guard_transcript(input))
+        let facts = RequestFacts::for_transcript(
+            TaskKind::ExtractDecisions,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        match selected
+            .backend
+            .extract_decisions(&self.guard_transcript(input, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .extract_decisions(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn extract_action_items(
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
-        self.backend
-            .extract_action_items(&self.guard_transcript(input))
+        let facts = RequestFacts::for_transcript(
+            TaskKind::ExtractActionItems,
+            &input.title,
+            &input.text,
+            input.context.as_deref(),
+            local_hour(),
+        );
+        let selected = self.route_for(&facts);
+        match selected
+            .backend
+            .extract_action_items(&self.guard_transcript(input, selected.redaction))
             .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .extract_action_items(&self.guard_transcript(input, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        self.backend.chat(&self.guard_chat(request)).await
+        let last = request
+            .messages
+            .last()
+            .map(|m| m.content.as_str())
+            .unwrap_or_default();
+        let facts = RequestFacts::for_chat(&request.context, last, local_hour());
+        let selected = self.route_for(&facts);
+        match selected
+            .backend
+            .chat(&self.guard_chat(request, selected.redaction))
+            .await
+        {
+            Err(e) if self.should_fall_back(&selected, &e) => {
+                self.backend
+                    .chat(&self.guard_chat(request, self.default_redaction()))
+                    .await
+            }
+            other => other,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::Predicate;
 
     /// Records exactly what the backend was handed, so a test can assert on what would have
     /// gone over the wire rather than on what the router intended to send.
@@ -783,6 +998,196 @@ mod tests {
             let router = Router::from_config(config.clone()).expect("should build");
             assert!(!router.is_local(), "{:?}", config.backend);
         }
+    }
+
+    /// A backend that reports a distinct model id, so a test can prove which one answered.
+    fn named(id: &'static str) -> Box<dyn AiBackend> {
+        Box::new(MockBackend::new().with_model_id(id))
+    }
+
+    #[tokio::test]
+    async fn a_summary_takes_the_summary_route_and_chat_does_not() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "quality".into(),
+                when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+            },
+            named("quality"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let summary = router
+            .summarize(&TranscriptInput::new("t", "we agreed"))
+            .await
+            .expect("summarizes");
+        assert_eq!(summary.model, "quality");
+
+        let answer = router
+            .chat(&ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .expect("chats");
+        assert_eq!(
+            answer.model, "default",
+            "chat does not match the summary route and must fall through"
+        );
+    }
+
+    /// The privacy-critical case. A local default with a remote route must mask for the *route*
+    /// that is actually being used — computing redaction from the default backend would send an
+    /// unmasked transcript to the remote one, silently and with no error.
+    #[tokio::test]
+    async fn a_remote_route_masks_even_when_the_default_is_local() {
+        let cloud = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(std::sync::Arc::new(SpyBackend::local())))
+            .with_redaction(RedactionPolicy::Off)
+            .with_route(
+                RouteSpec {
+                    name: "cloud".into(),
+                    when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+                },
+                Box::new(cloud.clone()),
+                BackendKind::Anthropic,
+                RedactionPolicy::Secrets,
+            );
+
+        router
+            .summarize(&TranscriptInput::new(
+                "Standup",
+                format!("Sam read out {SECRET} on the call"),
+            ))
+            .await
+            .expect("summarizes");
+
+        let transmitted = cloud.transmitted();
+        assert!(
+            !transmitted.contains(SECRET),
+            "an unmasked key reached a remote route: {transmitted}"
+        );
+        assert!(transmitted.contains("[redacted:api_key]"), "{transmitted}");
+    }
+
+    #[tokio::test]
+    async fn a_retryable_route_failure_retries_on_the_default() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "flaky".into(),
+                when: vec![],
+            },
+            Box::new(MockBackend::failing_retryably()),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let summary = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("should fall back to the default");
+        assert_eq!(summary.model, "default");
+    }
+
+    #[tokio::test]
+    async fn a_non_retryable_route_failure_does_not_fall_back() {
+        // A refusal is the same on any backend. Retrying elsewhere just spends another call.
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "refuses".into(),
+                when: vec![],
+            },
+            Box::new(MockBackend::failing("no")),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let err = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("a non-retryable failure must surface");
+        assert!(matches!(err, AiError::InvalidRequest(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failure_on_the_default_is_not_retried_against_itself() {
+        let router = Router::with_backend(Box::new(MockBackend::failing_retryably()));
+
+        let err = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("the default has nowhere to fall back to");
+        assert!(
+            matches!(err, AiError::Provider { status: 503, .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_policy_with_any_remote_route_is_not_local() {
+        // `is_local` drives a claim the product presents as verifiable. A policy where anything
+        // may leave the machine is not local, even if most calls stay.
+        let router = Router::from_config(RouterConfig::ollama())
+            .expect("ollama router")
+            .with_route(
+                RouteSpec {
+                    name: "cloud".into(),
+                    when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+                },
+                Box::new(std::sync::Arc::new(SpyBackend::cloud())),
+                BackendKind::Anthropic,
+                RedactionPolicy::Secrets,
+            );
+
+        assert!(
+            !router.is_local(),
+            "a route to Anthropic means this router is not local"
+        );
+    }
+
+    #[test]
+    fn redaction_is_the_strictest_across_every_route() {
+        let router = Router::from_config(RouterConfig::anthropic("k"))
+            .expect("anthropic router")
+            .with_redaction(RedactionPolicy::Secrets)
+            .with_route(
+                RouteSpec {
+                    name: "strict".into(),
+                    when: vec![],
+                },
+                Box::new(std::sync::Arc::new(SpyBackend::cloud())),
+                BackendKind::Anthropic,
+                RedactionPolicy::SecretsAndContacts,
+            );
+
+        assert_eq!(
+            router.effective_redaction(),
+            RedactionPolicy::SecretsAndContacts,
+            "asked without a call context, it must not under-report masking"
+        );
+    }
+
+    #[test]
+    fn a_router_has_no_routes_until_given_some() {
+        let router = Router::from_config(RouterConfig::mock()).expect("mock router");
+        assert!(
+            router.route_names().is_empty(),
+            "an empty policy is today's behaviour and must be the default"
+        );
+    }
+
+    #[test]
+    fn routes_are_named_in_the_order_they_were_added() {
+        let router = Router::from_config(RouterConfig::mock())
+            .expect("mock router")
+            .with_route(
+                RouteSpec {
+                    name: "first".into(),
+                    when: vec![],
+                },
+                Box::new(MockBackend::new()),
+                BackendKind::Mock,
+                RedactionPolicy::Off,
+            );
+
+        assert_eq!(router.route_names(), vec!["first".to_string()]);
     }
 
     #[test]

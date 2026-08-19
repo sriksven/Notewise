@@ -20,6 +20,13 @@ pub struct MockBackend {
     /// When set, every method returns this message as an `InvalidRequest` error.
     /// Lets callers exercise their own failure handling without a live provider.
     failure: Option<String>,
+    /// When set, every method fails with this error instead. Separate from `failure` because
+    /// that one is always `InvalidRequest`, which is not retryable — and a caller testing its
+    /// own retry path needs an error that is.
+    retryable_status: Option<u16>,
+    /// Reported model id. `None` means `"mock"`, so `Default` keeps the historical value and
+    /// no existing test changes.
+    model_id: Option<String>,
 }
 
 impl MockBackend {
@@ -31,10 +38,39 @@ impl MockBackend {
     pub fn failing(message: impl Into<String>) -> Self {
         Self {
             failure: Some(message.into()),
+            retryable_status: None,
+            model_id: None,
+        }
+    }
+
+    /// Override the reported model id, so a test with several mocks can prove which answered.
+    pub fn with_model_id(mut self, id: impl Into<String>) -> Self {
+        self.model_id = Some(id.into());
+        self
+    }
+
+    /// A backend that always fails with a retryable provider error.
+    ///
+    /// `failing` produces `InvalidRequest`, which `AiError::is_retryable` correctly reports as
+    /// not worth retrying. A caller exercising a fallback path needs the opposite, and a 5xx
+    /// `Provider` error is the simplest thing that qualifies — a real `Transport` error would
+    /// mean fabricating a `reqwest::Error`, which reqwest gives no way to construct.
+    pub fn failing_retryably() -> Self {
+        Self {
+            failure: None,
+            retryable_status: Some(503),
+            model_id: None,
         }
     }
 
     fn check(&self) -> Result<()> {
+        if let Some(status) = self.retryable_status {
+            return Err(AiError::Provider {
+                backend: "mock",
+                status,
+                message: "the mock backend was asked to fail retryably".into(),
+            });
+        }
         match &self.failure {
             Some(message) => Err(AiError::InvalidRequest(message.clone())),
             None => Ok(()),
@@ -45,7 +81,7 @@ impl MockBackend {
 #[async_trait]
 impl AiBackend for MockBackend {
     fn model_id(&self) -> &str {
-        "mock"
+        self.model_id.as_deref().unwrap_or("mock")
     }
 
     fn is_local(&self) -> bool {
