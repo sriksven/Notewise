@@ -45,7 +45,9 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use notewise_audio_capture::{AudioFormat, AudioSource, CaptureError, MixedSource, Mixer};
+use notewise_audio_capture::{
+    AudioFormat, AudioSource, CaptureError, MixedSource, Mixer, WavWriter,
+};
 use notewise_diarization::{AudioDiarizer, DiarizationError, Diarizer, SingleSpeakerDiarizer};
 use notewise_graph::{EdgeKind, Graph, GraphError, NodeKind, NodeRef};
 use notewise_storage::{Database, Id, MeetingRepository, NewTranscriptSegment, StorageError};
@@ -90,7 +92,9 @@ pub type Result<T> = std::result::Result<T, RecorderError>;
 const RETENTION_SAMPLE_RATE: u32 = AudioFormat::transcription().sample_rate.hz();
 
 /// What a recording produced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+// No longer `Copy`: it carries the retained audio's path, which is owned. Every caller
+// clones or moves it, and none relied on implicit copies.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RecordingStats {
     pub frames_processed: usize,
     pub segments_stored: usize,
@@ -98,6 +102,8 @@ pub struct RecordingStats {
     pub segments_attributed: usize,
     pub speakers_detected: usize,
     pub audio_ms: i64,
+    /// Where the audio was kept and how large the file is, when retention was on.
+    pub retained_audio: Option<(std::path::PathBuf, u64)>,
 }
 
 /// Pipeline tuning.
@@ -151,6 +157,12 @@ pub struct Pipeline {
     audio: Vec<f32>,
     /// Set when retention hit its budget: the buffer was dropped and the acoustic pass is skipped.
     audio_truncated: bool,
+    /// Writes captured audio to disk, when the user asked for it to be kept.
+    ///
+    /// Separate from `audio` above, which is a bounded in-memory buffer serving acoustic speaker
+    /// separation and is dropped when it hits its budget. This one is unbounded and durable, and its
+    /// budget is the retention policy rather than a byte count.
+    retain: Option<WavWriter>,
     config: PipelineConfig,
 }
 
@@ -167,9 +179,27 @@ impl Pipeline {
             engine,
             diarizer: ChannelDiarizer::Transcript(Box::new(SingleSpeakerDiarizer)),
             audio: Vec::new(),
+            retain: None,
             audio_truncated: false,
             config: PipelineConfig::default(),
         }
+    }
+
+    /// Keep the captured audio, writing it to `path` as it arrives.
+    ///
+    /// # Why the *converted* samples are what get written
+    ///
+    /// Each frame is written after `to_transcription_format`, at one known sample rate — the same
+    /// conversion the acoustic retention buffer uses, and for the same reason. A transcript segment
+    /// records millisecond bounds, and seeking to one means turning milliseconds into a sample
+    /// offset. That arithmetic only works if the file is at a rate the reader can assume, which the
+    /// raw device format is not.
+    ///
+    /// The writer is consumed by the run that uses it, so a pipeline reused for a second meeting
+    /// retains nothing rather than appending to the first meeting's file.
+    pub fn retaining_audio(mut self, path: impl AsRef<std::path::Path>) -> Result<Self> {
+        self.retain = Some(WavWriter::create(path, AudioFormat::transcription())?);
+        Ok(self)
     }
 
     pub fn with_diarizer(mut self, diarizer: Box<dyn Diarizer + Send>) -> Self {
@@ -256,6 +286,12 @@ impl Pipeline {
             stats.frames_processed += 1;
             stats.audio_ms += frame.duration_ms();
 
+            // Keep it on disk if the user asked for that. Before the diarizer's own buffer, so a
+            // recording is retained in full even when acoustic separation gives up on its budget.
+            if let Some(writer) = self.retain.as_mut() {
+                writer.write_frame(&frame.to_transcription_format().samples)?;
+            }
+
             // Convert once, here, so no engine has to care what the OS handed us.
             // Retain before feeding, and always from the transcription format, so a span's
             // millisecond bounds map to sample offsets at one known rate.
@@ -292,10 +328,26 @@ impl Pipeline {
             stats.speakers_detected = attributed.1;
         }
 
+        // Patch the WAV header now the length is known. Taken out of `self` so a pipeline reused
+        // for a second meeting cannot append to the first meeting's file.
+        if let Some(writer) = self.retain.take() {
+            let path = writer.path().to_path_buf();
+            match writer.finish() {
+                Ok(bytes) => stats.retained_audio = Some((path, bytes)),
+                Err(e) => {
+                    // The transcript is stored and is what the product is for. A header that was
+                    // never patched leaves a file `audio_capture::repair` can fix, so this is
+                    // reported and not fatal.
+                    tracing::warn!(error = %e, "could not finalise the retained audio file");
+                }
+            }
+        }
+
         tracing::info!(
             frames = stats.frames_processed,
             segments = stats.segments_stored,
             speakers = stats.speakers_detected,
+            retained = stats.retained_audio.is_some(),
             "recording finished"
         );
 
@@ -923,6 +975,103 @@ mod tests {
 
     fn never_stop() -> impl FnMut() -> bool {
         || false
+    }
+
+    /// The claim spec 11 rests on: with retention on, the audio a transcript came from is on disk
+    /// afterwards, readable, and at the rate a millisecond bound can be turned into a sample offset.
+    #[tokio::test]
+    async fn retained_audio_is_written_and_reads_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("meeting.wav");
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()))
+            .retaining_audio(&path)
+            .expect("retain");
+
+        let stats = pipeline
+            .run(&db, id, &mut tone(1000), never_stop())
+            .await
+            .expect("pipeline");
+
+        let (reported_path, bytes) = stats.retained_audio.expect("retention was on");
+        assert_eq!(reported_path, path);
+        assert!(bytes > 44, "more than a bare header: {bytes}");
+        assert_eq!(
+            std::fs::metadata(&path).expect("stat").len(),
+            bytes,
+            "the reported size must be the file's real size"
+        );
+
+        // Readable, and at the transcription rate — which is what makes seeking to a segment's
+        // millisecond bound arithmetic rather than guesswork.
+        let source = FileSource::open_wav(&path).expect("read back");
+        assert_eq!(source.format(), AudioFormat::transcription());
+
+        let mut read = FileSource::open_wav(&path).expect("read back");
+        let mut samples = 0usize;
+        while let Some(frame) = read.next_frame().expect("frame") {
+            samples += frame.samples.len();
+        }
+        let expected = AudioFormat::transcription().sample_rate.hz() as usize; // one second
+        assert!(
+            samples.abs_diff(expected) < expected / 10,
+            "expected about one second of audio, got {samples} samples"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_retention_nothing_is_written_and_stats_say_so() {
+        let db = db();
+        let id = meeting(&db);
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()));
+
+        let stats = pipeline
+            .run(&db, id, &mut tone(500), never_stop())
+            .await
+            .expect("pipeline");
+
+        assert!(
+            stats.retained_audio.is_none(),
+            "retention is off by default and must leave no trace"
+        );
+    }
+
+    /// A pipeline reused for a second meeting must not append to the first meeting's file.
+    #[tokio::test]
+    async fn a_second_run_does_not_append_to_the_first_recording() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("first.wav");
+        let db = db();
+
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()))
+            .retaining_audio(&path)
+            .expect("retain");
+
+        let first = meeting(&db);
+        let stats = pipeline
+            .run(&db, first, &mut tone(500), never_stop())
+            .await
+            .expect("first");
+        let after_first = stats.retained_audio.expect("retained").1;
+
+        let second = meeting(&db);
+        let stats = pipeline
+            .run(&db, second, &mut tone(500), never_stop())
+            .await
+            .expect("second");
+
+        assert!(
+            stats.retained_audio.is_none(),
+            "the writer was consumed by the first run, so a second must retain nothing rather \
+             than growing the first meeting's file"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).expect("stat").len(),
+            after_first,
+            "the first recording must be untouched"
+        );
     }
 
     #[tokio::test]
