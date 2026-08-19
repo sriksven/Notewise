@@ -10,12 +10,12 @@ use crate::backends::{
     AnthropicBackend, GeminiBackend, MockBackend, OllamaBackend, OpenAiCompatBackend, Preset,
 };
 use crate::error::{AiError, Result};
+use crate::policy::{RequestFacts, RouteSpec, TaskKind};
 use crate::redact::{RedactionPolicy, RedactionReport};
 use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, SummaryOutput,
     TranscriptInput,
 };
-use crate::policy::{Predicate, RequestFacts, RouteSpec, TaskKind};
 use crate::AiBackend;
 
 /// Which backend to use.
@@ -278,6 +278,7 @@ fn policy_for(backend: &dyn AiBackend, configured: RedactionPolicy) -> Redaction
 struct Selected<'a> {
     backend: &'a dyn AiBackend,
     name: Option<&'a str>,
+    kind: BackendKind,
     redaction: RedactionPolicy,
 }
 
@@ -411,11 +412,13 @@ impl Router {
             Some(route) => Selected {
                 backend: route.backend.as_ref(),
                 name: Some(route.spec.name.as_str()),
+                kind: route.kind,
                 redaction: policy_for(route.backend.as_ref(), route.redaction),
             },
             None => Selected {
                 backend: self.backend.as_ref(),
                 name: None,
+                kind: self.kind,
                 redaction: policy_for(self.backend.as_ref(), self.redaction),
             },
         }
@@ -447,11 +450,16 @@ impl Router {
         retryable
     }
 
-    /// Which route a request would take. Answers "why did this cost money".
+    /// Which route a request would take, and to which provider.
+    ///
+    /// Answers "why did this cost money", which is the question that decides whether a user
+    /// trusts routing or turns it off. Naming the provider matters as much as naming the rule:
+    /// the rule explains the decision, the provider explains the bill.
     pub fn explain(&self, facts: &RequestFacts) -> String {
-        match self.route_for(facts).name {
-            Some(name) => format!("route {name:?}"),
-            None => "the default backend".to_string(),
+        let selected = self.route_for(facts);
+        match selected.name {
+            Some(name) => format!("route {:?} -> {}", name, selected.kind.label()),
+            None => format!("the default backend -> {}", selected.kind.label()),
         }
     }
 
@@ -507,7 +515,11 @@ impl Router {
     ///
     /// Takes the policy rather than asking [`Self::effective_redaction`] for it, because with
     /// routing the answer depends on which destination this particular call selected.
-    fn guard_transcript(&self, input: &TranscriptInput, policy: RedactionPolicy) -> TranscriptInput {
+    fn guard_transcript(
+        &self,
+        input: &TranscriptInput,
+        policy: RedactionPolicy,
+    ) -> TranscriptInput {
         if policy == RedactionPolicy::Off {
             return input.clone();
         }
@@ -692,6 +704,7 @@ impl AiBackend for Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::Predicate;
 
     /// Records exactly what the backend was handed, so a test can assert on what would have
     /// gone over the wire rather than on what the router intended to send.
@@ -1046,10 +1059,7 @@ mod tests {
             !transmitted.contains(SECRET),
             "an unmasked key reached a remote route: {transmitted}"
         );
-        assert!(
-            transmitted.contains("[redacted:api_key]"),
-            "{transmitted}"
-        );
+        assert!(transmitted.contains("[redacted:api_key]"), "{transmitted}");
     }
 
     #[tokio::test]
@@ -1099,7 +1109,10 @@ mod tests {
             .summarize(&TranscriptInput::new("t", "x"))
             .await
             .expect_err("the default has nowhere to fall back to");
-        assert!(matches!(err, AiError::Provider { status: 503, .. }), "{err:?}");
+        assert!(
+            matches!(err, AiError::Provider { status: 503, .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
