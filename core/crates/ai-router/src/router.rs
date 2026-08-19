@@ -3,6 +3,9 @@
 //! [`Router`] owns a boxed [`AiBackend`] and forwards to it. Callers hold a `Router`, so
 //! switching a user between local and cloud is a config change rather than a code change.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -329,7 +332,19 @@ pub struct Router {
     /// Ordered. First match wins. Empty means every request goes to `backend`, which is exactly
     /// the behaviour before routing existed.
     routes: Vec<Route>,
+    /// Last probe of the default backend, and when it was taken.
+    ///
+    /// Only ever populated when a rule uses `Predicate::LocalBackendHealthy`. Probing needs a
+    /// network round trip, and selection runs before every model call — spending one to answer a
+    /// question no policy asks would be pure waste.
+    health: Arc<tokio::sync::RwLock<Option<(Instant, bool)>>>,
 }
+
+/// How long a probe result is trusted.
+///
+/// Long enough that a busy minute costs one probe, short enough that a daemon coming back up is
+/// noticed while the user is still waiting to see it.
+const HEALTH_TTL: Duration = Duration::from_secs(30);
 
 impl Router {
     /// Build a router from configuration.
@@ -343,6 +358,7 @@ impl Router {
             kind,
             redaction,
             routes: Vec::new(),
+            health: Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
 }
@@ -413,6 +429,7 @@ impl Router {
             kind: BackendKind::Mock,
             redaction: RedactionPolicy::Secrets,
             routes: Vec::new(),
+            health: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -522,6 +539,27 @@ impl Router {
                 redaction: policy_for(self.backend.as_ref(), self.redaction),
             },
         }
+    }
+
+    /// Whether the default backend is reachable, from a probe cached for [`HEALTH_TTL`].
+    ///
+    /// Returns `None` when no rule asks, so the probe is never spent on a policy that would ignore
+    /// it. A probe that errors is a definite "not reachable", which is the answer a rule wants —
+    /// unlike "nobody checked", which must not satisfy anything.
+    async fn local_healthy(&self) -> Option<bool> {
+        if !self.routes.iter().any(|r| r.spec.needs_health()) {
+            return None;
+        }
+
+        if let Some((taken, healthy)) = *self.health.read().await {
+            if taken.elapsed() < HEALTH_TTL {
+                return Some(healthy);
+            }
+        }
+
+        let healthy = self.backend.probe().await.is_ok();
+        *self.health.write().await = Some((Instant::now(), healthy));
+        Some(healthy)
     }
 
     /// The masking the default backend needs.
@@ -719,6 +757,10 @@ impl AiBackend for Router {
             input.context.as_deref(),
             local_hour(),
         );
+        let facts = RequestFacts {
+            local_healthy: self.local_healthy().await,
+            ..facts
+        };
         let selected = self.route_for(&facts);
         match selected
             .backend
@@ -742,6 +784,10 @@ impl AiBackend for Router {
             input.context.as_deref(),
             local_hour(),
         );
+        let facts = RequestFacts {
+            local_healthy: self.local_healthy().await,
+            ..facts
+        };
         let selected = self.route_for(&facts);
         match selected
             .backend
@@ -768,6 +814,10 @@ impl AiBackend for Router {
             input.context.as_deref(),
             local_hour(),
         );
+        let facts = RequestFacts {
+            local_healthy: self.local_healthy().await,
+            ..facts
+        };
         let selected = self.route_for(&facts);
         match selected
             .backend
@@ -789,7 +839,10 @@ impl AiBackend for Router {
             .last()
             .map(|m| m.content.as_str())
             .unwrap_or_default();
-        let facts = RequestFacts::for_chat(&request.context, last, local_hour());
+        let facts = RequestFacts {
+            local_healthy: self.local_healthy().await,
+            ..RequestFacts::for_chat(&request.context, last, local_hour())
+        };
         let selected = self.route_for(&facts);
         match selected
             .backend
@@ -1397,6 +1450,111 @@ mod tests {
                 *kind
             );
         }
+    }
+
+    /// No rule asks about health, so no probe is spent — and the predicate that would have needed
+    /// it is absent, so nothing is skipped either.
+    #[tokio::test]
+    async fn no_probe_is_taken_when_no_rule_asks() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "plain".into(),
+                when: vec![Predicate::Task(vec![TaskKind::Summarize])],
+            },
+            named("routed"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let summary = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("summarizes");
+        assert_eq!(summary.model, "routed");
+        assert!(
+            router.health.read().await.is_none(),
+            "a health check for a policy that never asks is a round trip spent on nothing"
+        );
+    }
+
+    /// The use this predicate exists for: fall out to another backend while the local one is down.
+    #[tokio::test]
+    async fn a_rule_can_fire_only_when_the_default_is_unhealthy() {
+        // `MockBackend::probe` succeeds, so the default is healthy and a `healthy(false)` rule must
+        // not match.
+        let healthy = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "fallback".into(),
+                when: vec![Predicate::LocalBackendHealthy(false)],
+            },
+            named("fallback"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let answer = healthy
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("summarizes");
+        assert_eq!(
+            answer.model, "default",
+            "the local backend is up, so the unhealthy-only route must not fire"
+        );
+        let recorded = healthy.health.read().await.map(|(_, healthy)| healthy);
+        assert_eq!(
+            recorded,
+            Some(true),
+            "the probe was taken and recorded the default as reachable"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_healthy_rule_matches_when_the_default_answers() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "while up".into(),
+                when: vec![Predicate::LocalBackendHealthy(true)],
+            },
+            named("while-up"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        let answer = router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("summarizes");
+        assert_eq!(answer.model, "while-up");
+    }
+
+    /// A cached probe is reused, so a busy minute costs one round trip rather than one per call.
+    #[tokio::test]
+    async fn the_probe_is_cached() {
+        let router = Router::with_backend(named("default")).with_route(
+            RouteSpec {
+                name: "while up".into(),
+                when: vec![Predicate::LocalBackendHealthy(true)],
+            },
+            named("while-up"),
+            BackendKind::Mock,
+            RedactionPolicy::Off,
+        );
+
+        router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("first");
+        let first_taken = router.health.read().await.expect("probed").0;
+
+        router
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("second");
+        assert_eq!(
+            router.health.read().await.expect("probed").0,
+            first_taken,
+            "the second call must reuse the cached probe, not take a new one"
+        );
     }
 
     #[test]

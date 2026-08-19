@@ -219,11 +219,12 @@ no duration; adding one changes a type every backend consumes, to serve a predic
 `InputTokensOver` already answers — a longer meeting is a longer transcript. Two ways to express
 one condition is worse than one.
 
-`LocalBackendHealthy` is **deferred, and named as follow-up work** rather than quietly missing.
-It is the predicate behind R7's "a route whose backend is unreachable is skipped at selection
-time", and it needs a probe result cached with a TTL inside `Router` plus a flag threaded into
-`RequestFacts` at the boundary the way the local hour already is. Without it, an unreachable
-route fails once and falls back — correct, just slower than skipping it would have been.
+`LocalBackendHealthy` is **built**, and is the sixth predicate. It reads a probe of the default
+backend cached for 30 seconds, threaded into `RequestFacts` at the boundary the way the local hour
+already is. Two details decide whether it costs anything: the probe is only taken when some rule
+actually asks (`RouteSpec::needs_health`), and `local_healthy: None` — nobody asked — never
+satisfies the predicate, because firing on an unknown is how a policy sends a transcript to a paid
+provider on a guess.
 
 ### Default policy, offered rather than seeded
 
@@ -302,8 +303,8 @@ Nothing here needs an API key or a GPU, so nothing here is `#[ignore]`d.
    Rules are validated before storage: an unnamed rule, a rule targeting a backend that runs no
    model, a custom-endpoint backend with no URL, a rule below a catch-all, and a rule whose size
    bounds contradict each other are all refused with a message naming the rule.
-5. Fallback-once semantics. Probe-based route skipping is deferred with `LocalBackendHealthy`.
-6. Five predicates, not seven — see Predicates for which two were dropped and why.
+5. Fallback-once semantics, and health-gated routing via `LocalBackendHealthy`.
+6. Six predicates. `TranscriptMinutesOver` is the only one dropped — see Predicates for why.
 
 ## Risks and open questions
 

@@ -23,7 +23,7 @@ use notewise_ai_router::{
     contradictory_route, unreachable_route, BackendKind, Predicate, RequestFacts, RouteSpec,
     StoredRoute, TaskKind,
 };
-use notewise_storage::SettingsRepository;
+use notewise_storage::{MergeMode, SettingsRepository};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ApiResult};
@@ -36,6 +36,66 @@ pub fn routes() -> AxumRouter<Shared> {
         .route("/v1/routing/rules", get(get_rules).put(put_rules))
         .route("/v1/routing/explain", post(explain))
         .route("/v1/routing/default", post(install_default))
+        .route("/v1/workspace/merge", post(merge_workspace))
+}
+
+#[derive(Debug, Deserialize)]
+struct MergeBody {
+    /// The workspace to fold in.
+    from: String,
+    /// Report what would move and change nothing. Defaults to **true**, so a caller that forgets
+    /// the field previews rather than mutates.
+    #[serde(default = "default_true")]
+    dry_run: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize)]
+struct MergeResponse {
+    applied: bool,
+    summary: String,
+    meetings: usize,
+    transcript_segments: usize,
+    notes: usize,
+    people_added: usize,
+    people_merged: usize,
+    skipped_conflicts: usize,
+}
+
+/// Fold another workspace into this one, or report what that would move.
+///
+/// `dry_run` defaults to true. This is the only endpoint here that changes a user's data in a way
+/// nothing else undoes, and a caller that omits a field should get the harmless behaviour — the
+/// opposite default would make a forgotten parameter destructive.
+async fn merge_workspace(
+    State(state): State<Shared>,
+    Json(body): Json<MergeBody>,
+) -> ApiResult<Json<MergeResponse>> {
+    let mode = if body.dry_run {
+        MergeMode::Preview
+    } else {
+        MergeMode::Apply
+    };
+    let source = std::path::PathBuf::from(&body.from);
+
+    let report = {
+        let db = state.db().await;
+        notewise_storage::merge_from(&db, &source, mode)?
+    };
+
+    Ok(Json(MergeResponse {
+        applied: !body.dry_run,
+        summary: report.summary(),
+        meetings: report.meetings,
+        transcript_segments: report.transcript_segments,
+        notes: report.notes,
+        people_added: report.people_added,
+        people_merged: report.people_merged,
+        skipped_conflicts: report.skipped_conflicts,
+    }))
 }
 
 #[derive(Debug, Serialize)]
@@ -199,6 +259,10 @@ async fn explain(
         estimated_tokens: body.estimated_tokens.unwrap_or(0),
         hour_of_day,
         text: text.to_lowercase(),
+        // A dry run does not probe. Spending a health check to answer a hypothetical would make
+        // the explain endpoint the one place that touches the network to describe what *might*
+        // happen, and a rule gated on health simply reports as not matching.
+        local_healthy: None,
     };
 
     Ok(Json(ExplainResponse {
@@ -309,6 +373,45 @@ mod tests {
 
     fn rule(name: &str, when: serde_json::Value) -> serde_json::Value {
         serde_json::json!({ "name": name, "when": when, "backend": "ollama" })
+    }
+
+    /// The safe default matters more than the convenience here: a caller that forgets `dry_run`
+    /// must preview, not mutate.
+    #[tokio::test]
+    async fn merge_defaults_to_a_dry_run() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("other.db");
+        notewise_storage::Database::open(&source).expect("source");
+
+        let (status, body) = call(
+            &app(),
+            send(
+                "POST",
+                "/v1/workspace/merge",
+                serde_json::json!({ "from": source.to_str().unwrap() }),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body["applied"], false,
+            "omitting dry_run must not apply a merge"
+        );
+    }
+
+    #[tokio::test]
+    async fn merging_a_missing_workspace_is_a_client_error() {
+        let (status, body) = call(
+            &app(),
+            send(
+                "POST",
+                "/v1/workspace/merge",
+                serde_json::json!({ "from": "/nope/missing.db", "dry_run": true }),
+            ),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK, "{body}");
     }
 
     #[tokio::test]

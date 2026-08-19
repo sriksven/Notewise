@@ -64,6 +64,12 @@ pub struct RequestFacts {
     /// The text a keyword predicate searches: title and context for a transcript, the last user
     /// message for a chat. Lowercased once here so every predicate does not repeat it.
     pub text: String,
+    /// Whether the default backend answered a probe recently.
+    ///
+    /// `None` means nobody asked — no rule uses [`Predicate::LocalBackendHealthy`], so no probe was
+    /// spent. A rule that needs the answer and finds `None` does not match, because acting on an
+    /// unknown is how a policy sends a transcript to a paid provider on a guess.
+    pub local_healthy: Option<bool>,
 }
 
 impl RequestFacts {
@@ -82,6 +88,7 @@ impl RequestFacts {
                 + estimate_tokens(extra),
             hour_of_day,
             text: format!("{title} {extra}").to_lowercase(),
+            local_healthy: None,
         }
     }
 
@@ -92,6 +99,7 @@ impl RequestFacts {
             estimated_tokens: context_tokens + estimate_tokens(last_user_message),
             hour_of_day,
             text: last_user_message.to_lowercase(),
+            local_healthy: None,
         }
     }
 }
@@ -111,6 +119,11 @@ pub enum Predicate {
     TextContains(Vec<String>),
     /// Inclusive local-hour range. `from > to` wraps past midnight.
     HourBetween(u8, u8),
+    /// Whether the router's default backend is currently reachable.
+    ///
+    /// The predicate that lets a policy say "use the cloud when the local daemon is down".
+    /// Answered from a cached probe, refreshed at most once per TTL — see `Router::local_healthy`.
+    LocalBackendHealthy(bool),
 }
 
 impl Predicate {
@@ -122,6 +135,9 @@ impl Predicate {
             Predicate::TextContains(needles) => needles
                 .iter()
                 .any(|n| facts.text.contains(&n.to_lowercase())),
+            // `None` never matches: no probe was spent because nothing asked, and a rule that
+            // wants the answer must not fire on an assumption.
+            Predicate::LocalBackendHealthy(want) => facts.local_healthy == Some(*want),
             Predicate::HourBetween(from, to) => {
                 let h = facts.hour_of_day;
                 if from <= to {
@@ -149,6 +165,16 @@ pub struct RouteSpec {
 impl RouteSpec {
     pub fn matches(&self, facts: &RequestFacts) -> bool {
         self.when.iter().all(|p| p.holds(facts))
+    }
+
+    /// Whether judging this rule requires knowing if the default backend is up.
+    ///
+    /// Lets the caller skip the probe entirely when no rule asks. A health check on every model
+    /// call, to answer a question no policy poses, is a round trip spent on nothing.
+    pub fn needs_health(&self) -> bool {
+        self.when
+            .iter()
+            .any(|p| matches!(p, Predicate::LocalBackendHealthy(_)))
     }
 }
 
@@ -333,6 +359,7 @@ mod tests {
             estimated_tokens: tokens,
             hour_of_day: hour,
             text: text.to_lowercase(),
+            local_healthy: None,
         }
     }
 
