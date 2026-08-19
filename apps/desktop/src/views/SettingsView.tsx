@@ -18,6 +18,7 @@ import type { Mode, Theme } from "../lib/theme";
 import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { RoutingSettings } from "./RoutingSettings";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
@@ -180,6 +181,8 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
             </div>
           </section>
         )}
+
+        <RoutingSettings />
 
         <SearchIndexSettings />
 

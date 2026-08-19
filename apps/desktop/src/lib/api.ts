@@ -386,6 +386,68 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/**
+ * One condition on a request, in the shape the engine serializes.
+ *
+ * A tagged union rather than a flat object with optional fields, because that is what
+ * `ai_router::Predicate` is — and flattening it here would mean this file deciding which
+ * combinations are legal, which the engine already validates.
+ */
+export type RoutingPredicate =
+  | { task: string[] }
+  | { input_tokens_over: number }
+  | { input_tokens_under: number }
+  | { text_contains: string[] }
+  | { hour_between: [number, number] }
+  | { local_backend_healthy: boolean };
+
+export interface RoutingRule {
+  name: string;
+  /** All must hold. Empty matches every request, which makes any rule below it unreachable. */
+  when: RoutingPredicate[];
+  backend: string;
+  model?: string;
+  endpoint?: string;
+  redaction?: string;
+}
+
+export interface RoutingRules {
+  rules: RoutingRule[];
+  /**
+   * Names the running engine actually built, in evaluation order.
+   *
+   * A stored rule missing from here failed to construct — usually a lost API key — and is not in
+   * force. Showing only `rules` would present it as working.
+   */
+  active: string[];
+}
+
+export interface RoutingExplainQuery {
+  task?: string;
+  estimated_tokens?: number;
+  text?: string;
+  hour_of_day?: number;
+}
+
+export interface RoutingExplain {
+  /** Human-readable: the rule that matched and the provider it reaches. */
+  decision: string;
+  task: string;
+  estimated_tokens: number;
+  hour_of_day: number;
+}
+
+export interface MergeResult {
+  applied: boolean;
+  summary: string;
+  meetings: number;
+  transcript_segments: number;
+  notes: number;
+  people_added: number;
+  people_merged: number;
+  skipped_conflicts: number;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -607,6 +669,47 @@ export const api = {
 
   forgetVoiceprints: () =>
     request<{ erased: number }>("/v1/voiceprints", { method: "DELETE" }),
+
+  /** The routing policy: what is stored, and which rules the running engine actually built. */
+  routingRules: () => request<RoutingRules>("/v1/routing/rules"),
+
+  /** Replace the policy. The engine validates before storing and names any rule that could never run. */
+  saveRoutingRules: (rules: RoutingRule[]) =>
+    request<RoutingRules>("/v1/routing/rules", {
+      method: "PUT",
+      body: JSON.stringify({ rules }),
+    }),
+
+  /**
+   * Where a request like this would go, without sending it.
+   *
+   * The answer to "why did that cost anything", which is the question that decides whether someone
+   * trusts routing or turns it off.
+   */
+  explainRouting: (query: RoutingExplainQuery) =>
+    request<RoutingExplain>("/v1/routing/explain", {
+      method: "POST",
+      body: JSON.stringify(query),
+    }),
+
+  /** Install the starting policy: heavy work to a chosen backend, everything else to the default. */
+  installDefaultRouting: (backend: string, model?: string) =>
+    request<RoutingRules>("/v1/routing/default", {
+      method: "POST",
+      body: JSON.stringify({ quality_backend: backend, quality_model: model }),
+    }),
+
+  /**
+   * Fold another workspace into this one.
+   *
+   * `dryRun` is required rather than optional so a call site cannot omit it and mutate by
+   * accident. The engine also defaults it to true, but a caller should have to say which it meant.
+   */
+  mergeWorkspace: (from: string, dryRun: boolean) =>
+    request<MergeResult>("/v1/workspace/merge", {
+      method: "POST",
+      body: JSON.stringify({ from, dry_run: dryRun }),
+    }),
 
   diarization: () => request<DiarizationStatus>("/v1/diarization"),
 
