@@ -209,7 +209,7 @@ pub async fn gather_hybrid(
     state: &std::sync::Arc<crate::state::AppState>,
     query: &str,
 ) -> ApiResult<Vec<Passage>> {
-    let embedder = state.embedder();
+    let embedder = state.embedder().await;
 
     // Is there anything to fuse? A count is cheap, and asking first avoids spending a model
     // call embedding the question for a workspace that has never been indexed.

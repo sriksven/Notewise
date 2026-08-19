@@ -364,7 +364,7 @@ pub fn touch(state: Arc<crate::state::AppState>) {
         }
 
         let has_index = {
-            let model = state.embedder().model().to_string();
+            let model = state.embedder().await.model().to_string();
             let db = state.db().await;
             notewise_storage::EmbeddingRepository::new(&db)
                 .count(&model)
@@ -381,7 +381,7 @@ pub fn touch(state: Arc<crate::state::AppState>) {
 }
 
 pub async fn start(state: Arc<crate::state::AppState>) -> IndexStatus {
-    let embedder = state.embedder();
+    let embedder = state.embedder().await;
     let model = embedder.model().to_string();
 
     if state.indexing().is_running().await {
@@ -525,7 +525,7 @@ pub(crate) fn router() -> axum::Router<Arc<crate::state::AppState>> {
 async fn index_status(
     axum::extract::State(state): axum::extract::State<Arc<crate::state::AppState>>,
 ) -> axum::Json<IndexStatus> {
-    let embedder = state.embedder();
+    let embedder = state.embedder().await;
     let model = embedder.model().to_string();
 
     if let Some(running) = state.indexing().get().await {

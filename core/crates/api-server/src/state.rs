@@ -43,6 +43,11 @@ pub struct AppState {
     agents: crate::agent::AgentRegistry,
     /// The semantic indexing pass, if one is going.
     indexing: crate::indexing::IndexManager,
+    /// The resolved embedder, and the setting it was built for.
+    ///
+    /// Resolving a tag costs a round trip to the daemon, and the answer only changes when the user
+    /// picks a different embedding model — so it is built once and kept.
+    embedder: tokio::sync::RwLock<Option<CachedEmbedder>>,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -50,6 +55,17 @@ pub struct AppState {
     /// entry is drained when its meeting ends — see
     /// [`crate::speakers::apply_pending_timeline`].
     speaker_timelines: crate::speakers::PendingTimelines,
+}
+
+/// A resolved embedder together with the setting value it was built from.
+///
+/// Keyed by the *requested* name, because that is what a settings change alters — comparing
+/// resolved tags would miss a switch from `bge-m3` to `nomic-embed-text` if both resolved to the
+/// same tag, which cannot happen, and would still be the wrong thing to compare.
+#[derive(Debug)]
+struct CachedEmbedder {
+    requested: String,
+    embedder: Arc<notewise_ai_router::Embedder>,
 }
 
 impl AppState {
@@ -67,6 +83,7 @@ impl AppState {
             downloads: DownloadManager::new(),
             agents: crate::agent::AgentRegistry::new(),
             indexing: crate::indexing::IndexManager::new(),
+            embedder: tokio::sync::RwLock::new(None),
             speaker_timelines: Default::default(),
         }
     }
@@ -109,13 +126,31 @@ impl AppState {
         &self.indexing
     }
 
-    /// The local embedder.
+    /// The local embedder, with its tag already resolved.
     ///
     /// Always Ollama, never the configured chat backend — see [`notewise_ai_router::Embedder`]
     /// for why embedding a whole workspace must not follow the chat provider. Which model is
     /// a stored setting so a user who prefers `bge-m3` keeps it across restarts.
-    pub fn embedder(&self) -> notewise_ai_router::Embedder {
-        notewise_ai_router::Embedder::new(self.embedding_model())
+    ///
+    /// Cached, and rebuilt only when the configured model changes. `Embedder::connect` asks the
+    /// daemon which tags it holds, and retrieval builds an embedder for every search — paying a
+    /// round trip per query to answer a question whose answer does not change would be a poor
+    /// trade for exactness.
+    pub async fn embedder(&self) -> Arc<notewise_ai_router::Embedder> {
+        let requested = self.embedding_model();
+
+        if let Some(cached) = self.embedder.read().await.as_ref() {
+            if cached.requested == requested {
+                return Arc::clone(&cached.embedder);
+            }
+        }
+
+        let embedder = Arc::new(notewise_ai_router::Embedder::connect(&requested).await);
+        *self.embedder.write().await = Some(CachedEmbedder {
+            requested,
+            embedder: Arc::clone(&embedder),
+        });
+        embedder
     }
 
     /// The configured embedding model, or the default.

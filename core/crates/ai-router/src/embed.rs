@@ -103,6 +103,11 @@ pub struct Embedder {
 }
 
 impl Embedder {
+    /// An embedder that has **not** resolved its tag.
+    ///
+    /// [`Self::model`] returns the name as given, which is only exact if the caller already passed
+    /// a tag. Prefer [`Self::connect`] anywhere the label will be stored: two embedders
+    /// disagreeing about what to call the same model is what mixes vectors.
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             endpoint: DEFAULT_ENDPOINT.to_string(),
@@ -110,6 +115,35 @@ impl Embedder {
             resolved: Arc::new(tokio::sync::OnceCell::new()),
             http: reqwest::Client::new(),
         }
+    }
+
+    /// An embedder whose tag is resolved **now**, so its label is exact and never changes.
+    ///
+    /// # Why this is async, and why that is the whole point
+    ///
+    /// Resolution has to ask the daemon. Doing it lazily — on the first embed — means
+    /// [`Self::model`] returns one thing before a request and another after, and since that value
+    /// both labels stored vectors *and* decides which chunks are still pending, the label written
+    /// would stop matching the label queried and every run would re-embed the workspace.
+    ///
+    /// Resolving at construction removes the flip-flop instead of working around it: the value is
+    /// fixed before anything can read it, and stays fixed for this embedder's lifetime.
+    ///
+    /// If the daemon cannot be reached the requested name is kept, which is stable too — and
+    /// embedding needs the daemon anyway, so nothing gets stored under the wrong label.
+    pub async fn connect(model: impl Into<String>) -> Self {
+        Self::new(model).resolved().await
+    }
+
+    /// Resolve this embedder's tag against the daemon it points at.
+    ///
+    /// A method rather than a second constructor so it composes with [`Self::with_endpoint`] —
+    /// `Embedder::new(m).with_endpoint(url).resolved().await` resolves against *that* daemon.
+    /// A `connect(model, endpoint)` constructor would have had to grow a parameter for every
+    /// builder method that already exists.
+    pub async fn resolved(self) -> Self {
+        let model = self.wire_model().await;
+        Self { model, ..self }
     }
 
     /// Point at a daemon somewhere other than localhost.
@@ -123,11 +157,13 @@ impl Embedder {
 
     /// Which model produces these vectors. Recorded with every one that is stored.
     ///
-    /// Deliberately the name that was *asked for*, not the tag it resolves to on this machine.
-    /// This value is also what decides which chunks are already embedded, and it is read
-    /// before anything has spoken to the daemon — so a value that changed once resolution
-    /// happened would make every indexing run believe the whole workspace was pending, and
-    /// re-embed it forever.
+    /// Exact when the embedder came from [`Self::connect`], which is what production uses; the
+    /// name as given when it came from [`Self::new`].
+    ///
+    /// Either way it is **fixed for this embedder's lifetime**. That is the property that matters:
+    /// this value labels stored vectors *and* decides which chunks are still pending, so a value
+    /// that changed part-way through a process would make every run believe the whole workspace
+    /// was pending and re-embed it forever.
     pub fn model(&self) -> &str {
         &self.model
     }
@@ -362,18 +398,56 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 mod tests {
     use super::*;
 
+    /// Guards an infinite re-index. The label must not change part-way through a process: it
+    /// names stored vectors *and* decides which chunks are pending, so a value that moved would
+    /// make the label written stop matching the label queried, forever.
+    ///
+    /// The property is *stability*, not which name is used — which is why resolving eagerly in
+    /// `connect` is safe and resolving lazily was not.
     #[test]
-    fn the_recorded_model_is_the_name_that_was_asked_for() {
-        // Guards an infinite re-index. This value labels stored vectors *and* decides which
-        // chunks are still pending, and it is read before anything has spoken to the daemon.
-        // If it became the resolved tag once a request had happened, the label written would
-        // stop matching the label queried and every run would re-embed the whole workspace.
+    fn an_unresolved_embedder_keeps_the_name_it_was_given() {
         let embedder = Embedder::new("nomic-embed-text");
         assert_eq!(embedder.model(), "nomic-embed-text");
         assert_eq!(
             embedder.clone().model(),
             "nomic-embed-text",
             "a clone must agree, since indexing builds a fresh embedder per pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn connecting_to_an_unreachable_daemon_keeps_the_requested_name_and_stays_fixed() {
+        // Port 1 is reserved and nothing listens there, so resolution cannot succeed. The endpoint
+        // has to be set *before* resolving, which is why `resolved` is a method and not a second
+        // constructor.
+        let embedder = Embedder::new("nomic-embed-text")
+            .with_endpoint("http://127.0.0.1:1/api/embed")
+            .resolved()
+            .await;
+
+        let first = embedder.model().to_string();
+        assert_eq!(first, "nomic-embed-text");
+        assert_eq!(
+            embedder.model(),
+            first,
+            "the label must not move once anything could have read it"
+        );
+    }
+
+    /// The residual this change closes: a stored label that names a family rather than the tag
+    /// that actually produced the vectors, so pulling a second tag of the same family could mix
+    /// incomparable vectors under one name.
+    ///
+    /// `#[ignore]`d because it needs a running Ollama with an embedding model pulled. Run with
+    /// `cargo test -p notewise-ai-router -- --ignored connect_resolves`.
+    #[tokio::test]
+    #[ignore = "needs a running Ollama daemon with an embedding model pulled"]
+    async fn connect_resolves_the_label_to_an_exact_tag() {
+        let embedder = Embedder::connect("nomic-embed-text").await;
+        assert!(
+            embedder.model().contains(':'),
+            "expected an exact tag, got {:?}",
+            embedder.model()
         );
     }
 
