@@ -22,6 +22,7 @@ export type Route =
   | { name: "tickets" }
   | { name: "trash" }
   | { name: "agent" }
+  | { name: "jobs" }
   | { name: "connectors" }
   | { name: "help"; section?: HelpSection }
   | { name: "settings"; section?: string }
@@ -66,6 +67,8 @@ export function parseRoute(hash: string): Route {
       return { name: "trash" };
     case "agent":
       return { name: "agent" };
+    case "jobs":
+      return { name: "jobs" };
     case "connectors":
       return { name: "connectors" };
     case "help":
@@ -88,6 +91,8 @@ export function routeToHash(route: Route): string {
   switch (route.name) {
     case "home":
       return "#/";
+    case "jobs":
+      return "#/jobs";
     case "meeting":
       return `#/meetings/${route.id}/${route.tab}`;
     case "notes":

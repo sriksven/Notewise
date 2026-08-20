@@ -14,6 +14,7 @@ import { WorkspaceHeader, type Tab } from "./components/WorkspaceHeader";
 import { OPEN_SETTINGS_EVENT } from "./onboarding/SetupGate";
 import { AboutView } from "./views/AboutView";
 import { AgentView } from "./views/AgentView";
+import { JobsView } from "./views/JobsView";
 import { ChatView } from "./views/ChatView";
 import { ConnectorsView } from "./views/ConnectorsView";
 import { HelpView } from "./views/HelpView";
@@ -719,6 +720,7 @@ export default function App() {
             {route.name === "tickets" && <TicketsView />}
             {route.name === "trash" && <TrashView />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
+            {route.name === "jobs" && <JobsView />}
             {route.name === "connectors" && <ConnectorsView />}
             {route.name === "help" && (
               <HelpView section={route.section ?? "docs"} onNavigate={navigate} />

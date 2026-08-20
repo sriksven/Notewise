@@ -19,6 +19,7 @@ import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { RoutingSettings } from "./RoutingSettings";
+import { MemorySettings } from "./MemorySettings";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
@@ -183,6 +184,8 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
         )}
 
         <RoutingSettings />
+
+        <MemorySettings />
 
         <SearchIndexSettings />
 

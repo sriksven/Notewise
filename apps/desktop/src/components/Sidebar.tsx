@@ -1,4 +1,5 @@
 import {
+  CalendarClock,
   Bot,
   CircleHelp,
   FileText,
@@ -69,6 +70,7 @@ const GROUPS: Array<{ label: string | null; items: Item[] }> = [
       { route: { name: "tasks" }, label: "My Tasks", Icon: SquareCheckBig },
       { route: { name: "tickets" }, label: "Tickets", Icon: TicketCheck },
       { route: { name: "agent" }, label: "Agent", Icon: Bot },
+      { route: { name: "jobs" }, label: "Automation", Icon: CalendarClock },
       { route: { name: "connectors" }, label: "Connectors", Icon: Plug },
     ],
   },

@@ -478,6 +478,43 @@ export interface SummaryTemplate {
   is_builtin: boolean;
 }
 
+export interface Job {
+  id: string;
+  name: string;
+  prompt: string;
+  cron: string;
+  timezone: string;
+  enabled: boolean;
+  catch_up: boolean;
+  timeout_secs: number;
+  /** When it would next fire, or null if the expression no longer parses. */
+  next_fire: string | null;
+}
+
+export interface JobRun {
+  id: string;
+  /** `running` | `completed` | `failed` | `timed_out` | `skipped`. */
+  status: string;
+  trace: { n: number; action: string; reason: string | null; observation: string }[] | null;
+  note_id: string | null;
+  /** External tool calls proposed. Always zero until there is a way to confirm one. */
+  proposals: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface MemoryItem {
+  id: string;
+  scope: string;
+  project_id: string | null;
+  text: string;
+  /** `manual` or `extracted`, so what you wrote is distinguishable from what was inferred. */
+  origin: string;
+  source_meeting_id: string | null;
+  created_at: string;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -525,6 +562,61 @@ export const api = {
       `/v1/meetings/${id}/speakers/rename`,
       { method: "POST", body: JSON.stringify({ from, to }) },
     ),
+
+  // ---------------------------------------------------------------- jobs
+
+  jobs: () => request<Job[]>("/v1/jobs"),
+
+  createJob: (job: {
+    name: string;
+    prompt: string;
+    cron: string;
+    timezone?: string;
+    catch_up?: boolean;
+  }) => request<Job>("/v1/jobs", { method: "POST", body: JSON.stringify(job) }),
+
+  deleteJob: (id: string) => request<{ deleted: boolean }>(`/v1/jobs/${id}`, { method: "DELETE" }),
+
+  setJobEnabled: (id: string, enabled: boolean) =>
+    request<Job>(`/v1/jobs/${id}/enabled`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  jobRuns: (id: string) => request<JobRun[]>(`/v1/jobs/${id}/runs`),
+
+  /** Run a job now, regardless of its schedule. Refused while one is already going. */
+  runJob: (id: string) =>
+    request<{ run_id: string }>(`/v1/jobs/${id}/run`, { method: "POST", body: "{}" }),
+
+  /** Check a cron expression before saving it, rather than discovering it is wrong at 3am. */
+  previewSchedule: (cron: string, timezone?: string) =>
+    request<{ timezone: string; next: string[] }>("/v1/jobs/preview", {
+      method: "POST",
+      body: JSON.stringify({ cron, timezone }),
+    }),
+
+  // ---------------------------------------------------------------- memories
+
+  memories: () =>
+    request<{
+      memories: MemoryItem[];
+      global_used: number;
+      global_cap: number;
+      project_cap: number;
+    }>("/v1/memories"),
+
+  createMemory: (text: string, scope?: "global" | "project", project_id?: string) =>
+    request<MemoryItem>("/v1/memories", {
+      method: "POST",
+      body: JSON.stringify({ text, scope, project_id }),
+    }),
+
+  updateMemory: (id: string, text: string) =>
+    request<MemoryItem>(`/v1/memories/${id}`, { method: "PUT", body: JSON.stringify({ text }) }),
+
+  deleteMemory: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/memories/${id}`, { method: "DELETE" }),
 
   /** Whether a meeting has retained audio to play, and how large it is. */
   audioInfo: (meetingId: string) =>
