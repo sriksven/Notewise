@@ -6,6 +6,7 @@
 mod calendar;
 mod comms;
 mod connector_account;
+mod document;
 mod edge;
 mod embedding;
 mod external_item;
@@ -27,6 +28,7 @@ pub use calendar::{
 };
 pub use comms::{EmailDraftRepository, NewEmailDraft, NewNotification, NotificationRepository};
 pub use connector_account::{AccountStatus, ConnectorAccount, ConnectorAccountRepository};
+pub use document::{Divergence, Document, DocumentRepository, NewDocument, Resolution};
 pub use edge::{EdgeRecord, EdgeRepository, NewEdge};
 pub use embedding::{Embedding, EmbeddingRepository, IndexedEntity, NewEmbedding};
 pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};

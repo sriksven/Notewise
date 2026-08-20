@@ -737,6 +737,58 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX idx_calendar_attendees_person ON calendar_attendees(person_id);
     "#,
+    // v16 — documents read from a watched folder, and vault files edited behind our back.
+    //
+    // `body` is stored rather than re-read on demand, so a search result or a grounded answer
+    // survives the file being moved or the drive being unmounted. `updated_at` is what makes
+    // `indexing.rs` notice it needs re-embedding — the same rule that crate already applies.
+    //
+    // `missing_at` is not in the design's DDL, and the design's own prose requires it: a file that
+    // disappears is marked missing rather than deleted, so existing embeddings stay and an answer
+    // citing a document does not become uncitable because somebody reorganised a folder. A column
+    // was the only way to have both.
+    r#"
+    CREATE TABLE documents (
+        id               TEXT PRIMARY KEY NOT NULL,
+        external_item_id TEXT NOT NULL UNIQUE
+                         REFERENCES external_items(id) ON DELETE CASCADE,
+        path             TEXT NOT NULL,
+        title            TEXT NOT NULL,
+        body             TEXT NOT NULL,
+        byte_size        INTEGER NOT NULL,
+        modified_at      TEXT NOT NULL,
+        missing_at       TEXT,
+        updated_at       TEXT NOT NULL
+    );
+
+    CREATE INDEX idx_documents_missing ON documents(missing_at) WHERE missing_at IS NOT NULL;
+
+    CREATE TABLE vault_divergences (
+        id               TEXT PRIMARY KEY NOT NULL,
+        external_item_id TEXT NOT NULL UNIQUE
+                         REFERENCES external_items(id) ON DELETE CASCADE,
+        path             TEXT NOT NULL,
+        detected_at      TEXT NOT NULL,
+        resolved_at      TEXT,
+        resolution       TEXT
+    );
+
+    CREATE INDEX idx_divergences_open ON vault_divergences(resolved_at)
+        WHERE resolved_at IS NULL;
+
+    CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        VALUES ('document', new.id, new.title, new.body);
+    END;
+    CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+        DELETE FROM search_index WHERE entity_kind = 'document' AND entity_id = old.id;
+        INSERT INTO search_index(entity_kind, entity_id, title, body)
+        SELECT 'document', new.id, new.title, new.body WHERE new.missing_at IS NULL;
+    END;
+    CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+        DELETE FROM search_index WHERE entity_kind = 'document' AND entity_id = old.id;
+    END;
+    "#,
 ];
 
 /// Schema version this build understands.

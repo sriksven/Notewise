@@ -13,7 +13,7 @@ use crate::credentials::{CredentialStore, Secret};
 use crate::error::Result;
 use crate::registry::ConnectorRegistry;
 use crate::sinks::{VaultSink, WebhookSink};
-use crate::sources::{GoogleBridge, MicrosoftGraph};
+use crate::sources::{Documents, GoogleBridge, MicrosoftGraph};
 
 /// Credential key holding a webhook's HMAC signing secret.
 pub const SIGNING_KEY: &str = "signing_secret";
@@ -89,6 +89,8 @@ pub fn build_registry(
                     ),
                 }
             }
+            // No credential: a folder on this machine needs a path, which is the account label.
+            Documents::ID => registry.register_source(Arc::new(Documents::new(target))),
             other => tracing::warn!(connector = %other, "no such connector in this build"),
         }
     }
@@ -214,6 +216,21 @@ mod tests {
 
         let registry = build_registry(&db, &MemoryStore::new()).unwrap();
         assert!(registry.source_ids().is_empty());
+    }
+
+    #[test]
+    fn a_connected_folder_becomes_a_source_with_no_credential() {
+        let db = Database::open_in_memory().unwrap();
+        ConnectorAccountRepository::new(&db)
+            .connect("documents", Some("/tmp/vault"), &[])
+            .unwrap();
+
+        let registry = build_registry(&db, &MemoryStore::new()).unwrap();
+        assert_eq!(
+            registry.source_ids(),
+            vec!["documents".to_string()],
+            "a folder on this machine has nothing to authenticate with"
+        );
     }
 
     #[test]

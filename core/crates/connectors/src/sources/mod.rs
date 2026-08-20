@@ -4,8 +4,13 @@
 //! writes implements both and is registered in both maps; `google` is exactly that, pulling a
 //! calendar and creating mail drafts through one deployment.
 
+mod documents;
 mod google;
 mod microsoft;
+
+pub use documents::{
+    is_readable, scan, title_of, Documents, Found, EXTENSIONS, MAX_BYTES, MAX_DEPTH, MAX_FILES,
+};
 
 pub use microsoft::{
     authorize_url, base64url, parse_graph_time, GraphAttendee, GraphEvent, GraphTime,
