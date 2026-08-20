@@ -42,6 +42,7 @@ mod clarify;
 mod email;
 mod embed;
 mod error;
+mod memory;
 mod policy;
 mod redact;
 mod router;
@@ -60,6 +61,10 @@ pub use email::{
 };
 pub use embed::{cosine, is_embedding_model, Embedder, DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL};
 pub use error::{AiError, Result};
+pub use memory::{
+    as_prompt_section, reflect, reflect_batch, Candidate, Verdict, MAX_LEN as MEMORY_MAX_LEN,
+    MIN_LEN as MEMORY_MIN_LEN,
+};
 pub use policy::{
     contradictory_route, estimate_tokens, select_index, unreachable_route, Predicate, RequestFacts,
     RouteSpec, TaskKind,

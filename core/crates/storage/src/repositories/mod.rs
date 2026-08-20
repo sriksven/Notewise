@@ -10,6 +10,7 @@ mod embedding;
 mod external_item;
 mod job;
 mod meeting;
+mod memory;
 mod note;
 mod outbox;
 mod person;
@@ -27,6 +28,9 @@ pub use embedding::{Embedding, EmbeddingRepository, IndexedEntity, NewEmbedding}
 pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};
 pub use job::{Job, JobRepository, JobRun, NewJob, RunStatus, RUNS_KEPT};
 pub use meeting::{MeetingRepository, NewMeeting, NewTranscriptSegment};
+pub use memory::{
+    Memory, MemoryOrigin, MemoryRepository, MemoryScope, NewMemory, GLOBAL_CAP, PROJECT_CAP,
+};
 pub use note::{NewNote, NoteRepository};
 pub use outbox::{NewOutboxEntry, OutboxRecord, OutboxRepository, OutboxStatus};
 pub use person::{NewPerson, PersonRepository, VoicePrint};

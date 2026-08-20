@@ -56,6 +56,129 @@ pub fn routes() -> AxumRouter<Shared> {
         .route("/v1/audio/sweep", post(sweep_audio))
         .route("/v1/meetings/:id/audio", get(serve_audio))
         .route("/v1/meetings/:id/audio/info", get(audio_info))
+        .route("/v1/memories", get(list_memories).post(create_memory))
+        .route(
+            "/v1/memories/:id",
+            axum::routing::put(update_memory).delete(delete_memory),
+        )
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBody {
+    id: String,
+    scope: String,
+    project_id: Option<String>,
+    text: String,
+    /// `manual` or `extracted`. Shown so a user can tell what they wrote from what was inferred.
+    origin: String,
+    /// The meeting it came from, while that meeting exists. Answers "why does it think that".
+    source_meeting_id: Option<String>,
+    created_at: String,
+}
+
+impl From<notewise_storage::Memory> for MemoryBody {
+    fn from(m: notewise_storage::Memory) -> Self {
+        Self {
+            id: m.id.to_string(),
+            scope: m.scope.as_str().to_string(),
+            project_id: m.project_id.map(|i| i.to_string()),
+            text: m.text,
+            origin: m.origin.as_str().to_string(),
+            source_meeting_id: m.source_meeting_id.map(|i| i.to_string()),
+            created_at: m.created_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct MemoriesResponse {
+    memories: Vec<MemoryBody>,
+    /// How many of each scope are used, and the ceiling. A cap the user cannot see is a cap that
+    /// arrives as a surprise refusal.
+    global_used: usize,
+    global_cap: usize,
+    project_cap: usize,
+}
+
+async fn list_memories(State(state): State<Shared>) -> ApiResult<Json<MemoriesResponse>> {
+    let db = state.db().await;
+    let repo = notewise_storage::MemoryRepository::new(&db);
+    let memories = repo.list()?;
+    let global_used = repo.count(notewise_storage::MemoryScope::Global, None)?;
+
+    Ok(Json(MemoriesResponse {
+        memories: memories.into_iter().map(Into::into).collect(),
+        global_used,
+        global_cap: notewise_storage::GLOBAL_CAP,
+        project_cap: notewise_storage::PROJECT_CAP,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryInput {
+    text: String,
+    /// `global` or `project`. Defaults to global, which is what a user typing a preference means.
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+/// Add a memory by hand.
+///
+/// Works whether or not automatic extraction is on. Typing something you want remembered is a
+/// deliberate act and should not require enabling a background pass.
+async fn create_memory(
+    State(state): State<Shared>,
+    Json(body): Json<MemoryInput>,
+) -> ApiResult<Json<MemoryBody>> {
+    let scope = match body.scope.as_deref().unwrap_or("global") {
+        "global" => notewise_storage::MemoryScope::Global,
+        "project" => notewise_storage::MemoryScope::Project,
+        other => {
+            return Err(ApiError::BadRequest(format!(
+                "'{other}' is not a scope; expected global or project"
+            )))
+        }
+    };
+
+    let project_id = match body.project_id.as_deref() {
+        Some(raw) => Some(parse_storage_id(raw)?),
+        None => None,
+    };
+
+    let db = state.db().await;
+    let made =
+        notewise_storage::MemoryRepository::new(&db).create(notewise_storage::NewMemory {
+            scope,
+            project_id,
+            text: body.text,
+            origin: notewise_storage::MemoryOrigin::Manual,
+            source_meeting_id: None,
+        })?;
+
+    Ok(Json(made.into()))
+}
+
+async fn update_memory(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<MemoryInput>,
+) -> ApiResult<Json<MemoryBody>> {
+    let id = parse_storage_id(&id)?;
+    let db = state.db().await;
+    let updated = notewise_storage::MemoryRepository::new(&db).update(id, &body.text)?;
+    Ok(Json(updated.into()))
+}
+
+async fn delete_memory(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id = parse_storage_id(&id)?;
+    let db = state.db().await;
+    notewise_storage::MemoryRepository::new(&db).delete(id)?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
 #[derive(Debug, Serialize)]
@@ -1044,6 +1167,118 @@ mod tests {
 
         let (status, _) = call(&app, get(&format!("/v1/meetings/{id}/audio"))).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_remembered_on_a_fresh_engine() {
+        let (status, body) = call(&app(), get("/v1/memories")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["memories"].as_array().expect("array").len(), 0);
+        assert_eq!(body["global_used"], 0);
+        assert_eq!(body["global_cap"], notewise_storage::GLOBAL_CAP);
+    }
+
+    #[tokio::test]
+    async fn a_memory_can_be_added_edited_and_deleted() {
+        let app = app();
+        let (status, made) = call(
+            &app,
+            send(
+                "POST",
+                "/v1/memories",
+                serde_json::json!({"text": "I prefer short summaries"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{made}");
+        assert_eq!(made["scope"], "global");
+        assert_eq!(
+            made["origin"], "manual",
+            "a user has to be able to tell what they wrote from what was inferred"
+        );
+
+        let id = made["id"].as_str().expect("id");
+        let (status, edited) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/memories/{id}"),
+                serde_json::json!({"text": "I prefer very short summaries"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(edited["text"], "I prefer very short summaries");
+        assert_eq!(edited["id"], made["id"], "editing must not replace it");
+
+        let (status, _) = call(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/memories/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, after) = call(&app, get("/v1/memories")).await;
+        assert_eq!(after["memories"].as_array().expect("array").len(), 0);
+    }
+
+    /// The cap arrives as a refusal with a sentence, because a cap the user cannot see is a cap
+    /// that arrives as a surprise.
+    #[tokio::test]
+    async fn the_global_cap_is_refused_at_the_boundary() {
+        let app = app();
+        for n in 0..notewise_storage::GLOBAL_CAP {
+            let (status, _) = call(
+                &app,
+                send(
+                    "POST",
+                    "/v1/memories",
+                    serde_json::json!({"text": format!("I have preference number {n}")}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        let (status, body) = call(
+            &app,
+            send(
+                "POST",
+                "/v1/memories",
+                serde_json::json!({"text": "I have one preference too many"}),
+            ),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK);
+        assert!(body.to_string().contains("Delete one"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_scope_is_refused() {
+        let (status, _) = call(
+            &app(),
+            send(
+                "POST",
+                "/v1/memories",
+                serde_json::json!({"text": "I prefer short summaries", "scope": "everywhere"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn an_empty_memory_is_refused() {
+        let (status, _) = call(
+            &app(),
+            send("POST", "/v1/memories", serde_json::json!({"text": "   "})),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK);
     }
 
     #[tokio::test]

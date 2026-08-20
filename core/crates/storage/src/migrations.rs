@@ -647,6 +647,42 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX idx_job_runs_job ON job_runs(job_id, started_at DESC);
     "#,
+    // v14 — things worth remembering about the person using this.
+    //
+    // Off by default and capped hard. Memory is injected into prompts that already carry retrieved
+    // material and a transcript, so an unbounded list crowds out the actual content and makes every
+    // answer slightly worse in a way nobody can attribute. Reaching a cap forces a choice, and
+    // forcing the choice is the point.
+    //
+    // The CHECK makes the scope/project pairing a schema invariant rather than a convention: a
+    // global memory carrying a project id, or a project memory without one, cannot exist.
+    //
+    // `source_meeting_id` is ON DELETE SET NULL. A memory outlives the meeting that produced it, but
+    // while that meeting exists the provenance is what lets the UI answer "why does it think that".
+    //
+    // Extraction state is its own table rather than a column on `meetings`, for the reason v8
+    // applies to embeddings: it is derived state about a background pass, and `meetings` should not
+    // grow a column every time something processes it.
+    r#"
+    CREATE TABLE memories (
+        id                TEXT PRIMARY KEY NOT NULL,
+        scope             TEXT NOT NULL,
+        project_id        TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        text              TEXT NOT NULL,
+        origin            TEXT NOT NULL,
+        source_meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL,
+        CHECK ((scope = 'project') = (project_id IS NOT NULL))
+    );
+
+    CREATE INDEX idx_memories_scope ON memories(scope, project_id);
+
+    CREATE TABLE memory_extraction_state (
+        meeting_id   TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+        processed_at TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// Schema version this build understands.
