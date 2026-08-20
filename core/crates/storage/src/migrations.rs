@@ -683,6 +683,60 @@ const MIGRATIONS: &[&str] = &[
         processed_at TEXT NOT NULL
     );
     "#,
+    // v15 — calendar events, and who was invited to them.
+    //
+    // `external_items` records that a thing exists elsewhere and has nowhere to put a start time —
+    // nor should it, being the shared identity table for every connector. So the detail lives here,
+    // foreign-keyed to that row and cascading from it: the detail is *owned* by the external record,
+    // while the association between a meeting and its event is a `SyncedTo` edge. Getting that
+    // backwards means a migration the first time an event links to something other than a meeting.
+    //
+    // `is_all_day` exists because an all-day event has no meaningful instant. Storing one without
+    // the flag makes a timezone bug indistinguishable from a real 00:00 meeting.
+    //
+    // `recurrence_key` is the provider's own identifier — `recurringEventId` on Google,
+    // `seriesMasterId` on Graph — normalised to one nullable column. It is what replaces the title
+    // matching that `series.rs` documents as a stopgap.
+    //
+    // `person_id` is ON DELETE SET NULL: an attendee is a fact about an event and survives the
+    // person record being merged away. Speaker merging already exists and repoints these.
+    r#"
+    CREATE TABLE calendar_events (
+        id                TEXT PRIMARY KEY NOT NULL,
+        external_item_id  TEXT NOT NULL UNIQUE
+                          REFERENCES external_items(id) ON DELETE CASCADE,
+        calendar_id       TEXT NOT NULL,
+        provider_source   TEXT NOT NULL,
+        title             TEXT,
+        starts_at         TEXT NOT NULL,
+        ends_at           TEXT NOT NULL,
+        is_all_day        INTEGER NOT NULL DEFAULT 0,
+        location          TEXT,
+        join_url          TEXT,
+        organizer_email   TEXT,
+        recurrence_key    TEXT,
+        status            TEXT NOT NULL,
+        updated_at        TEXT NOT NULL
+    );
+
+    CREATE INDEX idx_calendar_events_starts ON calendar_events(starts_at);
+    CREATE INDEX idx_calendar_events_recurrence ON calendar_events(recurrence_key)
+        WHERE recurrence_key IS NOT NULL;
+
+    CREATE TABLE calendar_attendees (
+        id                 TEXT PRIMARY KEY NOT NULL,
+        calendar_event_id  TEXT NOT NULL
+                           REFERENCES calendar_events(id) ON DELETE CASCADE,
+        email              TEXT NOT NULL,
+        display_name       TEXT,
+        response_status    TEXT,
+        is_organizer       INTEGER NOT NULL DEFAULT 0,
+        person_id          TEXT REFERENCES people(id) ON DELETE SET NULL,
+        UNIQUE(calendar_event_id, email)
+    );
+
+    CREATE INDEX idx_calendar_attendees_person ON calendar_attendees(person_id);
+    "#,
 ];
 
 /// Schema version this build understands.
