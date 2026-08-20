@@ -789,6 +789,64 @@ const MIGRATIONS: &[&str] = &[
         DELETE FROM search_index WHERE entity_kind = 'document' AND entity_id = old.id;
     END;
     "#,
+    // v17 — external tool servers, which tools of theirs are allowed, and every call proposed.
+    //
+    // `enabled` defaults to 0 and a tool is allowed only by having a row: default-deny, mirroring
+    // how `mcp-server` treats its own write scope. A server added and forgotten grants nothing.
+    //
+    // Credentials — environment variables for a stdio server, headers for an HTTP one — are not
+    // here. They go to the keychain, and these rows hold only the reference, the same split routing
+    // rules make for provider keys.
+    //
+    // `tool_executions` is persisted where agent runs are not, for the reason Spec 7 persists job
+    // runs: this is unwitnessed or irreversible work in somebody else's system, and "what did it do
+    // in Linear last Tuesday" has to be answerable. `action_item_id` is ON DELETE SET NULL because
+    // deleting an action item must not erase the record that something was done on its behalf.
+    //
+    // `job_allowed_tools` belongs here rather than in v13, next to the tables it references: it
+    // governs which of these tools a scheduled run may *propose*, and a scheduled run may never
+    // execute one.
+    r#"
+    CREATE TABLE mcp_servers (
+        id          TEXT PRIMARY KEY NOT NULL,
+        name        TEXT NOT NULL UNIQUE,
+        transport   TEXT NOT NULL,
+        command     TEXT,
+        args        TEXT,
+        url         TEXT,
+        enabled     INTEGER NOT NULL DEFAULT 0,
+        auto_start  INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE mcp_enabled_tools (
+        server_id  TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+        tool_name  TEXT NOT NULL,
+        PRIMARY KEY (server_id, tool_name)
+    );
+
+    CREATE TABLE tool_executions (
+        id             TEXT PRIMARY KEY NOT NULL,
+        action_item_id TEXT REFERENCES action_items(id) ON DELETE SET NULL,
+        server_id      TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+        tool_name      TEXT NOT NULL,
+        arguments      TEXT NOT NULL,
+        status         TEXT NOT NULL,
+        result         TEXT,
+        proposed_at    TEXT NOT NULL,
+        executed_at    TEXT
+    );
+
+    CREATE INDEX idx_tool_executions_status ON tool_executions(status, proposed_at DESC);
+    CREATE INDEX idx_tool_executions_action ON tool_executions(action_item_id);
+
+    CREATE TABLE job_allowed_tools (
+        job_id     TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        server_id  TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+        tool_name  TEXT NOT NULL,
+        PRIMARY KEY (job_id, server_id, tool_name)
+    );
+    "#,
 ];
 
 /// Schema version this build understands.

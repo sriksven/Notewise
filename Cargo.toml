@@ -12,6 +12,7 @@ members = [
     "core/crates/sync-client",
     "core/crates/api-server",
     "core/crates/mcp-server",
+    "core/crates/mcp-client",
     "core/crates/recorder",
     "core/crates/eval",
     "core/crates/ffi",
@@ -43,6 +44,7 @@ notewise-transcription = { path = "core/crates/transcription", version = "0.1.0"
 notewise-diarization = { path = "core/crates/diarization", version = "0.1.0" }
 notewise-api-server = { path = "core/crates/api-server", version = "0.1.0" }
 notewise-mcp-server = { path = "core/crates/mcp-server", version = "0.1.0" }
+notewise-mcp-client = { path = "core/crates/mcp-client", version = "0.1.0" }
 notewise-recorder = { path = "core/crates/recorder", version = "0.1.0" }
 notewise-connectors = { path = "core/crates/connectors", version = "0.1.0" }
 
