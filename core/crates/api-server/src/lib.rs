@@ -38,6 +38,7 @@ pub mod downloads;
 mod error;
 pub mod indexing;
 pub mod jobs;
+pub mod join;
 pub mod recording;
 mod retrieval;
 mod routes;

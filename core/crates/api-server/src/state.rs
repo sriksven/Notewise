@@ -48,6 +48,12 @@ pub struct AppState {
     /// Resolving a tag costs a round trip to the daemon, and the answer only changes when the user
     /// picks a different embedding model — so it is built once and kept.
     embedder: tokio::sync::RwLock<Option<CachedEmbedder>>,
+    /// Fused join signals, so dedup and the grace period survive between requests.
+    ///
+    /// In memory: this is a few keys describing meetings happening right now, and a restart
+    /// forgetting them costs at most one duplicate notification. Persisting it would mean a table
+    /// and a retention policy for state whose whole lifetime is an afternoon.
+    join: tokio::sync::Mutex<crate::join::JoinTracker>,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -84,6 +90,7 @@ impl AppState {
             agents: crate::agent::AgentRegistry::new(),
             indexing: crate::indexing::IndexManager::new(),
             embedder: tokio::sync::RwLock::new(None),
+            join: tokio::sync::Mutex::new(crate::join::JoinTracker::default()),
             speaker_timelines: Default::default(),
         }
     }
@@ -165,6 +172,14 @@ impl AppState {
                     .flatten()
             })
             .unwrap_or_else(|| notewise_ai_router::DEFAULT_EMBEDDING_MODEL.to_string())
+    }
+
+    /// The join-signal tracker.
+    ///
+    /// A guard rather than a clone: the tracker's whole job is remembering what it has already
+    /// mentioned, and two callers holding separate copies would each notify once.
+    pub async fn join_tracker(&self) -> tokio::sync::MutexGuard<'_, crate::join::JoinTracker> {
+        self.join.lock().await
     }
 
     /// Speaker events accumulated for meetings still in progress.

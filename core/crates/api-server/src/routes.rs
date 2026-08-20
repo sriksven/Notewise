@@ -109,6 +109,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/backend", post(switch_backend))
         .merge(crate::routing::routes())
         .merge(crate::jobs::routes())
+        .merge(crate::join::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",
