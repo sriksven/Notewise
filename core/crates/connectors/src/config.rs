@@ -13,7 +13,7 @@ use crate::credentials::{CredentialStore, Secret};
 use crate::error::Result;
 use crate::registry::ConnectorRegistry;
 use crate::sinks::{VaultSink, WebhookSink};
-use crate::sources::GoogleBridge;
+use crate::sources::{GoogleBridge, MicrosoftGraph};
 
 /// Credential key holding a webhook's HMAC signing secret.
 pub const SIGNING_KEY: &str = "signing_secret";
@@ -72,6 +72,20 @@ pub fn build_registry(
                     None => tracing::warn!(
                         "the Google bridge has no shared key; skipping it rather than calling a \
                          deployment that would refuse every request"
+                    ),
+                }
+            }
+            MicrosoftGraph::ID => {
+                match credentials.get(MicrosoftGraph::ID, crate::sources::REFRESH_TOKEN_KEY)? {
+                    Some(token) => {
+                        // The account label holds the client id: a tenant that requires its own app
+                        // registration supplies one, and otherwise it is the build's own.
+                        let graph = Arc::new(MicrosoftGraph::new(target, token));
+                        registry.register_source(graph);
+                    }
+                    None => tracing::warn!(
+                        "Microsoft has no refresh token; skipping it rather than registering a \
+                         connector that cannot authenticate"
                     ),
                 }
             }
@@ -170,6 +184,36 @@ mod tests {
             registry.source_ids().is_empty(),
             "calling a deployment with no key would have every request refused"
         );
+    }
+
+    #[test]
+    fn a_connected_microsoft_account_with_a_token_becomes_a_source() {
+        let db = Database::open_in_memory().unwrap();
+        ConnectorAccountRepository::new(&db)
+            .connect("microsoft", Some("client-id"), &[])
+            .unwrap();
+        let store = MemoryStore::new();
+        store
+            .set(
+                "microsoft",
+                crate::sources::REFRESH_TOKEN_KEY,
+                &Secret::new("refresh"),
+            )
+            .unwrap();
+
+        let registry = build_registry(&db, &store).unwrap();
+        assert_eq!(registry.source_ids(), vec!["microsoft".to_string()]);
+    }
+
+    #[test]
+    fn a_microsoft_account_without_a_token_is_not_registered() {
+        let db = Database::open_in_memory().unwrap();
+        ConnectorAccountRepository::new(&db)
+            .connect("microsoft", Some("client-id"), &[])
+            .unwrap();
+
+        let registry = build_registry(&db, &MemoryStore::new()).unwrap();
+        assert!(registry.source_ids().is_empty());
     }
 
     #[test]
