@@ -28,6 +28,7 @@ mod importer;
 mod keychain;
 mod registry;
 mod sinks;
+mod sources;
 mod types;
 
 pub use config::{build_registry, generate_signing_secret, SIGNING_KEY};
@@ -39,4 +40,9 @@ pub use importer::{ImportReport, Importer};
 pub use keychain::KeychainStore;
 pub use registry::ConnectorRegistry;
 pub use sinks::{MockConnector, VaultSink, WebhookSink, SIGNATURE_HEADER};
+pub use sources::{
+    join_url_of, to_inbound, Calendar, DraftRef, GoogleBridge, ScriptEvent, ScriptGuest,
+    DEPLOYMENT_URL_KEY, REQUIRED_VERSION, SHARED_KEY as GOOGLE_SHARED_KEY, WINDOW_BACK_DAYS,
+    WINDOW_FORWARD_DAYS,
+};
 pub use types::{Cursor, ExternalRef, Health, Inbound, Operation, Outbound, PullBatch};

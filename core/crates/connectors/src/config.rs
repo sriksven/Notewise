@@ -13,6 +13,7 @@ use crate::credentials::{CredentialStore, Secret};
 use crate::error::Result;
 use crate::registry::ConnectorRegistry;
 use crate::sinks::{VaultSink, WebhookSink};
+use crate::sources::GoogleBridge;
 
 /// Credential key holding a webhook's HMAC signing secret.
 pub const SIGNING_KEY: &str = "signing_secret";
@@ -58,6 +59,22 @@ pub fn build_registry(
                 Some(secret) => registry.register_sink(Arc::new(WebhookSink::new(target, secret))),
                 None => tracing::warn!("webhook has no signing secret; skipping"),
             },
+            // Both a source and a sink: one deployment reads the calendar and creates drafts, so
+            // the same handle is registered in both maps. The direction-split traits are what make
+            // that expressible rather than needing two connector ids.
+            GoogleBridge::ID => {
+                let key = credentials.get(GoogleBridge::ID, crate::sources::SHARED_KEY)?;
+                match key {
+                    Some(key) => {
+                        let bridge = Arc::new(GoogleBridge::new(target, key));
+                        registry.register_source(bridge);
+                    }
+                    None => tracing::warn!(
+                        "the Google bridge has no shared key; skipping it rather than calling a \
+                         deployment that would refuse every request"
+                    ),
+                }
+            }
             other => tracing::warn!(connector = %other, "no such connector in this build"),
         }
     }
@@ -115,6 +132,43 @@ mod tests {
         assert!(
             registry.sink_ids().is_empty(),
             "signing with an empty key would produce a signature anyone could forge"
+        );
+    }
+
+    #[test]
+    fn a_connected_google_bridge_with_its_key_becomes_a_source() {
+        let db = Database::open_in_memory().unwrap();
+        ConnectorAccountRepository::new(&db)
+            .connect(
+                "google",
+                Some("https://script.google.com/macros/s/x/exec"),
+                &[],
+            )
+            .unwrap();
+        let store = MemoryStore::new();
+        store
+            .set("google", crate::sources::SHARED_KEY, &Secret::new("k"))
+            .unwrap();
+
+        let registry = build_registry(&db, &store).unwrap();
+        assert_eq!(registry.source_ids(), vec!["google".to_string()]);
+    }
+
+    #[test]
+    fn a_google_bridge_without_its_key_is_not_registered() {
+        let db = Database::open_in_memory().unwrap();
+        ConnectorAccountRepository::new(&db)
+            .connect(
+                "google",
+                Some("https://script.google.com/macros/s/x/exec"),
+                &[],
+            )
+            .unwrap();
+
+        let registry = build_registry(&db, &MemoryStore::new()).unwrap();
+        assert!(
+            registry.source_ids().is_empty(),
+            "calling a deployment with no key would have every request refused"
         );
     }
 
