@@ -31,6 +31,7 @@
 
 mod agent;
 mod ask;
+pub mod calendar;
 mod connectors;
 pub mod diarization;
 pub mod downloads;

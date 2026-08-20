@@ -3,6 +3,7 @@
 //! Each repository borrows the [`Database`](crate::Database) rather than owning it, so a
 //! caller can hold several at once without cloning connections.
 
+mod calendar;
 mod comms;
 mod connector_account;
 mod edge;
@@ -21,6 +22,9 @@ mod summary;
 mod ticket;
 mod workspace;
 
+pub use calendar::{
+    Attendee, CalendarEvent, CalendarRepository, EventStatus, NewAttendee, NewCalendarEvent,
+};
 pub use comms::{EmailDraftRepository, NewEmailDraft, NewNotification, NotificationRepository};
 pub use connector_account::{AccountStatus, ConnectorAccount, ConnectorAccountRepository};
 pub use edge::{EdgeRecord, EdgeRepository, NewEdge};

@@ -237,6 +237,29 @@ impl<'a> MeetingRepository<'a> {
         Ok(())
     }
 
+    /// Meetings whose recorded span overlaps a window.
+    ///
+    /// Overlap rather than containment: a recording started late and running long still belongs to
+    /// the event it began in, which is the whole point of matching by time.
+    ///
+    /// An unfinished meeting is treated as running until now, so a live recording can be matched to
+    /// the event it is happening inside.
+    pub fn overlapping(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Meeting>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, title, source, started_at, ended_at, series_id, created_at,
+                    updated_at, deleted_at
+             FROM meetings WHERE deleted_at IS NULL
+                AND started_at < ?2
+                AND COALESCE(ended_at, ?3) > ?1
+              ORDER BY started_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![from, to, Utc::now()], map_meeting)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
     /// Append a transcript segment.
     pub fn add_segment(&self, new: NewTranscriptSegment) -> Result<TranscriptSegment> {
         let segment = TranscriptSegment {
