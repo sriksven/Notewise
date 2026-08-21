@@ -22,6 +22,16 @@ pub enum ConnectorError {
     #[error("permanent failure: {0}")]
     Permanent(String),
 
+    /// The destination has been changed by somebody else, and writing would destroy their work.
+    ///
+    /// Typed rather than a formatted `Permanent`, because something has to *act* on it: the
+    /// dispatcher records the divergence so the user can be asked what to do. A message in a
+    /// dead-letter row is not something a screen can offer three choices about.
+    ///
+    /// Not retryable. Retrying cannot resolve a conflict — only a person can.
+    #[error("{path} was changed outside Notewise; not overwriting it")]
+    Diverged { path: String },
+
     #[error("connector is not configured: {0}")]
     NotConfigured(String),
 

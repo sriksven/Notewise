@@ -51,6 +51,7 @@ mod setup;
 pub mod speakers;
 mod state;
 mod tools;
+pub mod vault;
 mod voiceprints;
 mod workspace;
 

@@ -21,7 +21,12 @@ use crate::types::{ExternalRef, Health, Outbound};
 /// A hash rather than a modification time: a sync client touching a file, or a restore from a
 /// backup, moves the timestamp without changing a word. What matters is whether the bytes are
 /// still the bytes we wrote.
-fn fingerprint(content: &str) -> String {
+/// The version marker the vault stores for a file it wrote.
+///
+/// Public because resolving a divergence needs it: "overwrite this file" is implemented by adopting
+/// the file's *current* content as the baseline and letting the sink write over it normally, which
+/// keeps the filesystem work and the fingerprint bookkeeping in one place instead of two.
+pub fn fingerprint(content: &str) -> String {
     hex::encode(Sha256::digest(content.as_bytes()))
 }
 
@@ -145,14 +150,29 @@ impl SinkConnector for VaultSink {
         {
             match tokio::fs::read_to_string(&path).await {
                 Ok(current) if fingerprint(&current) != previous => {
-                    return Err(ConnectorError::Permanent(format!(
-                        "{} has been edited since Notewise last wrote it — not overwriting. \
-                         Move or delete the file to let it be rewritten.",
-                        path.display()
-                    )));
+                    return Err(ConnectorError::Diverged {
+                        path: path.display().to_string(),
+                    });
                 }
-                // Unchanged since our last write, or gone. Both are ours to write.
-                Ok(_) | Err(_) => {}
+                // Unchanged since our last write. Ours to rewrite.
+                Ok(_) => {}
+                // Gone. We wrote it and something removed it, so writing it again restores the
+                // mirror — there is no edit to lose.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // Readable in principle and not readable now: a permission change, a stalled sync
+                // client holding a lock, a decryption failure. Treated as diverged, because the
+                // failure mode of guessing "unchanged" is overwriting somebody's edit — the exact
+                // bug `b6e9c3f` fixed. Refusing costs one paused mirror; guessing costs their work.
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "cannot read a vault file to check it; treating it as edited"
+                    );
+                    return Err(ConnectorError::Diverged {
+                        path: path.display().to_string(),
+                    });
+                }
             }
         }
 
@@ -240,7 +260,7 @@ mod tests {
 
         let refused = sink.push(&second).await;
         assert!(
-            matches!(refused, Err(ConnectorError::Permanent(_))),
+            matches!(refused, Err(ConnectorError::Diverged { .. })),
             "an edited file must not be overwritten, got {refused:?}"
         );
         assert_eq!(

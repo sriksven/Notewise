@@ -7,6 +7,7 @@ import {
   type AvailableConnector,
   type FailedDelivery,
 } from "../lib/api";
+import { VaultDivergences } from "./VaultDivergences";
 
 /**
  * Where meetings can be sent.
@@ -81,6 +82,12 @@ export function ConnectorsView() {
               ))}
             </div>
           )}
+
+          {/* Above failed deliveries, because a divergence is not a failure — it is the vault
+              keeping its promise, and it needs an answer rather than a retry. */}
+          <div className="mt-7">
+            <VaultDivergences />
+          </div>
 
           {failures.length > 0 && (
             <section className="mt-7">

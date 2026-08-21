@@ -118,6 +118,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::assistant::routes())
         // Extraction settings and a manual run. The memory CRUD lives in `routing`.
         .merge(crate::memory::routes())
+        // Mirroring a meeting to a vault, and settling a file the user edited.
+        .merge(crate::vault::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",

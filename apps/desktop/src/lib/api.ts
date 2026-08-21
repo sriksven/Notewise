@@ -779,8 +779,58 @@ export interface DetectionStatus {
   blind_spot: string;
 }
 
+/**
+ * A vault file edited outside Notewise.
+ *
+ * The mirror pauses for it rather than overwriting, which is the promise the vault makes — and until
+ * now the pause was silent.
+ */
+export interface VaultDivergence {
+  id: string;
+  path: string;
+  /** What a person recognises. */
+  file_name: string;
+  detected_at: string;
+  meeting_id: string | null;
+  meeting_title: string | null;
+  /** What you wrote, so the choice is made looking at it. Null when the file cannot be read. */
+  current_content: string | null;
+}
+
+export interface MirrorResult {
+  outcome: "written" | "diverged" | "unavailable";
+  path: string | null;
+  divergence_id: string | null;
+  message: string;
+}
+
+export interface DivergenceResolved {
+  resolution: "kept" | "overwritten" | "copied_to_note";
+  /** Where your writing went, when it was kept as a note. */
+  note_id: string | null;
+  mirror: MirrorResult | null;
+  message: string;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
+
+  /** Write a meeting to the connected vault folder. Refuses rather than overwriting an edit. */
+  mirrorMeeting: (meetingId: string) =>
+    request<MirrorResult>(`/v1/meetings/${meetingId}/mirror`, { method: "POST" }),
+
+  /** Vault files edited outside Notewise and not yet answered. */
+  vaultDivergences: () => request<VaultDivergence[]>("/v1/vault/divergences"),
+
+  /**
+   * Settle one. `copy_to_note` is the only choice that loses nothing — it saves what you wrote as a
+   * note before refreshing the file.
+   */
+  resolveDivergence: (id: string, resolution: "keep" | "overwrite" | "copy_to_note") =>
+    request<DivergenceResolved>(`/v1/vault/divergences/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    }),
 
   /** What meeting detection can see. */
   detectionStatus: () => request<DetectionStatus>("/v1/signals/join"),

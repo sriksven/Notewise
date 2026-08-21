@@ -5,10 +5,13 @@
 //! `external_item` joined to its source node by a `synced_to` edge — so a pushed action item
 //! is reachable from `find_related` rather than through a connector-specific lookup.
 
+use std::sync::Arc;
+
 use chrono::{Duration, Utc};
 use notewise_graph::{EdgeKind, Graph, NodeKind, NodeRef};
 use notewise_storage::{
-    Database, ExternalItemRepository, NewExternalItem, OutboxRecord, OutboxRepository,
+    Database, DocumentRepository, ExternalItemRepository, NewExternalItem, OutboxRecord,
+    OutboxRepository,
 };
 
 use crate::error::{ConnectorError, Result};
@@ -64,13 +67,22 @@ pub struct DispatchReport {
 
 #[derive(Debug)]
 pub struct Dispatcher {
-    registry: ConnectorRegistry,
+    registry: Arc<ConnectorRegistry>,
     policy: RetryPolicy,
 }
 
 impl Dispatcher {
-    pub fn new(registry: ConnectorRegistry, policy: RetryPolicy) -> Self {
-        Self { registry, policy }
+    /// Build a dispatcher.
+    ///
+    /// Takes anything that becomes an `Arc<ConnectorRegistry>`, so a caller holding the registry by
+    /// value passes it and a caller holding a shared one — `api-server` keeps its behind an `Arc` so
+    /// connecting a folder in one window does not block a request in another — passes that. Without
+    /// this the shared caller would have to rebuild the registry per request.
+    pub fn new(registry: impl Into<Arc<ConnectorRegistry>>, policy: RetryPolicy) -> Self {
+        Self {
+            registry: registry.into(),
+            policy,
+        }
     }
 
     pub fn registry(&self) -> &ConnectorRegistry {
@@ -114,15 +126,44 @@ impl Dispatcher {
 
         let node = NodeRef::new(node_kind, row.node_id);
 
+        let existing = self.existing_item(db, node, &row.connector_id)?;
+        let existing_item_id = existing.as_ref().map(|(id, _)| *id);
+
         let outbound = Outbound {
             node_kind: row.node_kind.clone(),
             node_id: row.node_id,
             operation,
             payload: serde_json::from_str(&row.payload)?,
-            existing: self.existing_ref(db, node, &row.connector_id)?,
+            existing: existing.map(|(_, reference)| reference),
         };
 
-        let reference = sink.push(&outbound).await?;
+        let reference = match sink.push(&outbound).await {
+            Ok(reference) => reference,
+            // Recorded here rather than in the sink. A sink writes to somewhere; deciding what a
+            // refusal *means* for the workspace is the dispatcher's job, and it is the layer that
+            // has the database — the vault connector holds a folder path and nothing else.
+            Err(ConnectorError::Diverged { path }) => {
+                if let Some(item_id) = existing_item_id {
+                    // Best effort: failing to record it must not turn a paused mirror into a lost
+                    // outbox row. The dead-letter below happens either way.
+                    if let Err(e) = DocumentRepository::new(db).record_divergence(item_id, &path) {
+                        tracing::warn!(error = %e, "could not record a vault divergence");
+                    }
+                } else {
+                    // A first push cannot diverge — there was nothing to compare against — so this
+                    // is a sink returning `Diverged` without an existing reference, which is a bug
+                    // in the sink rather than a state the user can resolve.
+                    tracing::warn!(
+                        connector = %row.connector_id,
+                        %path,
+                        "a divergence with no external item to attach it to"
+                    );
+                }
+                return Err(ConnectorError::Diverged { path });
+            }
+            Err(other) => return Err(other),
+        };
+
         self.record_success(db, row, node_kind, &reference)?;
         OutboxRepository::new(db).complete(row.id)?;
         Ok(())
@@ -134,12 +175,16 @@ impl Dispatcher {
     /// a second ticket — the exact failure the outbox exists to prevent, reintroduced one
     /// layer up. The outbox stops a *retry* from duplicating; this stops a genuinely new
     /// enqueue for an already-synced node from duplicating.
-    fn existing_ref(
+    /// The row id as well as the reference.
+    ///
+    /// The id is what a divergence is recorded against, and the reference is what the sink needs.
+    /// Returned together because finding them is one graph walk.
+    fn existing_item(
         &self,
         db: &Database,
         node: NodeRef,
         connector_id: &str,
-    ) -> Result<Option<ExternalRef>> {
+    ) -> Result<Option<(notewise_storage::Id, ExternalRef)>> {
         let items = ExternalItemRepository::new(db);
 
         for related in Graph::new(db).related(node, 1)? {
@@ -149,12 +194,15 @@ impl Dispatcher {
 
             let item = items.get(related.node.id)?;
             if item.connector_id == connector_id {
-                return Ok(Some(ExternalRef {
-                    external_id: item.external_id,
-                    url: item.url,
-                    title: item.title,
-                    remote_version: item.remote_version,
-                }));
+                return Ok(Some((
+                    item.id,
+                    ExternalRef {
+                        external_id: item.external_id,
+                        url: item.url,
+                        title: item.title,
+                        remote_version: item.remote_version,
+                    },
+                )));
             }
         }
 
@@ -239,6 +287,46 @@ mod tests {
             })
             .unwrap()
             .id
+    }
+
+    /// The vault needs a real payload — it writes `markdown` under `title` — and its own id.
+    fn queued_vault(db: &Database, node_id: Id, key: &str) -> Id {
+        OutboxRepository::new(db)
+            .enqueue(NewOutboxEntry {
+                connector_id: crate::sinks::VaultSink::ID.into(),
+                node_kind: "meeting".into(),
+                node_id,
+                operation: Operation::Create.as_str().into(),
+                payload: serde_json::json!({
+                    "title": "Platform standup",
+                    "markdown": "# Platform standup\n\nwhat Notewise wrote"
+                })
+                .to_string(),
+                idempotency_key: key.into(),
+            })
+            .unwrap()
+            .id
+    }
+
+    /// The one file the vault wrote, and the row recording it.
+    fn written_item(db: &Database, dir: &std::path::Path) -> notewise_storage::ExternalItem {
+        let name = std::fs::read_dir(dir)
+            .expect("reads the vault")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .next()
+            .expect("the vault has a file in it");
+
+        ExternalItemRepository::new(db)
+            .find(crate::sinks::VaultSink::ID, &name)
+            .expect("reads")
+            .expect("the write was recorded")
+    }
+
+    fn vault_dispatcher(dir: &std::path::Path) -> Dispatcher {
+        let mut registry = ConnectorRegistry::new();
+        registry.register_sink(std::sync::Arc::new(crate::sinks::VaultSink::new(dir)));
+        Dispatcher::new(registry, RetryPolicy::default())
     }
 
     #[tokio::test]
@@ -413,5 +501,130 @@ mod tests {
         let report = dispatcher.drain(&db).await.unwrap();
 
         assert_eq!(report.failed, 1);
+    }
+    /// The gap this closes: the sink refused correctly and nothing recorded it, so the user got
+    /// silence and a mirror that quietly stopped updating.
+    #[tokio::test]
+    async fn a_refused_write_becomes_a_divergence_the_user_can_be_asked_about() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_in_memory().expect("db");
+        let dispatcher = vault_dispatcher(dir.path());
+        let node_id = Id::new();
+
+        // First push: writes the file and records what it wrote.
+        queued_vault(&db, node_id, "first");
+        let first = dispatcher.drain(&db).await.expect("first drain");
+        assert_eq!(first.delivered, 1, "{first:?}");
+
+        let item = written_item(&db, dir.path());
+        let path = dir.path().join(&item.external_id);
+
+        // Somebody edits it in Obsidian.
+        std::fs::write(&path, "# Platform standup\n\nmy own notes about this call").expect("edits");
+
+        // Second push: refused, and now recorded.
+        queued_vault(&db, node_id, "second");
+        let second = dispatcher.drain(&db).await.expect("second drain");
+        assert_eq!(second.delivered, 0, "{second:?}");
+
+        let open = DocumentRepository::new(&db)
+            .open_divergences()
+            .expect("reads");
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!(open[0].external_item_id, item.id);
+        assert!(
+            open[0].path.ends_with(&item.external_id),
+            "{:?}",
+            open[0].path
+        );
+        assert!(open[0].resolved_at.is_none());
+
+        // And the user's edit is still there, which is the whole point.
+        let on_disk = std::fs::read_to_string(&path).expect("reads");
+        assert!(on_disk.contains("my own notes"), "{on_disk}");
+    }
+
+    /// A mirror that refuses on every attempt must not produce a row per attempt.
+    #[tokio::test]
+    async fn repeated_refusals_produce_one_divergence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_in_memory().expect("db");
+        let dispatcher = vault_dispatcher(dir.path());
+        let node_id = Id::new();
+
+        queued_vault(&db, node_id, "first");
+        dispatcher.drain(&db).await.expect("first drain");
+
+        let item = written_item(&db, dir.path());
+        std::fs::write(dir.path().join(&item.external_id), "edited").expect("edits");
+
+        for attempt in 0..3 {
+            queued_vault(&db, node_id, &format!("retry-{attempt}"));
+            dispatcher.drain(&db).await.expect("drain");
+        }
+
+        assert_eq!(
+            DocumentRepository::new(&db)
+                .open_divergences()
+                .expect("reads")
+                .len(),
+            1
+        );
+    }
+
+    /// Retrying cannot resolve a conflict, only a person can — so it dead-letters at once rather
+    /// than spending three attempts to reach the same refusal.
+    #[tokio::test]
+    async fn a_divergence_does_not_retry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_in_memory().expect("db");
+        let dispatcher = vault_dispatcher(dir.path());
+        let node_id = Id::new();
+
+        queued_vault(&db, node_id, "first");
+        dispatcher.drain(&db).await.expect("drain");
+
+        let item = written_item(&db, dir.path());
+        std::fs::write(dir.path().join(&item.external_id), "edited").expect("edits");
+
+        let outbox_id = queued_vault(&db, node_id, "second");
+        dispatcher.drain(&db).await.expect("drain");
+
+        let failed = OutboxRepository::new(&db).list_failed(10).expect("reads");
+        let row = failed
+            .iter()
+            .find(|r| r.id == outbox_id)
+            .expect("it dead-lettered rather than waiting for another attempt");
+        assert_eq!(row.status, OutboxStatus::Failed);
+        assert!(
+            row.last_error
+                .as_deref()
+                .is_some_and(|e| e.contains("changed outside")),
+            "{row:?}"
+        );
+    }
+
+    /// A file that vanished is ours to rewrite: we wrote it, and restoring the mirror loses nothing.
+    #[tokio::test]
+    async fn a_deleted_file_is_rewritten_rather_than_treated_as_edited() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_in_memory().expect("db");
+        let dispatcher = vault_dispatcher(dir.path());
+        let node_id = Id::new();
+
+        queued_vault(&db, node_id, "first");
+        dispatcher.drain(&db).await.expect("drain");
+
+        let item = written_item(&db, dir.path());
+        std::fs::remove_file(dir.path().join(&item.external_id)).expect("removes");
+
+        queued_vault(&db, node_id, "second");
+        let report = dispatcher.drain(&db).await.expect("drain");
+
+        assert_eq!(report.delivered, 1, "{report:?}");
+        assert!(DocumentRepository::new(&db)
+            .open_divergences()
+            .expect("reads")
+            .is_empty());
     }
 }

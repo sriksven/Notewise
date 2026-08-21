@@ -39,7 +39,7 @@ pub use error::{ConnectorError, Result};
 pub use importer::{ImportReport, Importer};
 pub use keychain::KeychainStore;
 pub use registry::ConnectorRegistry;
-pub use sinks::{MockConnector, VaultSink, WebhookSink, SIGNATURE_HEADER};
+pub use sinks::{vault_fingerprint, MockConnector, VaultSink, WebhookSink, SIGNATURE_HEADER};
 pub use sources::{
     authorize_url, base64url, is_readable, join_url_of, parse_graph_time, scan as scan_folder,
     title_of, to_inbound, Calendar, Documents, DraftRef, Found, GoogleBridge, GraphAttendee,
