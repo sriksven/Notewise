@@ -21,6 +21,7 @@ mod series;
 mod setting;
 mod summary;
 mod ticket;
+mod tool_execution;
 mod workspace;
 
 pub use calendar::{
@@ -47,6 +48,10 @@ pub use summary::{
     NewActionItem, NewDecision, NewSummary, NewSummaryTemplate, SummaryRepository, SummaryTemplate,
 };
 pub use ticket::{NewTicket, TicketEdit, TicketRepository};
+pub use tool_execution::{
+    ExecutionStatus, McpServer, McpServerRepository, McpTransport, NewMcpServer, NewToolExecution,
+    Outcome, ToolExecution, ToolExecutionRepository,
+};
 pub use workspace::{NewProject, NewWorkspace, ProjectRepository, WorkspaceRepository};
 
 use crate::error::{Result, StorageError};

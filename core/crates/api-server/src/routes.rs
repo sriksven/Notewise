@@ -110,6 +110,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::routing::routes())
         .merge(crate::jobs::routes())
         .merge(crate::join::routes())
+        // External tools: server configuration, proposals, and the confirmation that runs one.
+        .merge(crate::tools::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",

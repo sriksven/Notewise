@@ -7,8 +7,10 @@
 //!
 //! It may not execute an external tool. Spec 6 requires a human to confirm every external tool call,
 //! every time, and a scheduled job is by definition unattended — those two cannot both hold, and the
-//! confirmation is the one that stays. A run may eventually *propose* tool calls for review; until
-//! the MCP client exists it proposes nothing, and `proposals` is always zero.
+//! confirmation is the one that stays. That holds now that the MCP client exists: `job_allowed_tools`
+//! scopes which tools a run may *propose*, [`crate::tools`] is where a proposal becomes a call, and
+//! only a request from the interface moves a row to `confirmed`. Nothing here generates proposals
+//! yet, so `proposals` is still always zero.
 //!
 //! Allowing pre-approved tools on a schedule is the shortest path to this product acquiring an
 //! unattended path into other people's systems, which nothing in it has by design.

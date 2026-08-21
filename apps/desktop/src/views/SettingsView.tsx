@@ -20,6 +20,7 @@ import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { RoutingSettings } from "./RoutingSettings";
 import { MemorySettings } from "./MemorySettings";
+import { ToolServersSettings } from "./ToolServersSettings";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
@@ -186,6 +187,11 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
         <RoutingSettings />
 
         <MemorySettings />
+
+        {/* After memory and before the index: this is the only screen that grants Notewise a way to
+            change something outside itself, so it reads after everything that only changes what it
+            knows. */}
+        <ToolServersSettings />
 
         <SearchIndexSettings />
 

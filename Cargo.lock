@@ -1508,6 +1508,7 @@ dependencies = [
  "notewise-connectors",
  "notewise-diarization",
  "notewise-graph",
+ "notewise-mcp-client",
  "notewise-recorder",
  "notewise-storage",
  "notewise-transcription",
@@ -1636,9 +1637,13 @@ dependencies = [
 name = "notewise-mcp-client"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
 ]
 

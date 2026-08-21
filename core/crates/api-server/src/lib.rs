@@ -47,6 +47,7 @@ pub mod schedule;
 mod setup;
 pub mod speakers;
 mod state;
+mod tools;
 mod voiceprints;
 mod workspace;
 
@@ -176,7 +177,7 @@ impl Server {
         // The scheduler starts with the server, not with the router: `app` is also called by tests
         // and by an embedder that only wants the route table, and neither wants a background loop.
         crate::jobs::spawn(Arc::clone(&state));
-        self.serve_router(app(state)).await
+        self.serve_router(app(Arc::clone(&state)), state).await
     }
 
     /// Serve the API plus a frontend from `dir`.
@@ -187,10 +188,15 @@ impl Server {
     ) -> Result<(), ServeError> {
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
-        self.serve_router(app_with_frontend(state, dir)).await
+        self.serve_router(app_with_frontend(Arc::clone(&state), dir), state)
+            .await
     }
 
-    async fn serve_router(self, router: AxumRouter) -> Result<(), ServeError> {
+    async fn serve_router(
+        self,
+        router: AxumRouter,
+        state: Arc<AppState>,
+    ) -> Result<(), ServeError> {
         let listener = tokio::net::TcpListener::bind(self.addr)
             .await
             .map_err(|source| ServeError::Bind {
@@ -204,6 +210,11 @@ impl Server {
         axum::serve(listener, router)
             .with_graceful_shutdown(shutdown_signal())
             .await?;
+
+        // Every MCP server this session started is a child process. `kill_on_drop` is the backstop,
+        // but a process left for the allocator to notice is a process the user cannot see and has
+        // no window to close — so they are stopped here, on the way out, on purpose.
+        state.mcp().stop_all().await;
 
         Ok(())
     }
@@ -234,10 +245,11 @@ impl Server {
         let bound = listener.local_addr()?;
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
-        let router = app_with_frontend(state, dir);
+        let router = app_with_frontend(Arc::clone(&state), dir);
 
         Ok((bound, async move {
             axum::serve(listener, router).await?;
+            state.mcp().stop_all().await;
             Ok(())
         }))
     }

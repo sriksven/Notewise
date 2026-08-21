@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2, SquareCheckBig, TicketCheck } from "lucide-react";
+import { Check, Loader2, SquareCheckBig, TicketCheck, Wrench } from "lucide-react";
 
-import { api, ApiError, type ActionItem, type Meeting } from "../lib/api";
+import {
+  api,
+  ApiError,
+  type ActionItem,
+  type McpServerInfo,
+  type Meeting,
+  type ToolExecution,
+} from "../lib/api";
 import type { Route } from "../lib/router";
+import { ToolCallReview } from "../components/ToolCallReview";
 
 interface Props {
   meetings: Meeting[];
@@ -45,6 +53,17 @@ export function TasksView({ meetings, onNavigate }: Props) {
   const [showDone, setShowDone] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  /**
+   * The external tool call for each task, when there is one.
+   *
+   * Keyed by action item so a proposal appears under the task it came from. A task with no entry
+   * has never had one proposed; the button is what creates one, and it sends nothing.
+   */
+  const [calls, setCalls] = useState<Record<string, ToolExecution>>({});
+  /** Servers, only to know whether any tool exists. A button that leads nowhere is worse than none. */
+  const [servers, setServers] = useState<McpServerInfo[]>([]);
+  const [declined, setDeclined] = useState<Record<string, string>>({});
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -66,6 +85,34 @@ export function TasksView({ meetings, onNavigate }: Props) {
       setLoading(false);
     }
   }, [meetings]);
+
+  // Tools are a side dish: their absence must not stop the list rendering, so this is its own
+  // effect that swallows its failures rather than part of `load`.
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const [list, history] = await Promise.all([
+        api.mcpServers().catch(() => []),
+        api.toolExecutions({ limit: 200 }).catch(() => []),
+      ]);
+      if (cancelled) return;
+
+      setServers(list);
+      const byTask: Record<string, ToolExecution> = {};
+      // Most recent first from the engine, so the first entry per task is the one to show.
+      for (const execution of history) {
+        if (execution.action_item_id && !byTask[execution.action_item_id]) {
+          byTask[execution.action_item_id] = execution;
+        }
+      }
+      setCalls(byTask);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void load();
@@ -94,6 +141,53 @@ export function TasksView({ meetings, onNavigate }: Props) {
       onNavigate({ name: "tickets" });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not file a ticket.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toolsAvailable = servers.some(
+    (server) => server.enabled && server.enabled_tools.length > 0,
+  );
+
+  const serverName = (id: string) =>
+    servers.find((server) => server.id === id)?.name ?? "that server";
+
+  /** Ask a model for one call. Nothing is sent; the answer is something to approve or decline. */
+  const propose = async (task: Task) => {
+    setBusyId(task.id);
+    setDeclined((current) => ({ ...current, [task.id]: "" }));
+    try {
+      const result = await api.proposeToolCall({ action_item_id: task.id });
+      if (result.execution) {
+        setCalls((current) => ({ ...current, [task.id]: result.execution! }));
+      } else {
+        setDeclined((current) => ({
+          ...current,
+          [task.id]: result.declined ?? "No tool call was proposed.",
+        }));
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not propose a tool call.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const answer = async (
+    task: Task,
+    work: (id: string) => Promise<ToolExecution>,
+  ) => {
+    const call = calls[task.id];
+    if (!call) return;
+
+    setBusyId(task.id);
+    try {
+      const updated = await work(call.id);
+      setCalls((current) => ({ ...current, [task.id]: updated }));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not do that.");
     } finally {
       setBusyId(null);
     }
@@ -206,7 +300,46 @@ export function TasksView({ meetings, onNavigate }: Props) {
                         {task.meetingTitle}
                       </button>
                     </p>
+
+                    {declined[task.id] && (
+                      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                        {declined[task.id]}
+                      </p>
+                    )}
+
+                    {calls[task.id] && (
+                      <div className="mt-2.5">
+                        <ToolCallReview
+                          execution={calls[task.id]}
+                          serverName={serverName(calls[task.id].server_id)}
+                          busy={busyId === task.id}
+                          onConfirm={() => void answer(task, api.confirmToolCall)}
+                          onReject={() => void answer(task, api.rejectToolCall)}
+                          onSend={() => void answer(task, api.executeToolCall)}
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {!closed && toolsAvailable && !calls[task.id] && (
+                    <button
+                      type="button"
+                      onClick={() => void propose(task)}
+                      disabled={busyId === task.id}
+                      title="Propose an external tool call for this"
+                      className="flex shrink-0 items-center gap-1 rounded-full border border-hairline
+                                 px-2 py-1 text-[11.5px] text-ink-muted opacity-0 transition
+                                 hover:bg-overlay hover:text-ink group-hover:opacity-100
+                                 focus-visible:opacity-100"
+                    >
+                      {busyId === task.id ? (
+                        <Loader2 size={11} className="animate-spin" aria-hidden />
+                      ) : (
+                        <Wrench size={11} aria-hidden />
+                      )}
+                      Tool
+                    </button>
+                  )}
 
                   {!closed && (
                     <button

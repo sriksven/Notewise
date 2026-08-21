@@ -515,6 +515,76 @@ export interface MemoryItem {
   created_at: string;
 }
 
+/**
+ * An external MCP server, as configured.
+ *
+ * Two switches, both off by default: `enabled` for the server and a row in `enabled_tools` per
+ * tool. A server that is added and forgotten reaches nothing.
+ */
+export interface McpServerInfo {
+  id: string;
+  name: string;
+  transport: "stdio" | "http";
+  command: string | null;
+  args: string[];
+  url: string | null;
+  enabled: boolean;
+  auto_start: boolean;
+  /** Whether a process or session exists right now. Servers start on first use, not at launch. */
+  running: boolean;
+  /** Which of its tools are allowed. Independent of `enabled`, so turning it off loses nothing. */
+  enabled_tools: string[];
+  /** Whether credentials are held for it. The values are never returned. */
+  has_secrets: boolean;
+}
+
+export interface McpTool {
+  name: string;
+  description: string | null;
+  /** The tool's own JSON Schema, as it published it. */
+  input_schema: unknown;
+  enabled: boolean;
+}
+
+export interface McpDiscovery {
+  tools: McpTool[];
+  /**
+   * Why the list is empty, when it is. A field rather than a failed request, so a server that
+   * will not start shows its reason instead of looking like a server with no tools.
+   */
+  error: string | null;
+  running: boolean;
+}
+
+/**
+ * One proposed, confirmed, or completed external call.
+ *
+ * `unknown` is not a synonym for `failed`. It means the call timed out and may have taken effect,
+ * which is the difference between "try again" and "check the other system first".
+ */
+export interface ToolExecution {
+  id: string;
+  action_item_id: string | null;
+  server_id: string;
+  tool_name: string;
+  /** Exactly what will be sent. Shown verbatim, because that is what the confirmation is for. */
+  arguments: Record<string, unknown> | string;
+  status: "proposed" | "confirmed" | "succeeded" | "failed" | "unknown" | "rejected";
+  result: string | null;
+  proposed_at: string;
+  executed_at: string | null;
+  outcome_unknown: boolean;
+}
+
+export interface ToolProposalResult {
+  /** The stored proposal. Nothing has been sent. */
+  execution: ToolExecution | null;
+  /** Why there is none. Shown verbatim. */
+  declined: string | null;
+  /** How many tools the model was shown, so "it ignored my tool" has an answer. */
+  tools_considered: number;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -1325,6 +1395,89 @@ export const api = {
    */
   brief: (meetingId: string) =>
     request<Brief>(`/v1/meetings/${meetingId}/brief`),
+
+  // -------------------------------------------------------------- external tools
+
+  mcpServers: () => request<McpServerInfo[]>("/v1/mcp/servers"),
+
+  /** Add a server. It arrives disabled, with none of its tools allowed. */
+  addMcpServer: (input: {
+    name: string;
+    transport: "stdio" | "http";
+    command?: string;
+    args?: string[];
+    url?: string;
+    auto_start?: boolean;
+    /** Environment for a stdio server, headers for an HTTP one. Goes to the keychain. */
+    secrets?: Record<string, string>;
+  }) =>
+    request<McpServerInfo>("/v1/mcp/servers", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  deleteMcpServer: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/mcp/servers/${id}`, { method: "DELETE" }),
+
+  setMcpServerEnabled: (id: string, enabled: boolean) =>
+    request<McpServerInfo>(`/v1/mcp/servers/${id}/enabled`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  setMcpServerAutoStart: (id: string, auto_start: boolean) =>
+    request<McpServerInfo>(`/v1/mcp/servers/${id}/auto-start`, {
+      method: "PUT",
+      body: JSON.stringify({ auto_start }),
+    }),
+
+  /** Ask a server what it can do, starting it if it is allowed to start. */
+  mcpServerTools: (id: string) => request<McpDiscovery>(`/v1/mcp/servers/${id}/tools`),
+
+  /** Start a server pinned `auto_start: false`. */
+  startMcpServer: (id: string) =>
+    request<McpDiscovery>(`/v1/mcp/servers/${id}/start`, { method: "POST" }),
+
+  stopMcpServer: (id: string) =>
+    request<{ stopped: boolean }>(`/v1/mcp/servers/${id}/stop`, { method: "POST" }),
+
+  enableMcpTool: (id: string, tool: string) =>
+    request<{ enabled_tools: string[] }>(
+      `/v1/mcp/servers/${id}/tools/${encodeURIComponent(tool)}`,
+      { method: "PUT" },
+    ),
+
+  disableMcpTool: (id: string, tool: string) =>
+    request<{ enabled_tools: string[] }>(
+      `/v1/mcp/servers/${id}/tools/${encodeURIComponent(tool)}`,
+      { method: "DELETE" },
+    ),
+
+  /** Ask a model for one tool call. Sends nothing — the result needs confirming. */
+  proposeToolCall: (input: { action_item_id?: string; text?: string }) =>
+    request<ToolProposalResult>("/v1/mcp/proposals", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  toolExecutions: (options: { pending?: boolean; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (options.pending) query.set("pending", "true");
+    if (options.limit) query.set("limit", String(options.limit));
+    const suffix = query.toString();
+    return request<ToolExecution[]>(`/v1/mcp/executions${suffix ? `?${suffix}` : ""}`);
+  },
+
+  /** Approve a call and send it. The only path by which anything reaches an external server. */
+  confirmToolCall: (id: string) =>
+    request<ToolExecution>(`/v1/mcp/executions/${id}/confirm`, { method: "POST" }),
+
+  rejectToolCall: (id: string) =>
+    request<ToolExecution>(`/v1/mcp/executions/${id}/reject`, { method: "POST" }),
+
+  /** Send a call that was confirmed and never went out. Not a retry: a failed call stays failed. */
+  executeToolCall: (id: string) =>
+    request<ToolExecution>(`/v1/mcp/executions/${id}/execute`, { method: "POST" }),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

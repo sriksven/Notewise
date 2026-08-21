@@ -13,3 +13,14 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+# `process` is not in the workspace feature set because nothing else spawns children. A stdio MCP
+# server is a child process, so it is asked for here rather than widened for everybody.
+tokio = { workspace = true, features = ["process", "io-util", "time", "sync", "rt", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net"] }
+# Stub servers for the transport tests. A real third-party MCP server cannot run in CI; an
+# in-process one can, and both transports are exercised against one.
+axum.workspace = true

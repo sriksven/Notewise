@@ -18,18 +18,28 @@
 //! it is absent rather than defaulted off. The product has no send path anywhere by design, and this
 //! must not become one by transitivity.
 //!
-//! # What is implemented here
+//! # What is here
 //!
-//! The parts where being wrong is expensive and which can be checked without a subprocess:
-//! [`validate`] against a tool's published schema, [`Allowlist`] enforcing default-deny, and
-//! [`parse_proposal`] reading a tool call out of model prose. **There is no transport** — nothing
-//! here spawns a server or speaks JSON-RPC to one yet.
+//! [`validate`] checks a proposal against the tool's published schema, [`Allowlist`] enforces
+//! default-deny, [`parse_proposal`] reads a tool call out of model prose, and [`McpClient`] speaks
+//! JSON-RPC to a real server over stdio or streamable HTTP.
+//!
+//! Persistence is not here. This crate manages child processes and a protocol; what was proposed,
+//! confirmed, and returned is the caller's to store — and `api-server` does store it, because the
+//! effect of a call is outside Notewise and "did that already run?" has to be answerable after a
+//! restart.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod client;
+mod protocol;
+mod transport;
 mod validate;
 
+pub use client::{McpClient, RunningServer, DEFAULT_TIMEOUT, HANDSHAKE_TIMEOUT};
+pub use protocol::{text_of, PROTOCOL_VERSION};
+pub use transport::{RealTransports, ServerConfig, Transport, TransportFactory, TransportKind};
 pub use validate::{validate, Invalid};
 
 use std::collections::BTreeSet;
@@ -43,17 +53,77 @@ pub enum McpError {
     #[error("no server named '{0}' is configured")]
     UnknownServer(String),
 
+    /// The gate. Nothing is started, nothing is sent.
     #[error("'{tool}' on '{server}' is not enabled")]
     NotAllowed { server: String, tool: String },
 
-    #[error("the proposed call is not valid: {0}")]
-    Invalid(String),
+    /// The server is configured to start only when asked, and nobody asked.
+    #[error("'{server}' is not running; start it to use its tools")]
+    NotStarted { server: String },
+
+    /// The configuration cannot work — an empty command, a URL that is not one.
+    ///
+    /// Separate from [`Self::SpawnFailed`] because this is caught before the operating system is
+    /// involved, and the message can name the field the user has to fix.
+    #[error("'{server}' is not configured correctly: {detail}")]
+    Misconfigured { server: String, detail: String },
+
+    /// The process would not start: a missing binary, usually.
+    #[error("could not start '{server}': {detail}")]
+    SpawnFailed { server: String, detail: String },
+
+    /// The server started and could not introduce itself, or speaks a revision we do not.
+    #[error("'{server}' did not complete its handshake: {detail}")]
+    Handshake { server: String, detail: String },
+
+    /// The pipe or socket broke.
+    #[error("lost contact with '{server}': {detail}")]
+    Transport { server: String, detail: String },
+
+    /// The server answered with a JSON-RPC error.
+    #[error("'{server}' rejected the request: {detail}")]
+    Rpc { server: String, detail: String },
+
+    /// Enabled, but this server does not publish it — an upgrade removed it, most likely.
+    #[error("'{server}' does not publish a tool called '{tool}'")]
+    UnknownTool { server: String, tool: String },
+
+    /// The arguments do not satisfy the tool's schema. Returned to the model as an observation,
+    /// never shown to a user as a valid proposal.
+    #[error("the arguments for '{tool}' are not valid: {detail}")]
+    InvalidArguments { tool: String, detail: String },
+
+    /// The tool ran and reported its own failure. MCP delivers this inside a *successful*
+    /// JSON-RPC response, which is why it has a variant rather than being missed.
+    #[error("'{tool}' failed: {detail}")]
+    ToolError { tool: String, detail: String },
+
+    /// The call did not answer in time.
+    ///
+    /// Deliberately not folded into [`Self::Transport`]: the call may have taken effect. See
+    /// [`McpError::outcome_unknown`].
+    #[error("'{tool}' on '{server}' did not answer in time; whether it ran is unknown")]
+    Timeout { server: String, tool: String },
 
     #[error("could not read the model's proposal: {0}")]
     Unparseable(String),
 
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+}
+
+impl McpError {
+    /// Whether this failure leaves it genuinely unknown if the call took effect.
+    ///
+    /// Only a timeout does. Everything else either never reached the server or came back with an
+    /// answer, and a caller can say "it did not run" without guessing.
+    ///
+    /// This is the distinction the user acts on: a failed call can be tried again by hand, and one
+    /// whose outcome is unknown means checking the other system first. Telling them the wrong one
+    /// is how a ticket gets filed twice.
+    pub fn outcome_unknown(&self) -> bool {
+        matches!(self, McpError::Timeout { .. })
+    }
 }
 
 pub type Result<T> = std::result::Result<T, McpError>;
@@ -118,16 +188,31 @@ impl Allowlist {
             .contains(&(server.to_string(), tool.to_string()))
     }
 
-    /// Check a proposal, naming what was refused.
-    pub fn check(&self, proposal: &Proposal) -> Result<()> {
-        if self.permits(&proposal.server, &proposal.tool) {
+    /// Refuse unless this exact pair is enabled.
+    ///
+    /// The one implementation of "may this run", so there is a single thing to read when asking
+    /// whether the gate can be got around. [`McpClient::call`] calls it before it starts anything.
+    pub fn require(&self, server: &str, tool: &str) -> Result<()> {
+        if self.permits(server, tool) {
             Ok(())
         } else {
             Err(McpError::NotAllowed {
-                server: proposal.server.clone(),
-                tool: proposal.tool.clone(),
+                server: server.to_string(),
+                tool: tool.to_string(),
             })
         }
+    }
+
+    /// Check a proposal, naming what was refused.
+    pub fn check(&self, proposal: &Proposal) -> Result<()> {
+        self.require(&proposal.server, &proposal.tool)
+    }
+
+    /// Every enabled pair, for showing a user what is reachable.
+    pub fn pairs(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.allowed
+            .iter()
+            .map(|(server, tool)| (server.as_str(), tool.as_str()))
     }
 
     pub fn is_empty(&self) -> bool {

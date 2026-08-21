@@ -54,6 +54,12 @@ pub struct AppState {
     /// forgetting them costs at most one duplicate notification. Persisting it would mean a table
     /// and a retention policy for state whose whole lifetime is an afternoon.
     join: tokio::sync::Mutex<crate::join::JoinTracker>,
+    /// Connections to external MCP servers.
+    ///
+    /// Holds sessions — child processes and sockets — and not configuration: the server list lives
+    /// in the database and is handed to the client per call, so there is no in-memory copy to drift
+    /// out of step with the rows the user edited. Nothing starts until a tool is listed or called.
+    mcp: Arc<notewise_mcp_client::McpClient>,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -91,6 +97,7 @@ impl AppState {
             indexing: crate::indexing::IndexManager::new(),
             embedder: tokio::sync::RwLock::new(None),
             join: tokio::sync::Mutex::new(crate::join::JoinTracker::default()),
+            mcp: Arc::new(notewise_mcp_client::McpClient::new()),
             speaker_timelines: Default::default(),
         }
     }
@@ -111,6 +118,14 @@ impl AppState {
 
     pub fn model_dir(&self) -> &Path {
         &self.model_dir
+    }
+
+    /// External MCP servers.
+    ///
+    /// An `Arc` handed out rather than a borrow, so a handler awaiting a sixty-second tool call is
+    /// not holding anything anybody else needs.
+    pub fn mcp(&self) -> Arc<notewise_mcp_client::McpClient> {
+        Arc::clone(&self.mcp)
     }
 
     /// The at-most-one live recording.

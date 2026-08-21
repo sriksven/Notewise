@@ -14,6 +14,7 @@ notewise-graph.workspace = true
 notewise-ai-router.workspace = true
 notewise-transcription.workspace = true
 notewise-connectors.workspace = true
+notewise-mcp-client.workspace = true
 cron.workspace = true
 iana-time-zone = "0.1"
 chrono-tz.workspace = true
