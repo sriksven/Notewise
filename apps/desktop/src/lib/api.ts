@@ -1266,6 +1266,15 @@ export const api = {
 
   discardEmailDraft: (id: string) => request<void>(`/v1/emails/${id}`, { method: "DELETE" }),
 
+  /**
+   * Where to download a draft as a file any mail client can open.
+   *
+   * A URL rather than a fetch: the browser saving a file is the whole point, and reading the bytes
+   * into memory to hand them straight back would be a round trip for nothing. The route out for
+   * anybody with no mailbox connected, which is everybody on a first run.
+   */
+  emailDraftFileUrl: (id: string) => `/v1/emails/${id}/eml`,
+
   diarization: () => request<DiarizationStatus>("/v1/diarization"),
 
   /**

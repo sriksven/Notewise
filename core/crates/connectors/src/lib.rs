@@ -32,7 +32,7 @@ mod sinks;
 mod sources;
 mod types;
 
-pub use config::{build_registry, generate_signing_secret, SIGNING_KEY};
+pub use config::{build_registry, generate_signing_secret, ALL_CONNECTOR_IDS, SIGNING_KEY};
 pub use connector::{Connector, SinkConnector, SourceConnector};
 pub use credentials::{CredentialStore, MemoryStore, Secret};
 pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy};

@@ -18,6 +18,24 @@ use crate::sources::{Documents, GoogleBridge, MicrosoftGraph};
 /// Credential key holding a webhook's HMAC signing secret.
 pub const SIGNING_KEY: &str = "signing_secret";
 
+/// Every connector this build has code for.
+///
+/// Held as data because two places have to agree with it and neither can see the other: the match in
+/// [`build_registry`], which turns a stored account into a live connector, and the catalogue
+/// `api-server` serves, which is the only list the interface reads.
+///
+/// They disagreed. The Google bridge, Microsoft, and the watched folder were all buildable and none
+/// of them was in the catalogue — so the engine could have used them and the app could not offer
+/// them, which is "half a connector that fails invisibly" moved one layer further out than the
+/// check that phrase was written for. A test now compares both against this.
+pub const ALL_CONNECTOR_IDS: &[&str] = &[
+    VaultSink::ID,
+    WebhookSink::ID,
+    GoogleBridge::ID,
+    MicrosoftGraph::ID,
+    Documents::ID,
+];
+
 /// A fresh shared secret for signing webhook deliveries.
 ///
 /// Two v4 UUIDs, hex, for 244 bits of entropy — well past what an HMAC key needs, and it

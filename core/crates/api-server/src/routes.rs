@@ -134,6 +134,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             get(list_email_drafts).post(draft_emails),
         )
         .route("/v1/emails/:id/approve", post(approve_email_draft))
+        // The route out for somebody with no mailbox connected, which is most people trying this.
+        .route("/v1/emails/:id/eml", get(download_draft_as_eml))
         .route("/v1/emails/:id", axum::routing::delete(discard_email_draft))
         .route(
             "/v1/recording",
@@ -1021,6 +1023,70 @@ async fn approve_email_draft(
     }
 
     Ok(Json(draft.into()))
+}
+
+/// A draft as a file any mail client can open.
+///
+/// The path for a user with neither Google nor Microsoft connected — which is most people, and all of
+/// them on a first run. Opening the file puts the draft in front of them with recipients and subject
+/// filled in, which is the same end state the connectors reach by a route that needs no vendor, no
+/// token, and no review.
+///
+/// Served as a download rather than as JSON the frontend assembles: the format has rules about line
+/// endings and header escaping that belong in one place, and `storage::export` is where the other
+/// renderer already lives.
+async fn download_draft_as_eml(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<axum::response::Response> {
+    let draft_id = parse_id(&id)?;
+
+    let draft = {
+        let db = state.db().await;
+        EmailDraftRepository::new(&db).get(draft_id)?
+    };
+
+    let file_name = eml_file_name(&draft.subject);
+    let body = notewise_storage::draft_to_eml(&draft);
+
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "message/rfc822".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{file_name}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// A filename from a subject.
+///
+/// Every character a filesystem or a `Content-Disposition` header could object to becomes a dash,
+/// including the quote that would end the header's own quoted string.
+fn eml_file_name(subject: &str) -> String {
+    let stem: String = subject
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+
+    let trimmed = stem.trim_matches(['-', ' ']).trim();
+    let stem = if trimmed.is_empty() { "draft" } else { trimmed };
+
+    // Bounded: a subject is model-generated and a two-hundred-character filename is refused by some
+    // filesystems outright.
+    format!("{}.eml", stem.chars().take(80).collect::<String>())
 }
 
 async fn discard_email_draft(
@@ -4623,5 +4689,89 @@ mod tests {
                 "{name} appears in both catalogues"
             );
         }
+    }
+    /// The route out for a user with no mailbox connected, which is most people on a first run.
+    #[tokio::test]
+    async fn a_draft_downloads_as_a_message_a_mail_client_can_open() {
+        let state = std::sync::Arc::new(AppState::new(
+            Database::open_in_memory().expect("db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("router"),
+        ));
+        let app = router(std::sync::Arc::clone(&state));
+
+        let draft_id = {
+            let db = state.db().await;
+            EmailDraftRepository::new(&db)
+                .create(NewEmailDraft {
+                    meeting_id: None,
+                    subject: "Follow-up: Platform standup".into(),
+                    body: "Here is what we agreed.".into(),
+                    recipients: vec!["priya@example.com".into()],
+                    variant: None,
+                })
+                .expect("a draft")
+                .id
+        };
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(format!("/v1/emails/{draft_id}/eml"))
+                    .body(axum::body::Body::empty())
+                    .expect("builds"),
+            )
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("message/rfc822")
+        );
+
+        let disposition = response
+            .headers()
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok())
+            .expect("a filename");
+        assert!(
+            disposition.contains("Follow-up- Platform standup.eml"),
+            "{disposition}"
+        );
+
+        let bytes = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .expect("a body")
+            .to_bytes();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("To: priya@example.com"), "{text}");
+        assert!(text.contains("X-Unsent: 1"), "{text}");
+        assert!(text.contains("Here is what we agreed."), "{text}");
+    }
+
+    /// A subject is model-generated text, and the quote is the character that would end the header's
+    /// own quoted string.
+    #[test]
+    fn a_filename_cannot_break_out_of_the_header() {
+        let name = eml_file_name("Follow-up\" ; rm -rf /");
+        assert!(!name.contains('"'), "{name}");
+        assert!(!name.contains(';'), "{name}");
+        assert!(name.ends_with(".eml"));
+    }
+
+    #[test]
+    fn a_subject_with_nothing_usable_still_produces_a_filename() {
+        assert_eq!(eml_file_name("///"), "draft.eml");
+        assert_eq!(eml_file_name("   "), "draft.eml");
+    }
+
+    /// A two-hundred-character filename is refused by some filesystems outright.
+    #[test]
+    fn a_long_subject_is_shortened() {
+        let name = eml_file_name(&"word ".repeat(60));
+        assert!(name.len() <= 90, "{} chars: {name}", name.len());
     }
 }

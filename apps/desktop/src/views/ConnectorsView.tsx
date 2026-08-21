@@ -8,6 +8,7 @@ import {
   type FailedDelivery,
 } from "../lib/api";
 import { CalendarSetup } from "./CalendarSetup";
+import { WatchedFolder } from "./WatchedFolder";
 import { VaultDivergences } from "./VaultDivergences";
 
 /**
@@ -78,15 +79,28 @@ export function ConnectorsView() {
             </p>
           ) : (
             <div className="space-y-3">
-              {connectors.map((connector) => (
-                <ConnectorCard key={connector.id} connector={connector} onChanged={load} />
-              ))}
+              {/* The three with their own cards below are filtered out rather than listed twice.
+                  A calendar is a sign-in ritual and a watched folder is somewhere Notewise reads,
+                  and neither fits a row whose shape is "here is where we write". */}
+              {connectors
+                .filter(
+                  (connector) =>
+                    !["google", "microsoft", "documents"].includes(connector.id),
+                )
+                .map((connector) => (
+                  <ConnectorCard key={connector.id} connector={connector} onChanged={load} />
+                ))}
             </div>
           )}
 
           {/* Its own section: connecting a calendar is a setup ritual rather than a switch, and the
               two vendors need different rituals for a reason worth stating on the screen. */}
           <CalendarSetup connectors={connectors} onChanged={load} />
+
+          <WatchedFolder
+            connector={connectors.find((connector) => connector.id === "documents")}
+            onChanged={load}
+          />
 
           {/* Above failed deliveries, because a divergence is not a failure — it is the vault
               keeping its promise, and it needs an answer rather than a retry. */}

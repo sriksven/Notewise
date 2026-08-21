@@ -107,7 +107,12 @@ pub async fn list_available_connectors(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<AvailableConnector>> {
     let registry = state.connectors();
-    let connected = registry.sink_ids();
+
+    // Both maps. A source-only connector — a watched folder — is registered as a source and would
+    // read as never connected if this asked only about sinks, which is how a connector ends up
+    // configured and invisible.
+    let mut connected = registry.sink_ids();
+    connected.extend(registry.source_ids());
     let is_connected = |id: &str| connected.iter().any(|got| got == id);
 
     Json(vec![
@@ -130,6 +135,40 @@ pub async fn list_available_connectors(
             description: "POSTs each meeting as JSON, signed so the receiver can verify it \
                           came from you. This one leaves your machine.",
             connected: is_connected(WebhookSink::ID),
+        },
+        // The three that were missing, and the reason this list is not a convenience. It is the only
+        // thing the interface reads: a connector absent from here cannot be connected from the app
+        // at all, however complete the engine behind it is. The calendar setup screen looked for
+        // "google" in a list that never contained it and rendered nothing.
+        AvailableConnector {
+            id: GoogleBridge::ID,
+            display_name: "Google Calendar and Gmail",
+            is_local: false,
+            target_label: "Apps Script deployment URL",
+            target_hint: "https://script.google.com/macros/s/…/exec",
+            description: "Reads your calendar and can put follow-up drafts in Gmail, through a \
+                          small script you deploy into your own account. Nothing is sent.",
+            connected: is_connected(GoogleBridge::ID),
+        },
+        AvailableConnector {
+            id: MicrosoftGraph::ID,
+            display_name: "Microsoft 365",
+            is_local: false,
+            target_label: "Client id",
+            target_hint: "an app registration in your tenant",
+            description: "Reads your calendar and can put follow-up drafts in Outlook. One \
+                          sign-in, and drafts only — never sending.",
+            connected: is_connected(MicrosoftGraph::ID),
+        },
+        AvailableConnector {
+            id: notewise_connectors::Documents::ID,
+            display_name: "Watched folder",
+            is_local: true,
+            target_label: "Folder",
+            target_hint: "e.g. ~/Documents/Specs",
+            description: "Imports text and Markdown files so answers can cite them. Read only — \
+                          Notewise never writes to this folder.",
+            connected: is_connected(notewise_connectors::Documents::ID),
         },
     ])
 }
@@ -187,7 +226,11 @@ pub(crate) fn apply_connect(
     // from the registry to the API boundary.
     if !matches!(
         id,
-        VaultSink::ID | WebhookSink::ID | GoogleBridge::ID | MicrosoftGraph::ID
+        VaultSink::ID
+            | WebhookSink::ID
+            | GoogleBridge::ID
+            | MicrosoftGraph::ID
+            | notewise_connectors::Documents::ID
     ) {
         return Err(ApiError::NotFound(format!(
             "no connector '{id}' in this build"
@@ -224,6 +267,17 @@ pub(crate) fn apply_connect(
         credentials
             .set(GoogleBridge::ID, GOOGLE_SHARED_KEY, &Secret::new(key))
             .map_err(|e| ApiError::Internal(format!("cannot store the deployment key: {e}")))?;
+    }
+
+    // A folder that is not there is a typo, and one that appears later can be connected then. Checked
+    // here because the alternative is a connector that reports connected and reads nothing, with the
+    // reason only in a log — `Documents::pull` reports it as transient, which is right for a drive
+    // that was unmounted and wrong as a first impression.
+    if id == notewise_connectors::Documents::ID && !std::path::Path::new(&request.target).is_dir() {
+        return Err(ApiError::BadRequest(format!(
+            "{} is not a folder Notewise can read",
+            request.target
+        )));
     }
 
     // Microsoft's target is a client id, and the refresh token arrives from the sign-in flow rather
@@ -573,19 +627,42 @@ mod route_smoke {
 
     /// The list of what *could* be connected is not the list of what is. On a fresh install
     /// the second is empty, which is exactly when a user needs the first.
+    /// The catalogue is the only list the interface reads, so a connector this build can construct
+    /// and this omits is a capability the engine has and the app cannot offer.
+    ///
+    /// Asserted against what the build can construct rather than a hardcoded list, because the
+    /// hardcoded version passed while three connectors were missing — Google, Microsoft, and the
+    /// watched folder were all buildable, none of them was here, and the calendar setup screen
+    /// looked for "google" in a list that never contained it and rendered nothing.
     #[tokio::test]
-    async fn available_lists_this_build_even_with_nothing_connected() {
+    async fn the_catalogue_offers_everything_this_build_can_construct() {
         let (status, body) = get("/v1/connectors/available").await;
         assert_eq!(status, StatusCode::OK);
 
         let available: Vec<serde_json::Value> = serde_json::from_str(&body).expect("json");
-        let ids: Vec<_> = available
+        let ids: std::collections::BTreeSet<&str> = available
             .iter()
-            .map(|c| c["id"].as_str().unwrap())
+            .map(|c| c["id"].as_str().expect("an id"))
             .collect();
 
-        assert_eq!(ids, vec![VaultSink::ID, WebhookSink::ID]);
+        let buildable: std::collections::BTreeSet<&str> = notewise_connectors::ALL_CONNECTOR_IDS
+            .iter()
+            .copied()
+            .collect();
+
+        assert_eq!(
+            ids, buildable,
+            "the catalogue and what this build can construct have drifted apart"
+        );
+
         assert!(available.iter().all(|c| c["connected"] == false));
+        for connector in &available {
+            assert!(!connector["description"].as_str().expect("prose").is_empty());
+            assert!(!connector["target_label"]
+                .as_str()
+                .expect("a label")
+                .is_empty());
+        }
     }
 
     /// Whether a sink leaves the machine is the fact a user of a local-first tool needs

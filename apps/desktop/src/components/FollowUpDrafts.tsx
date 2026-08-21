@@ -165,6 +165,17 @@ export function FollowUpDrafts({ meetingId, hasSource }: Props) {
                     <Copy className="h-3.5 w-3.5" />
                   )}
                 </button>
+                {/* The route out with no mailbox connected. Offered whatever the status: approving
+                    is a record that a human read it, and downloading it is how they act on that. */}
+                <a
+                  href={api.emailDraftFileUrl(d.id)}
+                  download
+                  className="btn-ghost px-2 py-1 text-[12px]"
+                  title="Open in your mail app, with the recipients and subject filled in"
+                >
+                  Open in mail app
+                </a>
+
                 {d.status !== "approved" && (
                   <button
                     type="button"

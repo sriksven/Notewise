@@ -492,3 +492,196 @@ mod tests {
         assert_eq!(timestamp(-5000), "00:00");
     }
 }
+
+/// Render a draft as an RFC 5322 message, for a mail client to open.
+///
+/// # Why this exists beside the two connectors
+///
+/// Putting a draft in Gmail or Outlook needs an account connected, and most people trying Notewise
+/// for the first time have not connected one. They still have a mail client. An `.eml` file is what
+/// every one of them can open, and opening it puts the draft in front of the user with the recipients
+/// and subject already filled in — the same end state the connectors reach, by a route that needs no
+/// vendor, no token, and no review.
+///
+/// # Why the envelope is all that is new
+///
+/// The body came from the email generator, which already drafts and never sends. This adds headers.
+/// There is deliberately no `Date` and no `Message-ID`: a client composing from a draft supplies its
+/// own, and a stale one from whenever the draft was generated would be wrong by the time it is sent.
+///
+/// # What is not attempted
+///
+/// No MIME multipart, no attachments, no HTML alternative. The body is plain text, so it is declared
+/// as plain text — and a message that says `text/plain` and means it needs no boundary machinery.
+pub fn draft_to_eml(draft: &crate::models::EmailDraft) -> String {
+    let mut out = String::new();
+
+    let recipients: Vec<&str> = draft
+        .recipients
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+        .collect();
+
+    if !recipients.is_empty() {
+        out.push_str(&format!("To: {}\r\n", recipients.join(", ")));
+    }
+
+    out.push_str(&format!("Subject: {}\r\n", header_value(&draft.subject)));
+    out.push_str("MIME-Version: 1.0\r\n");
+    out.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+    // `X-Unsent: 1` is what tells Outlook and Apple Mail to open this as a *draft* to edit rather
+    // than as a received message to read. Without it the file opens read-only and the user has to
+    // copy the text out, which defeats the point.
+    out.push_str("X-Unsent: 1\r\n");
+    out.push_str("\r\n");
+
+    // Bare newlines become CRLF: the format requires it, and a client that is strict about it shows
+    // one long paragraph otherwise.
+    out.push_str(&draft.body.replace("\r\n", "\n").replace('\n', "\r\n"));
+
+    out
+}
+
+/// A header value with the characters that would end the header removed.
+///
+/// A newline inside a subject is header injection — it would let a subject add its own headers, and
+/// the subject here is model-generated text. Folding it correctly would be the other answer;
+/// stripping is the one with no way to be subtly wrong.
+fn header_value(raw: &str) -> String {
+    let flattened: String = raw
+        .chars()
+        .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+        .collect();
+
+    // Whitespace collapsed as well, so a stripped CRLF leaves one space rather than two and the
+    // subject a client shows does not look like a formatting bug.
+    flattened.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod eml_tests {
+    use super::*;
+    use crate::models::{DraftStatus, EmailDraft};
+    use crate::Id;
+    use chrono::Utc;
+
+    fn draft(subject: &str, body: &str, recipients: &[&str]) -> EmailDraft {
+        EmailDraft {
+            id: Id::new(),
+            meeting_id: None,
+            subject: subject.into(),
+            body: body.into(),
+            recipients: recipients.iter().map(|r| (*r).to_string()).collect(),
+            status: DraftStatus::Draft,
+            variant: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn a_draft_renders_as_a_message_a_client_can_open() {
+        let rendered = draft_to_eml(&draft(
+            "Follow-up: Platform standup",
+            "Here is what we agreed.\nShip on Friday.",
+            &["priya@example.com", "sam@example.com"],
+        ));
+
+        assert!(rendered.contains("To: priya@example.com, sam@example.com\r\n"));
+        assert!(rendered.contains("Subject: Follow-up: Platform standup\r\n"));
+        assert!(rendered.contains("Content-Type: text/plain; charset=utf-8\r\n"));
+        assert!(rendered.ends_with("Ship on Friday."));
+    }
+
+    /// Without this the file opens read-only and the user has to copy the text out, which defeats
+    /// the point of generating a draft.
+    #[test]
+    fn it_opens_as_a_draft_rather_than_a_received_message() {
+        let rendered = draft_to_eml(&draft("Subject", "Body", &["a@b.com"]));
+        assert!(rendered.contains("X-Unsent: 1\r\n"), "{rendered}");
+    }
+
+    /// The headers end where the body begins, and exactly once.
+    #[test]
+    fn the_headers_are_separated_from_the_body_by_a_blank_line() {
+        let rendered = draft_to_eml(&draft("Subject", "Body", &["a@b.com"]));
+        let (headers, body) = rendered
+            .split_once("\r\n\r\n")
+            .expect("a blank line separates them");
+
+        assert!(headers.contains("Subject: Subject"));
+        assert_eq!(body, "Body");
+    }
+
+    /// The format requires CRLF, and a strict client shows one long paragraph without it.
+    #[test]
+    fn newlines_in_the_body_become_crlf() {
+        let rendered = draft_to_eml(&draft("S", "one\ntwo\nthree", &["a@b.com"]));
+        let body = rendered.split_once("\r\n\r\n").expect("a body").1;
+        assert_eq!(body, "one\r\ntwo\r\nthree");
+    }
+
+    /// And a body that already had CRLF must not end up with doubled carriage returns.
+    #[test]
+    fn a_body_that_is_already_crlf_is_not_doubled() {
+        let rendered = draft_to_eml(&draft("S", "one\r\ntwo", &["a@b.com"]));
+        let body = rendered.split_once("\r\n\r\n").expect("a body").1;
+        assert_eq!(body, "one\r\ntwo");
+        assert!(!body.contains("\r\r"));
+    }
+
+    /// The subject is model-generated text, and a newline in a header is header injection.
+    #[test]
+    fn a_newline_in_the_subject_cannot_add_a_header() {
+        let rendered = draft_to_eml(&draft(
+            "Follow-up\r\nBcc: everyone@example.com",
+            "Body",
+            &["a@b.com"],
+        ));
+
+        // The property is that it is not a *header*, not that the text is absent: "Bcc:" sitting
+        // inside a subject value is harmless, and asserting it away would be asserting the wrong
+        // thing. What must not happen is a line beginning with it.
+        let headers = rendered.split_once("\r\n\r\n").expect("a body").0;
+        assert!(
+            !headers
+                .lines()
+                .any(|line| line.to_lowercase().starts_with("bcc:")),
+            "a subject smuggled a header in: {headers}"
+        );
+        assert!(headers.contains("Subject: Follow-up Bcc: everyone@example.com"));
+    }
+
+    /// A draft with nobody to send it to still opens; the client asks for a recipient.
+    #[test]
+    fn a_draft_with_no_recipients_omits_the_header_rather_than_writing_an_empty_one() {
+        let rendered = draft_to_eml(&draft("Subject", "Body", &[]));
+        assert!(!rendered.contains("To:"), "{rendered}");
+        assert!(rendered.contains("Subject: Subject"));
+    }
+
+    #[test]
+    fn blank_recipients_are_dropped() {
+        let rendered = draft_to_eml(&draft("S", "B", &["a@b.com", "   ", ""]));
+        assert!(rendered.contains("To: a@b.com\r\n"), "{rendered}");
+    }
+
+    /// A subject in any script, because a follow-up is written in the language of the meeting.
+    #[test]
+    fn a_non_ascii_subject_survives() {
+        let rendered = draft_to_eml(&draft("Suivi : réunion d'équipe", "Corps", &["a@b.com"]));
+        assert!(rendered.contains("Suivi : réunion d'équipe"), "{rendered}");
+        assert!(rendered.contains("charset=utf-8"));
+    }
+
+    /// No Date and no Message-ID: a client composing from a draft supplies its own, and a stale one
+    /// from whenever this was generated would be wrong by the time it is sent.
+    #[test]
+    fn no_timestamp_is_baked_in() {
+        let rendered = draft_to_eml(&draft("S", "B", &["a@b.com"]));
+        assert!(!rendered.contains("Date:"), "{rendered}");
+        assert!(!rendered.contains("Message-ID:"), "{rendered}");
+    }
+}

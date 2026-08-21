@@ -43,7 +43,7 @@ pub use audio::{
 };
 pub use db::Database;
 pub use error::{Result, StorageError};
-pub use export::{meeting_to_markdown, ExportOptions};
+pub use export::{draft_to_eml, meeting_to_markdown, ExportOptions};
 pub use id::Id;
 pub use location::{
     adopt_legacy_models, adopt_legacy_workspace, data_dir, database_path, legacy_database_paths,
