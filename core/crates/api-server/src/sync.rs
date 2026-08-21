@@ -1,4 +1,4 @@
-//! The two background passes that keep connectors moving.
+//! The background passes: what happens without anybody pressing a button.
 //!
 //! # What was missing, and why it mattered
 //!
@@ -10,6 +10,16 @@
 //!
 //! So: one pass in each direction. **Pull** asks every registered source for what is new. **Drain**
 //! delivers whatever the outbox is holding, including the attempts a previous failure deferred.
+//!
+//! # And one that is not about connectors at all
+//!
+//! **Sweep** deletes retained audio past its retention policy. It lives here because it is the same
+//! shape — a periodic pass over the workspace that wants its own connection — and because it had
+//! exactly the same problem: `POST /v1/audio/sweep` existed, nothing called it, and its own log line
+//! said "a later sweep will retry" about a later sweep that was never going to happen.
+//!
+//! That one is worse than a stalled queue. A user who set "keep audio for seven days" had audio kept
+//! forever, and the setting that said otherwise was decoration.
 //!
 //! # Why these are not gated on a setting
 //!
@@ -46,6 +56,13 @@ type Shared = Arc<AppState>;
 /// does not care about the difference. Polling harder would spend a network round trip per source
 /// per minute to learn nothing.
 pub const PULL_TICK: Duration = Duration::from_secs(10 * 60);
+
+/// How often to delete audio past its retention.
+///
+/// Hourly. Retention is measured in days, so this could be far slower — but a machine that is only
+/// awake for an hour at a time would then never sweep at all, and the cost of asking is one indexed
+/// query against a table of meetings.
+pub const SWEEP_TICK: Duration = Duration::from_secs(60 * 60);
 
 /// How often to try the outbox.
 ///
@@ -131,7 +148,19 @@ pub async fn drain_once(
     .await
 }
 
-/// Start both passes.
+/// Delete retained audio the policy says is past its time.
+///
+/// Answers how much went, so a quiet log stays quiet. Failures are reported by the sweep itself and
+/// retried by the next one, which is now a sentence that is true.
+pub async fn sweep_once(state: &Shared) -> Result<notewise_storage::SweepReport, String> {
+    on_a_worker(state, |db, _| {
+        let policy = notewise_storage::retention_policy(db);
+        notewise_storage::sweep(db, policy, chrono::Utc::now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Start every pass.
 ///
 /// Started with the server rather than with the router, like the scheduler and the calendar watcher:
 /// `app` is also called by tests and by an embedder that only wants the route table, and neither
@@ -155,6 +184,26 @@ pub fn spawn(state: Shared) {
                 // A pass that dies on one bad tick stops every source silently, which is the
                 // failure mode a background loop is most likely to hide.
                 Err(e) => tracing::warn!(error = %e, "a pull failed; continuing"),
+            }
+        }
+    });
+
+    let sweeping = Arc::clone(&state);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(SWEEP_TICK).await;
+
+            match sweep_once(&sweeping).await {
+                Ok(report) if report.deleted > 0 || !report.failed.is_empty() => {
+                    tracing::info!(
+                        deleted = report.deleted,
+                        bytes_freed = report.bytes_freed,
+                        failed = report.failed.len(),
+                        "swept audio past its retention"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "a retention sweep failed; continuing"),
             }
         }
     });
@@ -366,5 +415,23 @@ mod tests {
         assert!(PULL_TICK >= Duration::from_secs(5 * 60));
         assert!(DRAIN_TICK <= Duration::from_secs(60));
         assert!(DRAIN_TICK < PULL_TICK);
+    }
+    /// The pass that did not exist. A user who set "keep audio for seven days" had audio kept
+    /// forever, and the setting that said otherwise was decoration.
+    #[tokio::test]
+    async fn a_sweep_runs_and_reports_what_it_removed() {
+        let (state, _dir) = on_disk();
+
+        // Nothing retained, so nothing to remove — and that is a report rather than an error.
+        let report = sweep_once(&state).await.expect("sweeps");
+        assert_eq!(report.deleted, 0);
+        assert_eq!(report.bytes_freed, 0);
+        assert!(report.failed.is_empty());
+    }
+
+    /// Hourly rather than daily, so a machine awake for an hour at a time still sweeps.
+    #[test]
+    fn the_sweep_runs_often_enough_for_a_machine_that_is_rarely_on() {
+        assert!(SWEEP_TICK <= Duration::from_secs(2 * 60 * 60));
     }
 }

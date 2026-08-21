@@ -39,6 +39,7 @@ export function AssistantSettings() {
 
   const [overlayHotkey, setOverlayHotkey] = useState("");
   const [typing, setTyping] = useState<TypingActivity | null>(null);
+  const [screen, setScreen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -78,6 +79,18 @@ export function AssistantSettings() {
       await load();
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** What the panel would be shown, before anybody uses it. */
+  const showWhatItSees = async () => {
+    setError(null);
+    try {
+      const found = await api.screenContext();
+      setScreen(found.empty ? "Nothing readable is on screen right now." : found.prompt);
+    } catch (e) {
+      setScreen(null);
+      setError(e instanceof ApiError ? e.message : "Could not read the screen.");
     }
   };
 
@@ -276,6 +289,26 @@ export function AssistantSettings() {
           is only on screen as pixels — a PDF, a screenshot — additionally needs a signed build,
           which a development build is not.
         </p>
+
+        {/* "What does it see" answerable before the panel is used rather than after. This is the
+            surface that reads a window belonging to another application, so it should be possible
+            to check that without having to ask it a question first. */}
+        <div className="border-t border-hairline pt-2">
+          <button
+            type="button"
+            onClick={() => void showWhatItSees()}
+            className="btn-ghost px-2.5 py-1 text-[11.5px]"
+          >
+            Show me what it would read
+          </button>
+
+          {screen !== null && (
+            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-overlay p-2
+                            font-mono text-[11px] leading-snug text-ink-muted">
+              {screen}
+            </pre>
+          )}
+        </div>
       </div>
 
       {/* 9d, with its limits stated rather than implied. */}

@@ -9,7 +9,9 @@ import {
   X,
 } from "lucide-react";
 
-import type { AmbiguityKind, ClarifyingQuestion, Summary } from "../lib/api";
+import { useState } from "react";
+
+import { api, type AmbiguityKind, type ClarifyingQuestion, type Summary } from "../lib/api";
 import { ActionItems } from "./ActionItems";
 import { MeetingBrief } from "./MeetingBrief";
 
@@ -124,6 +126,26 @@ export function IntelPanel({
   onDismissQuestion,
   onClose,
 }: Props) {
+  /**
+   * Decisions removed in this session.
+   *
+   * Kept locally rather than by asking the parent to refetch: the summary arrives as a prop, and a
+   * callback chain up through the meeting view to refresh it would be four files of plumbing to
+   * remove one row. The deletion is already persisted, so a remount shows it gone anyway.
+   */
+  const [forgotten, setForgotten] = useState<string[]>([]);
+
+  const forget = async (id: string) => {
+    // Optimistic: the row should go when it is clicked. A failure puts it back, because a decision
+    // that looks deleted and is not would reappear later with no explanation.
+    setForgotten((current) => [...current, id]);
+    try {
+      await api.deleteDecision(id);
+    } catch {
+      setForgotten((current) => current.filter((got) => got !== id));
+    }
+  };
+
   return (
     <aside
       aria-label="Meeting intelligence"
@@ -218,21 +240,39 @@ export function IntelPanel({
               <Empty>No decisions were identified.</Empty>
             ) : (
               <ul className="space-y-2">
-                {summary.decisions.map((decision) => (
-                  <li
-                    key={decision.id}
-                    className="rounded-lg border border-hairline bg-surface p-2.5"
-                  >
-                    <p className="text-[12.5px] leading-snug text-ink">
-                      {decision.text}
-                    </p>
-                    {decision.reasoning && (
-                      <p className="mt-1 text-[11px] leading-snug text-ink-muted">
-                        {decision.reasoning}
-                      </p>
-                    )}
-                  </li>
-                ))}
+                {summary.decisions
+                  .filter((decision) => !forgotten.includes(decision.id))
+                  .map((decision) => (
+                    <li
+                      key={decision.id}
+                      className="group flex items-start gap-2 rounded-lg border border-hairline
+                                 bg-surface p-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12.5px] leading-snug text-ink">{decision.text}</p>
+                        {decision.reasoning && (
+                          <p className="mt-1 text-[11px] leading-snug text-ink-muted">
+                            {decision.reasoning}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* A wrong decision is worse than a missing one: it reads as a record of what
+                          the room agreed. The engine has allowed removing one since decisions became
+                          first-class and nothing offered it. */}
+                      <button
+                        type="button"
+                        onClick={() => void forget(decision.id)}
+                        aria-label={`Forget: ${decision.text}`}
+                        title="This was not a decision"
+                        className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 transition
+                                   hover:text-warn-text group-hover:opacity-100
+                                   focus-visible:opacity-100"
+                      >
+                        <X size={11} aria-hidden />
+                      </button>
+                    </li>
+                  ))}
               </ul>
             )}
           </Section>

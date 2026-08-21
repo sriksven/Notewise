@@ -1472,6 +1472,16 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
+  /**
+   * Forget a decision the model got wrong.
+   *
+   * The engine has allowed this since decisions became first-class and nothing offered it, which
+   * left a wrong decision on the meeting permanently — and a wrong decision is worse than a missing
+   * one, because it reads as a record of what the room agreed.
+   */
+  deleteDecision: (id: string) =>
+    request<void>(`/v1/decisions/${id}`, { method: "DELETE" }),
+
   deleteActionItem: (id: string) =>
     request<{ deleted: boolean }>(`/v1/action-items/${id}`, {
       method: "DELETE",
@@ -1832,6 +1842,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  /**
+   * What the assistant would read from your screen right now.
+   *
+   * Exists so "what does it see" is answerable before the panel is used rather than after. Needs the
+   * Accessibility permission, and refuses with the pane to open when it does not have it.
+   */
+  screenContext: () =>
+    request<{ context: ScreenContext; prompt: string; empty: boolean }>(
+      "/v1/assistant/context",
+    ),
 
   typingActivity: () =>
     request<{ activity: TypingActivity; supported: boolean }>("/v1/assistant/typing"),
