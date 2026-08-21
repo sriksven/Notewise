@@ -7,6 +7,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # For the expensive combination below, which is too slow to run on every push and too important
+  # to run never. See the `heavy` job.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -113,6 +118,16 @@ jobs:
       - name: diarization with onnx
         run: cargo check -p notewise-diarization --features onnx --all-targets
 
+      # The desktop assistant's platform layer. Cheap to check — no cmake, no ONNX, no SDK — and the
+      # only thing in the workspace that compiles `unsafe`, which makes it the last feature that
+      # should go unchecked. On Linux it compiles to the refusal path, which is also worth knowing
+      # still compiles.
+      - name: os-input without the platform layer
+        run: cargo check -p notewise-os-input --all-targets
+
+      - name: api-server with external tools
+        run: cargo check -p notewise-api-server --features assistant --all-targets
+
   # The direction the matrix above misses: code behind an *enabled* feature is never compiled by
   # the default build, so `cargo build --workspace` stays green while a real desktop build is
   # broken. That happened — the import path moved a `ModelStore` a later line still needed, and
@@ -136,3 +151,36 @@ jobs:
 
       - name: cli with capture and speaker separation
         run: cargo check -p notewise-cli --features record,speaker-diarization --all-targets
+
+      # The assistant's `unsafe` half, which only exists on macOS. Tests as well as a check: the
+      # CoreFoundation round trips, the whole pasteboard including a real save-and-restore, and the
+      # event-synthesis allocation discipline all run without any permission, and they are the parts
+      # where being wrong is a crash rather than a compile error.
+      - name: os-input platform layer
+        run: cargo test -p notewise-os-input --features os-input
+
+      - name: shell with the assistant
+        run: cargo check --features assistant
+        working-directory: apps/desktop/src-tauri
+
+  # The combination nothing else checks, on a schedule rather than never.
+  #
+  # `--features full` pulls a cmake build of whisper.cpp, which is minutes of CI for a dependency
+  # most changes have nothing to do with — so it is not on the per-push path. It is also the
+  # combination that has actually broken: `Pipeline::retaining_audio` consumed `self` and could fail,
+  # so the import path borrowed a moved value, and *nothing compiled that code* for long enough that
+  # the break was discovered by hand. Weekly is not fast, and it is not never.
+  heavy:
+    name: full build (weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: api-server with everything
+        run: cargo check -p notewise-api-server --features full-assistant --all-targets
+
+      - name: cli with everything
+        run: cargo check -p notewise-cli --features full --all-targets
