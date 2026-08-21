@@ -63,9 +63,22 @@ jobs:
   #
   # This crate is outside the cargo workspace and had never been compiled by CI in any form. Adding
   # it found a clippy error on the first run.
+  # macOS, not ubuntu, and not a matrix. Three reasons, in order of how much they cost me:
+  #
+  # The shell is the only crate in the repository that compiles `unsafe`, and every line of it is
+  # macOS: ScreenCaptureKit, the accessibility API, Carbon hotkeys, Vision. A Linux run compiles the
+  # `cfg`-else branches — the stubs that refuse with a reason — so it checks the part that has no
+  # `unsafe` in it and skips the part that does. That is the wrong half.
+  #
+  # It is also the platform I can reproduce. A Linux Tauri build needs a webview and a window
+  # toolkit from apt, and when this job was ubuntu it failed for a reason I could not read, could
+  # not reproduce, and could only have guessed at.
+  #
+  # And the shell ships on macOS. Nobody runs it on Linux yet, so a Linux failure would block a
+  # merge over a target that has no users.
   shell:
     name: desktop shell
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -77,21 +90,24 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
 
-      # Tauri on Linux needs a webview and a window toolkit at *build* time, not just at run time.
-      - name: System dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
+      # Before clippy, not beside it: `tauri.conf.json` points `frontendDist` at `dist/`, which is
+      # gitignored, and `tauri-build` fails on a fresh checkout if it is not there. Nothing about
+      # the Rust here needs the built frontend — the build script does.
       - name: Frontend
         run: npm ci && npx vite build
         working-directory: apps/desktop
+
+      # `cargo fmt --all` at the repository root does not reach this crate — it is excluded from
+      # the workspace, so rustfmt never sees it and drift here was caught by nothing. Found the
+      # hard way: unformatted code sat in `main.rs` while every `fmt` gate reported clean.
+      - name: Formatting
+        run: cargo fmt --check
 
       # Both ways round. Without the feature is what a default build ships; with it is the only
       # thing in the repository that compiles `unsafe`, and it is not in the workspace clippy runs

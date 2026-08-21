@@ -247,7 +247,10 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
         return Ok(PathBuf::from(dir));
     }
 
-    if let Ok(resource) = app.path().resolve("dist", tauri::path::BaseDirectory::Resource) {
+    if let Ok(resource) = app
+        .path()
+        .resolve("dist", tauri::path::BaseDirectory::Resource)
+    {
         if resource.join("index.html").exists() {
             return Ok(resource);
         }
