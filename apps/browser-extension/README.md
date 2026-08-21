@@ -1,11 +1,38 @@
 # Browser extension
 
 > **Status: implemented, unverified against live meeting pages.** The platform-independent logic is
-> tested (`npm test`, 13 tests). The DOM selectors are not, and cannot be — see
+> tested (`npm test`, 28 tests). The DOM selectors are not, and cannot be — see
 > [What is not tested](#what-is-not-tested).
 
-Tells your local Notewise engine **who is speaking**. It sends names and speaking times. It does not
-send audio.
+Two jobs, and they send different things.
+
+**Notices that a meeting started**, so Notewise can offer to record it. Sends the platform name and
+an opaque key derived from the URL — at most ten times, then never again for that meeting. Reads no
+page content at all: a meeting is recognised from the shape of its address.
+
+**Tells your local engine who is speaking**, once a recording is running. Sends display names and
+speaking times.
+
+Neither sends audio, video, chat, screen contents, the meeting title, or the link itself.
+
+## Why the first job runs before you press record
+
+Everything else in Notewise is downstream of somebody remembering to press record, and forgetting is
+the single largest source of lost value in the product. That cannot be fixed by a feature that only
+runs once recording has started.
+
+So join detection is the one thing here that is active on a meeting page with no recording in
+progress — and it is deliberately the thing that reads the least. It looks at `location.href`,
+recognises the shape of a meeting link, and posts a platform name and a digest. It cannot see the
+roster, the chat, or anything rendered.
+
+Speaker tracking is unchanged: it starts only when the engine reports an active recording, and until
+then nothing samples the page.
+
+**Detection never starts a recording.** It produces a notification and an offer in the app, and a
+person clicks. A false positive is then a prompt nobody wanted; if it recorded instead, a false
+positive would be audio of other people captured because software guessed a meeting had begun. Those
+are not the same kind of mistake.
 
 ## The problem it solves
 
@@ -44,6 +71,10 @@ project does not do. So for native-app users the speaker options are:
    real meetings has not been measured here.
 
 Neither needs this extension. It is an accelerator for browser meetings, not a dependency.
+
+The same limitation applies to join detection, and harder: a meeting taken in a native client with
+nothing on your calendar is not noticed at all. Notewise does not watch what is running on your
+machine, which is what it would take.
 
 ## Why this replaced the audio-streaming design
 

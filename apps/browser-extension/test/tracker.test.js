@@ -13,7 +13,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { SpeakerTracker, MIN_TURN_MS } from "../src/tracker.js";
-import { activeRecording, findEngine, postSpeakerEvents, PORTS } from "../src/engine.js";
+import {
+  activeRecording,
+  findEngine,
+  meetingKey,
+  postSpeakerEvents,
+  PORTS,
+} from "../src/engine.js";
+import { activeMeeting } from "../src/platforms.js";
+import { JoinAnnouncer } from "../src/join.js";
 
 /** A clock the test drives by hand. */
 function fakeClock(start = 0) {
@@ -290,4 +298,169 @@ test("a batch is posted to the loopback engine as JSON", async () => {
   assert.equal(seen.url, "http://127.0.0.1:47825/v1/meetings/m1/speaker-events");
   assert.equal(seen.init.method, "POST");
   assert.deepEqual(JSON.parse(seen.init.body), batch);
+});
+
+// ---------------------------------------------------------------- join detection
+
+test("a meeting url is recognised and a landing page is not", () => {
+  const meeting = (href) => activeMeeting(new URL(href));
+
+  // Meet's three-four-three code, which is the whole signal.
+  assert.deepEqual(meeting("https://meet.google.com/abc-defg-hij"), {
+    platform: "meet",
+    meetingId: "abc-defg-hij",
+  });
+  assert.deepEqual(meeting("https://meet.google.com/abc-defg-hij?authuser=1"), {
+    platform: "meet",
+    meetingId: "abc-defg-hij",
+  });
+  assert.deepEqual(meeting("https://meet.google.com/lookup/standup"), {
+    platform: "meet",
+    meetingId: "lookup/standup",
+  });
+
+  // A landing page is not a meeting, and neither is the rest of the product.
+  assert.equal(meeting("https://meet.google.com/"), null);
+  assert.equal(meeting("https://meet.google.com/landing"), null);
+  assert.equal(meeting("https://mail.google.com/mail/u/0/"), null);
+});
+
+test("the same zoom meeting joined four ways gets one identity", () => {
+  const ids = [
+    "https://acme.zoom.us/wc/98765432101/join",
+    "https://acme.zoom.us/wc/98765432101/start",
+    "https://acme.zoom.us/wc/join/98765432101",
+    "https://acme.zoom.us/j/98765432101",
+  ].map((href) => activeMeeting(new URL(href)));
+
+  for (const found of ids) {
+    assert.deepEqual(found, { platform: "zoom", meetingId: "98765432101" });
+  }
+
+  // Zoom's own website is not a meeting.
+  assert.equal(activeMeeting(new URL("https://zoom.us/pricing")), null);
+  assert.equal(activeMeeting(new URL("https://acme.zoom.us/profile")), null);
+});
+
+test("teams is read from the fragment, and a chat is not a meeting", () => {
+  const joined = activeMeeting(
+    new URL(
+      "https://teams.microsoft.com/_#/l/meetup-join/19%3ameeting_ZmE0OTQ%40thread.v2/0?context=%7b%7d",
+    ),
+  );
+  assert.equal(joined.platform, "teams");
+  assert.equal(joined.meetingId, "19:meeting_ZmE0OTQ@thread.v2");
+
+  // The same meeting written with a literal colon rather than an escape.
+  const literal = activeMeeting(
+    new URL("https://teams.live.com/_#/l/meetup-join/19:meeting_ZmE0OTQ@thread.v2/0"),
+  );
+  assert.equal(literal.meetingId, joined.meetingId, "one meeting, one identity");
+
+  // Opening Teams to read a message must not report a meeting.
+  assert.equal(activeMeeting(new URL("https://teams.microsoft.com/_#/conversations/19:abc")), null);
+  assert.equal(activeMeeting(new URL("https://teams.microsoft.com/")), null);
+});
+
+test("a join key is opaque, stable, and per-platform", async () => {
+  const first = await meetingKey("meet", "abc-defg-hij");
+  const again = await meetingKey("meet", "abc-defg-hij");
+  const other = await meetingKey("zoom", "abc-defg-hij");
+
+  assert.equal(first, again, "the same meeting must dedupe against itself");
+  assert.notEqual(first, other, "two platforms must not collide");
+  assert.ok(!first.includes("abc-defg-hij"), `the code leaked: ${first}`);
+  assert.match(first, /^x:[0-9a-f]{32}$/);
+});
+
+test("a key falls back to the plain identity when there is no webcrypto", async () => {
+  // `null` rather than `undefined`: a default parameter fires on undefined, so passing that would
+  // test the default instead of the fallback.
+  assert.equal(await meetingKey("meet", "abc-defg-hij", null), "meet:abc-defg-hij");
+});
+
+test("one meeting is announced once, however often the page is polled", async () => {
+  const sent = [];
+  const announcer = new JoinAnnouncer(async (platform, id) => {
+    sent.push(`${platform}:${id}`);
+    return true;
+  });
+
+  const meeting = { platform: "meet", meetingId: "abc-defg-hij" };
+  assert.equal(await announcer.tick(meeting), "announced");
+
+  for (let i = 0; i < 20; i++) {
+    assert.equal(await announcer.tick(meeting), "settled");
+  }
+  assert.deepEqual(sent, ["meet:abc-defg-hij"]);
+});
+
+test("nobody listening means retry, and then stop for good", async () => {
+  let attempts = 0;
+  const announcer = new JoinAnnouncer(
+    async () => {
+      attempts += 1;
+      return false;
+    },
+    { maxAttempts: 3 },
+  );
+
+  const meeting = { platform: "zoom", meetingId: "98765432101" };
+  assert.equal(await announcer.tick(meeting), "retrying");
+  assert.equal(await announcer.tick(meeting), "retrying");
+  assert.equal(await announcer.tick(meeting), "gave-up");
+
+  // A page left open all afternoon must not keep knocking.
+  for (let i = 0; i < 10; i++) {
+    assert.equal(await announcer.tick(meeting), "gave-up");
+  }
+  assert.equal(attempts, 3);
+});
+
+test("the app opening late is still told", async () => {
+  let running = false;
+  const announcer = new JoinAnnouncer(async () => running);
+  const meeting = { platform: "meet", meetingId: "abc-defg-hij" };
+
+  assert.equal(await announcer.tick(meeting), "retrying");
+  running = true;
+  assert.equal(await announcer.tick(meeting), "announced");
+});
+
+test("moving to a different call announces the new one", async () => {
+  const sent = [];
+  const announcer = new JoinAnnouncer(async (platform, id) => {
+    sent.push(`${platform}:${id}`);
+    return true;
+  });
+
+  await announcer.tick({ platform: "meet", meetingId: "abc-defg-hij" });
+  await announcer.tick({ platform: "meet", meetingId: "xyz-uvwx-yza" });
+
+  assert.deepEqual(sent, ["meet:abc-defg-hij", "meet:xyz-uvwx-yza"]);
+});
+
+test("leaving the call and coming back announces again", async () => {
+  const sent = [];
+  const announcer = new JoinAnnouncer(async (platform, id) => {
+    sent.push(`${platform}:${id}`);
+    return true;
+  });
+  const meeting = { platform: "meet", meetingId: "abc-defg-hij" };
+
+  await announcer.tick(meeting);
+  assert.equal(await announcer.tick(null), "idle");
+  await announcer.tick(meeting);
+
+  // Twice from this side; the engine's own deduplication decides whether the user hears about it,
+  // which is where that rule belongs.
+  assert.equal(sent.length, 2);
+});
+
+test("a thrown poster is treated as nobody listening", async () => {
+  const announcer = new JoinAnnouncer(async () => {
+    throw new Error("connection refused");
+  });
+
+  assert.equal(await announcer.tick({ platform: "meet", meetingId: "abc-defg-hij" }), "retrying");
 });

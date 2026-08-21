@@ -21,6 +21,7 @@ import { HelpView } from "./views/HelpView";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
 import { RecordView } from "./views/RecordView";
+import { JoinPrompt } from "./components/JoinPrompt";
 import { SettingsView } from "./views/SettingsView";
 import { NotesView } from "./views/NotesView";
 import { SummaryView } from "./views/SummaryView";
@@ -667,6 +668,14 @@ export default function App() {
               </>
             )}
 
+            {/* A meeting the extension or the calendar noticed. Above everything, because it is
+                time-limited in a way nothing else on screen is — and it renders nothing at all when
+                there is no offer, which is almost always. */}
+            <JoinPrompt
+              canRecord={health?.can_record ?? false}
+              onStarted={(id) => navigate({ name: "meeting", id, tab: "transcript" })}
+            />
+
             {route.name === "home" && (
               <HomeView
                 meetings={meetings}
@@ -730,6 +739,7 @@ export default function App() {
                 theme={theme.theme}
                 onModeChange={theme.setMode}
                 onAccentChange={theme.setAccent}
+                onNavigate={navigate}
               />
             )}
             {route.name === "about" && <AboutView health={health} />}

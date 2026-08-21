@@ -716,8 +716,44 @@ export interface TypingActivity {
   keystrokes: number;
 }
 
+/**
+ * A meeting that appears to have started, and has not been answered.
+ *
+ * Held in the engine's memory rather than stored: the whole lifetime of one is the few minutes at
+ * the start of a meeting, and an offer to record something that finished yesterday is worse than
+ * none.
+ */
+export interface JoinOffer {
+  id: string;
+  /** What the recording would be called. */
+  title: string;
+  platform: "meet" | "zoom" | "teams" | "unknown";
+  /** The queued notification, so showing the offer in-app can mark it delivered rather than
+   *  letting the user be told the same thing twice. */
+  notification_id: string | null;
+  created_at: string;
+  expires_in_secs: number;
+}
+
+/** What meeting detection can currently see, and what it cannot. */
+export interface DetectionStatus {
+  sources: Array<{
+    source: "extension" | "calendar" | "native";
+    /** Null means it has never reported — for the extension, that is the whole answer. */
+    last_seen_at: string | null;
+  }>;
+  offers: number;
+  calendar_connected: boolean;
+  grace_secs: number;
+  /** Stated rather than left to be discovered: what this cannot detect. */
+  blind_spot: string;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
+
+  /** What meeting detection can see. */
+  detectionStatus: () => request<DetectionStatus>("/v1/signals/join"),
 
   meetings: (limit = 50) => request<Meeting[]>(`/v1/meetings?limit=${limit}`),
 
@@ -1677,6 +1713,24 @@ export const api = {
     request<{ activity: TypingActivity; supported: boolean }>("/v1/assistant/typing", {
       method: "DELETE",
     }),
+
+  // -------------------------------------------------------------- meetings starting
+
+  /** Meetings that appear to have started. An empty list is the normal state. */
+  joinOffers: () => request<JoinOffer[]>("/v1/signals/join/offers"),
+
+  /**
+   * Take an offer up. Returns what to call the recording — it does not start one, because
+   * starting one already has its own endpoint with its own device and model errors.
+   */
+  acceptJoinOffer: (id: string) =>
+    request<{ title: string; calendar_event_id: string | null }>(
+      `/v1/signals/join/offers/${id}/accept`,
+      { method: "POST" },
+    ),
+
+  dismissJoinOffer: (id: string) =>
+    request<{ dismissed: boolean }>(`/v1/signals/join/offers/${id}`, { method: "DELETE" }),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

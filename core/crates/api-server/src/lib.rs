@@ -179,6 +179,7 @@ impl Server {
         // The scheduler starts with the server, not with the router: `app` is also called by tests
         // and by an embedder that only wants the route table, and neither wants a background loop.
         crate::jobs::spawn(Arc::clone(&state));
+        crate::join::spawn(Arc::clone(&state));
         self.serve_router(app(Arc::clone(&state)), state).await
     }
 
@@ -190,6 +191,7 @@ impl Server {
     ) -> Result<(), ServeError> {
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
+        crate::join::spawn(Arc::clone(&state));
         self.serve_router(app_with_frontend(Arc::clone(&state), dir), state)
             .await
     }
@@ -247,6 +249,7 @@ impl Server {
         let bound = listener.local_addr()?;
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
+        crate::join::spawn(Arc::clone(&state));
         let router = app_with_frontend(Arc::clone(&state), dir);
 
         Ok((bound, async move {

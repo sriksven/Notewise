@@ -73,7 +73,23 @@ function participantId(element, name) {
  */
 export const googleMeet = {
   name: "google-meet",
+  platform: "meet",
   matches: (url) => /(^|\.)meet\.google\.com$/.test(url.hostname),
+
+  /**
+   * The meeting code, or null when this is not an actual call.
+   *
+   * `meet.google.com` on its own is a landing page, and a landing page is not a meeting. The code
+   * is the three-four-three grouping Meet has used for years; `/lookup/<alias>` is the named-link
+   * form that redirects to one.
+   */
+  meetingId(url) {
+    const code = /^\/([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/.exec(url.pathname);
+    if (code) return code[1];
+
+    const lookup = /^\/lookup\/([A-Za-z0-9_-]{4,})\/?$/.exec(url.pathname);
+    return lookup ? `lookup/${lookup[1]}` : null;
+  },
 
   SELECTORS: {
     tile: ["[data-participant-id]", "[data-self-name]"],
@@ -123,7 +139,30 @@ export const googleMeet = {
  */
 export const zoomWeb = {
   name: "zoom-web",
+  platform: "zoom",
   matches: (url) => /(^|\.)zoom\.us$/.test(url.hostname),
+
+  /**
+   * The meeting number, or null.
+   *
+   * Zoom writes the same number four ways depending on how the link was made: `/j/` for an invite,
+   * `/s/` for a host start link, and `/wc/<id>/join` or `/wc/join/<id>` for the web client. All of
+   * them are the same meeting, so all of them produce the same id — otherwise one meeting joined by
+   * two routes would look like two.
+   */
+  meetingId(url) {
+    const patterns = [
+      /^\/wc\/(\d{9,})\/(?:join|start)/,
+      /^\/wc\/join\/(\d{9,})/,
+      /^\/[js]\/(\d{9,})/,
+    ];
+
+    for (const pattern of patterns) {
+      const found = pattern.exec(url.pathname);
+      if (found) return found[1];
+    }
+    return null;
+  },
 
   SELECTORS: {
     tile: [
@@ -176,9 +215,33 @@ export const zoomWeb = {
  */
 export const teamsWeb = {
   name: "teams-web",
+  platform: "teams",
   matches: (url) =>
     /(^|\.)teams\.microsoft\.com$/.test(url.hostname) ||
     /(^|\.)teams\.live\.com$/.test(url.hostname),
+
+  /**
+   * The meeting thread, or null.
+   *
+   * Teams is the awkward one: the join target lives in the *fragment*, which is why this reads
+   * `url.hash` as well as the path. Everything else about Teams — chats, channels, files — is on
+   * the same origin, so a host match alone would report a meeting every time somebody opened Teams
+   * to read a message.
+   */
+  meetingId(url) {
+    const wherever = `${url.pathname}${url.hash}`;
+
+    // The thread id is the durable identity: the same meeting rejoined from a different link keeps
+    // it, while the surrounding query parameters change every time.
+    const thread = /19(?:%3a|:)meeting_([A-Za-z0-9%._-]+?)(?:%40|@)thread\.v2/i.exec(wherever);
+    if (thread) return `19:meeting_${decodeURIComponent(thread[1])}@thread.v2`;
+
+    // A join URL whose thread cannot be read is still a join URL. Reported without an id, which
+    // the caller turns into a platform-and-time signal rather than nothing.
+    return /meetup-join|\/v2\/\?meetingjoin=true|modern-calling/i.test(wherever)
+      ? "meetup-join"
+      : null;
+  },
 
   SELECTORS: {
     tile: ["[data-tid='participant-item']", "[data-tid*='roster-list-item']", "[data-tid*='stream']"],
@@ -218,4 +281,25 @@ export const PLATFORMS = [googleMeet, zoomWeb, teamsWeb];
 /** The adapter for a URL, or null when this is not a meeting page we understand. */
 export function platformFor(url) {
   return PLATFORMS.find((p) => p.matches(url)) ?? null;
+}
+
+/**
+ * Whether this page is an actual call, and which meeting.
+ *
+ * Returns `{ platform, meetingId }` or null. Separate from [`platformFor`] because the two answer
+ * different questions: that one says "the extension understands this origin", and this one says
+ * "somebody is in a meeting right now". The speaker tracker needs the first; join detection needs
+ * the second, and conflating them would report a meeting every time a Teams tab was opened to read
+ * a chat.
+ *
+ * URL-shaped rather than DOM-shaped on purpose. It is the one signal on these pages that does not
+ * rot when a vendor redesigns, and navigating to a meeting link is a deliberate act — which is
+ * exactly what the engine's rules treat as a strong signal.
+ */
+export function activeMeeting(url) {
+  const platform = platformFor(url);
+  if (!platform || typeof platform.meetingId !== "function") return null;
+
+  const meetingId = platform.meetingId(url);
+  return meetingId ? { platform: platform.platform, meetingId } : null;
 }

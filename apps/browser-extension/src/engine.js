@@ -123,3 +123,68 @@ export async function postSpeakerEvents(meetingId, batch, engineOrigin, fetchImp
 
   return response.ok;
 }
+
+/**
+ * Tell the engine a meeting appears to have started.
+ *
+ * # What crosses the wire, and what does not
+ *
+ * The platform — `meet`, `zoom`, or `teams` — and an opaque key. Not the URL, not the meeting code,
+ * not the page title, not the roster. The engine's only use for an identity here is to avoid
+ * notifying twice about one meeting, and a digest does that exactly as well as the thing it was
+ * derived from. Sending the link as well would be sending something nothing reads.
+ *
+ * The digest is for deduplication rather than secrecy — a meeting code is short enough that a
+ * determined listener could search for it — but the listener has already been checked to be
+ * Notewise before anything is sent, and not sending data nobody needs is worth doing regardless.
+ *
+ * Returns true when an engine accepted the signal, which is what stops the caller repeating it.
+ */
+export async function postJoinSignal(platform, meetingId, fetchImpl = fetch) {
+  const engine = await findEngine(fetchImpl);
+  if (!engine) return false;
+
+  const body = {
+    source: "extension",
+    platform,
+    // Navigating to a meeting link is deliberate, which is what the engine treats as strong.
+    strong: true,
+    external_id: await meetingKey(platform, meetingId),
+  };
+
+  try {
+    const response = await fetchImpl(`${origin(engine.port)}/v1/signals/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return response.ok;
+  } catch {
+    // The engine went away between the probe and the post. Not an error worth surfacing on a
+    // meeting page — the user gets no notification, which is the same as not having the app open.
+    return false;
+  }
+}
+
+/**
+ * A stable, opaque identity for one meeting.
+ *
+ * Prefixed with the platform so two vendors cannot collide, and truncated because the engine only
+ * compares it for equality.
+ */
+export async function meetingKey(platform, meetingId, subtle = globalThis.crypto?.subtle) {
+  const source = `${platform}:${meetingId}`;
+
+  if (!subtle) {
+    // No WebCrypto: send the plain identity rather than nothing. A missing digest should cost the
+    // opacity, not the feature.
+    return source;
+  }
+
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(source));
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `x:${hex.slice(0, 32)}`;
+}

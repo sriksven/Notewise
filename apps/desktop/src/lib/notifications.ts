@@ -23,11 +23,38 @@ import { api } from "./api";
 /** How often to look for queued notifications. */
 const POLL_MS = 15_000;
 
+/**
+ * After this, a queued notification is dropped rather than shown.
+ *
+ * A notification saying a meeting is starting, delivered forty minutes later, is worse than none:
+ * the user goes looking for a meeting that is half over, or presses record on one that has finished.
+ * The row is marked delivered anyway, so the queue drains rather than filling with things that will
+ * never be shown.
+ *
+ * Ten minutes is the same window the engine keeps a join offer live for, which is not a coincidence
+ * — past that there is nothing to act on either way.
+ */
+export const STALE_MS = 10 * 60 * 1000;
+
+/**
+ * Whether a queued notification has been waiting too long to be worth showing.
+ *
+ * Pure and exported so the rule is testable without a clock, a queue, or an OS.
+ */
+export function isStale(createdAt: string, now = Date.now()): boolean {
+  const at = new Date(createdAt).getTime();
+  // An unparseable date is not evidence of staleness. Showing it is the recoverable mistake.
+  if (Number.isNaN(at)) return false;
+  return now - at > STALE_MS;
+}
+
 /** Ids shown in this session, so a slow round trip cannot double-display one. */
 const shown = new Set<string>();
 
 function titleFor(sourceKind: string): string {
   switch (sourceKind) {
+    case "join_offer":
+      return "Meeting starting";
     case "meeting":
       return "Meeting";
     case "action_item":
@@ -61,7 +88,26 @@ export async function deliverPending(): Promise<number> {
       if (shown.has(item.id)) continue;
       shown.add(item.id);
 
-      new Notification(titleFor(item.source_kind), { body: item.body, tag: item.id });
+      // Dropped rather than shown, and drained rather than left: a queue that keeps things it will
+      // never display grows forever and hides the ones that matter.
+      if (isStale(item.created_at)) {
+        await api.markNotificationDelivered(item.id).catch(() => {});
+        continue;
+      }
+
+      const notification = new Notification(titleFor(item.source_kind), {
+        body: item.body,
+        tag: item.id,
+      });
+
+      // Bring the window forward. Whatever the notification is about is acted on in the app — a
+      // meeting to record has a button there — so the useful thing a click can do is get the user
+      // to it.
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
       delivered += 1;
 
       try {

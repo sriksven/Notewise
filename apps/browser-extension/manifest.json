@@ -37,7 +37,8 @@
         "src/session.js",
         "src/platforms.js",
         "src/tracker.js",
-        "src/engine.js"
+        "src/engine.js",
+        "src/join.js"
       ],
       "matches": [
         "https://meet.google.com/*",

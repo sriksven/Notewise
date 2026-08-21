@@ -1,25 +1,33 @@
 /**
- * The content script: watch a meeting page, report who spoke, send nothing else.
+ * The content script: watch a meeting page, report who spoke, and say that a meeting started.
  *
- * # What this does and does not send
+ * # Two jobs, and they send different things
  *
- * Sends: participant display names, and time spans saying who was speaking. That is it.
+ * **Speaker tracking** sends participant display names and time spans saying who was speaking, and
+ * only while the engine is already recording. A meeting page with no recording in progress has
+ * nothing read from it: no DOM is sampled, no roster is touched, no buffer fills. That is a privacy
+ * property rather than an optimisation — the extension should be inert unless the user has already
+ * chosen to record.
  *
- * Does not send: audio, video, chat, screen contents, the meeting title, the URL, or any page text
- * beyond the names in the participant roster. The desktop app already has the audio; duplicating it
- * here would be the expensive way to learn something cheap.
+ * **Join detection** cannot work that way, and this is the honest statement of the trade. Its whole
+ * purpose is to speak *before* anything is recording, because the largest source of lost value in
+ * this product is somebody not pressing record. So it does run on a page with no recording — and it
+ * reads no DOM whatsoever. The meeting is recognised from the URL's shape, and what crosses the
+ * wire is the platform name and an opaque key, at most ten times, then never again.
  *
- * # It only runs while the engine is recording
+ * Neither job sends audio, video, chat, screen contents, the meeting title, or the URL.
  *
- * Tracking starts when the local engine reports an active recording and stops when it stops. A
- * meeting page with no recording in progress is left completely alone — nothing is read, nothing is
- * buffered, no timer runs. That is a privacy property, not an optimisation: the extension should be
- * inert unless the user has already chosen to record.
+ * # Nothing here starts a recording
+ *
+ * The signal produces a notification the user clicks. A false positive is then a notification
+ * nobody wanted; if it started recording instead, a false positive would be audio of other people
+ * captured because software guessed. Those are not the same kind of mistake.
  */
 
-import { platformFor } from "./platforms.js";
+import { activeMeeting, platformFor } from "./platforms.js";
 import { SpeakerTracker, INTERVAL_MS } from "./tracker.js";
-import { activeRecording, postSpeakerEvents } from "./engine.js";
+import { activeRecording, postJoinSignal, postSpeakerEvents } from "./engine.js";
+import { JoinAnnouncer, RETRY_MS } from "./join.js";
 
 /*
  * Loaded by `content.js` via dynamic import rather than being the content script itself: a
@@ -47,6 +55,9 @@ const BLIND_SAMPLE_LIMIT = 120;
 
 /** @type {import('./platforms.js').Platform | null} */
 let platform = null;
+
+/** @type {JoinAnnouncer | null} */
+let announcer = null;
 
 /** @type {{ tracker: SpeakerTracker, meetingId: string, timer: number, flush: number } | null} */
 let session = null;
@@ -126,6 +137,18 @@ async function poll() {
 }
 
 /**
+ * Say that a meeting appears to be underway, if one does.
+ *
+ * Reads the URL and nothing else. Called on a slow interval rather than once, because these are
+ * single-page apps: the tab that is now in a call was on a landing page a second ago, and no load
+ * event marks the difference.
+ */
+async function announce() {
+  if (!announcer) return;
+  await announcer.tick(activeMeeting(new URL(location.href)));
+}
+
+/**
  * Start watching this page, if it is a meeting page we understand.
  *
  * Called by `content.js`. Returns the platform adapter in use, or null when the page is not one of
@@ -137,6 +160,12 @@ export function run() {
 
   setInterval(poll, ENGINE_POLL_MS);
   poll();
+
+  // Join detection, on its own slower clock. Separate from `poll` because that one asks whether a
+  // recording is running, and this one has to work precisely when none is.
+  announcer = new JoinAnnouncer(postJoinSignal);
+  setInterval(announce, RETRY_MS);
+  announce();
 
   // A tab closed mid-meeting should still hand over what it has.
   window.addEventListener("pagehide", () => stop("the tab closed"), { once: true });

@@ -22,6 +22,8 @@ import { RoutingSettings } from "./RoutingSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ToolServersSettings } from "./ToolServersSettings";
 import { AssistantSettings } from "./AssistantSettings";
+import { MeetingDetectionSettings } from "./MeetingDetectionSettings";
+import type { Route } from "../lib/router";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
@@ -41,9 +43,16 @@ interface SettingsViewProps {
   theme: Theme;
   onModeChange: (mode: Mode) => void;
   onAccentChange: (accent: string) => void;
+  /** So a setting that is fixed elsewhere can send the user there rather than describing it. */
+  onNavigate: (route: Route) => void;
 }
 
-export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsViewProps) {
+export function SettingsView({
+  theme,
+  onModeChange,
+  onAccentChange,
+  onNavigate,
+}: SettingsViewProps) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [active, setActive] = useState<Active | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -184,6 +193,10 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
             </div>
           </section>
         )}
+
+        {/* Before routing and models: this is the one setting that decides whether a meeting gets
+            captured at all, and everything else here is about what happens to one that was. */}
+        <MeetingDetectionSettings onNavigate={onNavigate} />
 
         <RoutingSettings />
 
