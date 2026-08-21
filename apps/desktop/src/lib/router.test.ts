@@ -51,6 +51,13 @@ describe("parseRoute", () => {
     expect(parseRoute("#/agent")).toEqual({ name: "agent" });
     expect(parseRoute("#/connectors")).toEqual({ name: "connectors" });
     expect(parseRoute("#/about")).toEqual({ name: "about" });
+    expect(parseRoute("#/overlay")).toEqual({ name: "overlay" });
+  });
+
+  /** The shell opens the overlay window at this address, so it has to round-trip. */
+  it("round-trips the overlay route", () => {
+    expect(routeToHash({ name: "overlay" })).toBe("#/overlay");
+    expect(parseRoute(routeToHash({ name: "overlay" }))).toEqual({ name: "overlay" });
   });
 
   it("reads a note id when one is present", () => {

@@ -23,9 +23,55 @@ mod ax;
 mod cf;
 mod hotkeys;
 mod keys;
+mod keystrokes;
 mod pasteboard;
+mod vision;
 
 pub use hotkeys::{listen, register, Registration};
+pub use keystrokes::TapRefusal;
+pub use vision::{recognise, Bitmap, ScreenCaptureRefusal};
+
+use crate::completion::TypingActivity;
+
+/// Whether the focused element will let its selection be replaced.
+///
+/// The check 9c needs: "replace" must only be offered where it can work, and offering it on a web
+/// page that will not take it is worse than not offering it — the user loses their selection and
+/// gets nothing.
+pub fn selection_is_replaceable() -> Result<bool> {
+    if !trusted() {
+        return Err(needs_accessibility("Replacing the selected text"));
+    }
+
+    match ax::focused_element() {
+        Ok(element) => Ok(element.is_settable(ax::SELECTED_TEXT)),
+        Err(ax::AxFailure::PermissionMissing) => {
+            Err(needs_accessibility("Replacing the selected text"))
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// Start watching for keystrokes. Timing only — see `keystrokes`.
+pub fn start_typing_monitor() -> Result<()> {
+    keystrokes::start().map_err(|refusal| match refusal {
+        keystrokes::TapRefusal::PermissionMissing => OsInputError::PermissionRequired {
+            what: "Noticing when you pause while typing".to_string(),
+            how_to_grant: Capability::InputMonitoring.how_to_grant(),
+        },
+        keystrokes::TapRefusal::Failed => {
+            OsInputError::Platform("the keystroke monitor could not start".to_string())
+        }
+    })
+}
+
+pub fn stop_typing_monitor() {
+    keystrokes::stop()
+}
+
+pub fn typing_activity() -> TypingActivity {
+    keystrokes::activity()
+}
 
 use notewise_macos_permissions::Capability;
 
@@ -198,34 +244,50 @@ pub fn screen_context() -> Result<ScreenContext> {
             .filter(|t| !t.trim().is_empty());
     }
 
+    // A4: recognised text is the fallback, and only when nothing structured was available. The
+    // accessibility API returns what an application says its field holds; recognition returns a
+    // guess about pixels. Reading the screen when the real text was already in hand would be a
+    // slower, worse answer and a capture the user did not need to consent to.
+    //
+    // A failure here is not a failure of `screen_context`: on any unsigned build the capture is
+    // impossible, and that must not turn a perfectly good window title into an error.
+    if context.selection.is_none() && context.focused_text.is_none() {
+        match recognise_text_on_screen() {
+            Ok(text) if !text.trim().is_empty() => context.recognised_text = Some(text),
+            Ok(_) => {}
+            Err(error) => tracing::debug!(%error, "no structured text, and none read from pixels"),
+        }
+    }
+
     Ok(context)
 }
 
 /// Read text off the screen as pixels.
 ///
-/// Refused, with the reason, rather than stubbed to return nothing.
-///
-/// Two walls stand in front of this, and the first is the one that matters: capturing the screen
-/// needs a grant macOS will not give a build without a Team ID, so on any development build the
-/// capture cannot happen at all — `can_hold_screen_recording` is the same check `audio-capture`
-/// already makes for system audio, and the lesson of `63f6f6d` is that asking for a permission the
-/// build cannot hold is a dead end rather than a prompt.
-///
-/// Behind it, the recognition itself is unwritten. It stays that way until there is a signed bundle
-/// to verify it against: shipping an OCR path that has never once seen a real screenshot would be
-/// claiming a capability on the strength of it compiling.
+/// The recognition half of this is real and tested — see [`vision`]. The capture half needs the
+/// Screen Recording grant, and the three ways it can be refused have three different fixes, so they
+/// are reported separately rather than collapsed into "unavailable".
 pub fn recognise_text_on_screen() -> Result<String> {
-    let reason = if !notewise_macos_permissions::can_hold_screen_recording() {
-        "this build has no Developer ID signature, and macOS will not grant screen recording to \
-         one — the same wall system audio hits"
-    } else {
-        "Notewise reads text through the accessibility API; reading it from pixels is not built yet"
-    };
+    let bitmap = vision::capture_screen().map_err(|refusal| match refusal {
+        // No switch in System Settings helps a build with no signature, so it must not be told to
+        // go looking for one. This is the case every development build is in.
+        ScreenCaptureRefusal::BuildCannotHoldGrant => OsInputError::Unsupported {
+            what: "Reading text from the screen".to_string(),
+            reason: "this build has no Developer ID signature, and macOS will not grant screen \
+                     recording to one — the same wall system audio hits"
+                .to_string(),
+        },
+        ScreenCaptureRefusal::GrantMissing => OsInputError::PermissionRequired {
+            what: "Reading text from the screen".to_string(),
+            how_to_grant: Capability::ScreenRecording.how_to_grant(),
+        },
+        ScreenCaptureRefusal::CaptureFailed => OsInputError::Platform(
+            "the screen could not be captured, though the permission is held".to_string(),
+        ),
+    })?;
 
-    Err(OsInputError::Unsupported {
-        what: "Reading text from the screen".to_string(),
-        reason: reason.to_string(),
-    })
+    let lines = vision::recognise(&bitmap).map_err(OsInputError::Platform)?;
+    Ok(lines.join("\n"))
 }
 
 #[cfg(test)]
@@ -255,10 +317,14 @@ mod tests {
         }
     }
 
-    /// Reading pixels is refused with a reason rather than returning an empty string, because an
-    /// empty string reads as "there was no text on screen".
+    /// On an unsigned build the refusal is about the signature, not about a switch — because no
+    /// switch helps. Every development build is in this case, so this runs.
     #[test]
-    fn reading_the_screen_is_refused_with_a_reason_and_not_stubbed() {
+    fn an_unsigned_build_is_told_about_the_signature_and_not_sent_to_settings() {
+        if notewise_macos_permissions::can_hold_screen_recording() {
+            return;
+        }
+
         let error = recognise_text_on_screen().expect_err("must refuse");
         assert!(
             matches!(error, OsInputError::Unsupported { .. }),
@@ -266,24 +332,28 @@ mod tests {
         );
 
         let rendered = error.to_string();
+        assert!(rendered.contains("Developer ID"), "{rendered}");
         assert!(
             !rendered.contains("System Settings"),
-            "there is no switch that fixes this, so it must not send the user looking for one: \
-             {rendered}"
+            "there is no switch that fixes this, so it must not send the user looking for one"
         );
     }
 
-    /// On an unsigned build the reason is the signing wall, which is the one the user is actually
-    /// behind. Every development build is in this case.
+    /// A signed build without the grant gets the pane instead. Two failures, two fixes.
     #[test]
-    fn an_unsigned_build_is_told_about_the_signature_rather_than_the_missing_code() {
-        if notewise_macos_permissions::can_hold_screen_recording() {
+    fn a_signed_build_without_the_grant_is_sent_to_the_pane() {
+        if !notewise_macos_permissions::can_hold_screen_recording()
+            || notewise_macos_permissions::screen_recording_granted()
+        {
             return;
         }
-        let rendered = recognise_text_on_screen()
-            .expect_err("must refuse")
-            .to_string();
-        assert!(rendered.contains("Developer ID"), "{rendered}");
+
+        let error = recognise_text_on_screen().expect_err("must refuse");
+        assert!(
+            matches!(error, OsInputError::PermissionRequired { .. }),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("System Settings"));
     }
 
     /// Inspecting capabilities must be safe with no grant and nothing focused — it runs on every

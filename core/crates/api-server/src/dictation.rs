@@ -58,6 +58,8 @@ pub const SUPPORTED: bool = cfg!(all(feature = "record", feature = "whisper"));
 
 /// Where the dictation hotkey is kept.
 const HOTKEY_SETTING: &str = "assistant.dictation.hotkey";
+/// Where the overlay hotkey is kept.
+const OVERLAY_HOTKEY_SETTING: &str = "assistant.overlay.hotkey";
 /// Where the default output mode is kept.
 const MODE_SETTING: &str = "assistant.dictation.mode";
 
@@ -70,6 +72,25 @@ pub const DEFAULT_HOTKEY: &str = "super+shift+d";
 
 /// The feature name the hotkey registry knows this by.
 pub const FEATURE: &str = "dictation";
+/// And the assistant panel's.
+pub const OVERLAY_FEATURE: &str = "overlay";
+
+/// The panel's default binding. Also checked against the list of combinations to avoid.
+pub const DEFAULT_OVERLAY_HOTKEY: &str = "super+shift+a";
+
+/// Every feature that holds a global hotkey, and where its binding is stored.
+///
+/// Held as data so the conflict check, the settings read, and the shell's registration cannot drift
+/// apart. Adding a third feature means adding a row, and the conflict detection covers it for free —
+/// which is the whole reason [`HotkeyRegistry`] exists rather than two settings compared by hand.
+pub const HOTKEYS: &[(&str, &str, &str)] = &[
+    (FEATURE, HOTKEY_SETTING, DEFAULT_HOTKEY),
+    (
+        OVERLAY_FEATURE,
+        OVERLAY_HOTKEY_SETTING,
+        DEFAULT_OVERLAY_HOTKEY,
+    ),
+];
 
 /// How long one dictation may run before it stops itself.
 ///
@@ -465,16 +486,31 @@ struct CapabilitiesBody {
     /// Whether this build can put text into another application.
     can_insert: bool,
     reason: Option<String>,
+    /// The dictation hotkey. Kept as its own field so a client written before the panel existed
+    /// keeps working.
     hotkey: String,
+    /// Every feature's binding, including the one above.
+    hotkeys: Vec<HotkeyBinding>,
     mode: &'static str,
     permissions: Vec<PermissionBody>,
+}
+
+#[derive(Debug, Serialize)]
+struct HotkeyBinding {
+    feature: String,
+    hotkey: String,
 }
 
 /// What the assistant can do on this machine, and what is stopping it.
 ///
 /// One request so a settings screen does not have to assemble four answers and guess at the fifth.
 async fn capabilities(State(state): State<Shared>) -> ApiResult<Json<CapabilitiesBody>> {
-    let hotkey = stored_hotkey(&state).await;
+    let stored = stored_hotkeys(&state).await;
+    let hotkey = stored
+        .iter()
+        .find(|(feature, _)| feature == FEATURE)
+        .map(|(_, binding)| binding.clone())
+        .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
     let mode = stored_mode(&state).await;
 
     // Only the two the assistant actually needs. Screen recording and input monitoring belong to
@@ -508,29 +544,29 @@ async fn capabilities(State(state): State<Shared>) -> ApiResult<Json<Capabilitie
         can_insert: notewise_os_input::SUPPORTED,
         reason: (!SUPPORTED).then(unsupported_reason),
         hotkey,
+        hotkeys: stored
+            .into_iter()
+            .map(|(feature, hotkey)| HotkeyBinding { feature, hotkey })
+            .collect(),
         mode: mode.as_str(),
         permissions,
     }))
 }
 
-async fn stored_hotkey(state: &Shared) -> String {
-    let db = state.db().await;
-    SettingsRepository::new(&db)
-        .get(HOTKEY_SETTING)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| DEFAULT_HOTKEY.to_string())
-}
-
 #[derive(Debug, Deserialize)]
 struct HotkeyBody {
     hotkey: String,
+    /// Which feature's key this is. Defaults to dictation, which is the only one a caller written
+    /// before the panel existed knows about.
+    #[serde(default)]
+    feature: Option<String>,
     #[serde(default)]
     mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct HotkeySaved {
+    feature: String,
     hotkey: String,
     mode: &'static str,
     /// Set when the binding is one the OS or a common editor usually claims.
@@ -541,23 +577,38 @@ struct HotkeySaved {
     warning: Option<String>,
 }
 
-/// Set the dictation hotkey.
+/// Set a global hotkey.
 ///
-/// Validated through the same registry the runtime uses, so a combination that would collide with
-/// another Notewise feature is refused here — at configuration time, with both names in the
-/// message — rather than at press time, when the symptom is a key that does nothing.
+/// Validated through the registry every feature's binding goes into, so a combination that would
+/// collide with another Notewise feature is refused here — at configuration time, with both names in
+/// the message — rather than at press time, when the symptom is a key that does nothing.
 async fn set_hotkey(
     State(state): State<Shared>,
     Json(body): Json<HotkeyBody>,
 ) -> ApiResult<Json<HotkeySaved>> {
+    let feature = body.feature.as_deref().unwrap_or(FEATURE).to_string();
+    let setting = HOTKEYS
+        .iter()
+        .find(|(name, _, _)| *name == feature)
+        .map(|(_, setting, _)| *setting)
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!(
+                "'{feature}' has no hotkey; try {}",
+                HOTKEYS
+                    .iter()
+                    .map(|(name, _, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            ))
+        })?;
+
     let binding =
         Binding::parse(&body.hotkey).map_err(|error| ApiError::BadRequest(error.to_string()))?;
 
-    // Every feature that holds a binding today. Dictation is the only one, and the registry is
-    // consulted anyway so that adding the second one cannot forget to.
-    let mut registry = HotkeyRegistry::new();
+    // Every binding currently held, so the collision that gets refused is a real one.
+    let mut registry = load_registry(&state).await;
     registry
-        .rebind(FEATURE, binding.clone())
+        .rebind(&feature, binding.clone())
         .map_err(|error| ApiError::Conflict(OsInputError::from(error).to_string()))?;
 
     let mode = match &body.mode {
@@ -572,7 +623,7 @@ async fn set_hotkey(
         let db = state.db().await;
         let settings = SettingsRepository::new(&db);
         settings
-            .set(HOTKEY_SETTING, &binding.to_string())
+            .set(setting, &binding.to_string())
             .map_err(|e| ApiError::Internal(format!("could not save the hotkey: {e}")))?;
         if let Some(mode) = mode {
             settings
@@ -589,10 +640,49 @@ async fn set_hotkey(
     });
 
     Ok(Json(HotkeySaved {
+        feature,
         hotkey: binding.to_string(),
         mode: mode.unwrap_or(Mode::Raw).as_str(),
         warning,
     }))
+}
+
+/// Every hotkey currently held, as a registry.
+///
+/// Built from settings each time rather than kept in memory: the bindings change rarely and reading
+/// two rows is cheaper than a cache that can be stale. A stored binding that no longer parses is
+/// skipped rather than fatal — it would otherwise make the settings screen unopenable.
+async fn load_registry(state: &Shared) -> HotkeyRegistry {
+    let mut registry = HotkeyRegistry::new();
+    let stored = stored_hotkeys(state).await;
+
+    for (feature, binding) in stored {
+        if let Ok(parsed) = Binding::parse(&binding) {
+            // A conflict between two *stored* bindings should not stop a third being set, and it
+            // cannot happen through this endpoint anyway.
+            let _ = registry.claim(&feature, parsed);
+        }
+    }
+
+    registry
+}
+
+/// Each feature's binding, falling back to its default.
+async fn stored_hotkeys(state: &Shared) -> Vec<(String, String)> {
+    let db = state.db().await;
+    let settings = SettingsRepository::new(&db);
+
+    HOTKEYS
+        .iter()
+        .map(|(feature, setting, default)| {
+            let binding = settings
+                .get(setting)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| (*default).to_string());
+            ((*feature).to_string(), binding)
+        })
+        .collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -1073,6 +1163,94 @@ mod tests {
                     .expect("a reason")
                     .contains("os-input"));
             }
+        });
+    }
+    /// The panel's default must not collide with dictation's, or one of them silently never fires.
+    #[test]
+    fn the_two_default_hotkeys_do_not_collide() {
+        let mut registry = HotkeyRegistry::new();
+        for (feature, _, default) in HOTKEYS {
+            let binding = Binding::parse(default).expect("parses");
+            registry
+                .claim(feature, binding)
+                .unwrap_or_else(|e| panic!("{feature} cannot hold {default}: {e}"));
+            assert!(
+                !notewise_os_input::is_commonly_claimed(&Binding::parse(default).expect("parses")),
+                "{default} is in the list of combinations to avoid"
+            );
+        }
+        assert_eq!(registry.len(), HOTKEYS.len());
+    }
+
+    /// The reason the registry exists rather than two settings compared by hand.
+    #[test]
+    fn a_hotkey_already_held_by_another_feature_is_refused_with_both_names() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let app = app();
+
+            // Give the panel a binding, then try to give dictation the same one.
+            let (status, _) = call(
+                &app,
+                put(
+                    "/v1/assistant/hotkey",
+                    serde_json::json!({ "feature": "overlay", "hotkey": "ctrl+alt+p" }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+
+            let (status, body) = call(
+                &app,
+                put(
+                    "/v1/assistant/hotkey",
+                    serde_json::json!({ "feature": "dictation", "hotkey": "ctrl+alt+p" }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+            let error = body["error"].as_str().expect("a reason");
+            assert!(error.contains("overlay"), "{error}");
+        });
+    }
+
+    #[test]
+    fn both_hotkeys_come_back_from_the_capabilities() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let app = app();
+            let (_, body) = call(&app, get("/v1/assistant")).await;
+
+            let features: Vec<&str> = body["hotkeys"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|h| h["feature"].as_str().expect("a name"))
+                .collect();
+            assert_eq!(features, vec!["dictation", "overlay"]);
+            assert_eq!(body["hotkey"], DEFAULT_HOTKEY);
+        });
+    }
+
+    #[test]
+    fn a_hotkey_for_a_feature_that_has_none_is_refused() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let app = app();
+            let (status, body) = call(
+                &app,
+                put(
+                    "/v1/assistant/hotkey",
+                    serde_json::json!({ "feature": "telepathy", "hotkey": "ctrl+alt+t" }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert!(body["error"]
+                .as_str()
+                .expect("a reason")
+                .contains("dictation"));
         });
     }
 }

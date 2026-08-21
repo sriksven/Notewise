@@ -24,6 +24,14 @@ export type Route =
   | { name: "agent" }
   | { name: "jobs" }
   | { name: "connectors" }
+  /**
+   * The assistant panel, in its own window.
+   *
+   * A route rather than a component the shell reaches for directly: the overlay is a second
+   * window pointed at the same frontend, and a hash is the only address that survives the engine
+   * binding a different port on every launch.
+   */
+  | { name: "overlay" }
   | { name: "help"; section?: HelpSection }
   | { name: "settings"; section?: string }
   | { name: "about" };
@@ -71,6 +79,8 @@ export function parseRoute(hash: string): Route {
       return { name: "jobs" };
     case "connectors":
       return { name: "connectors" };
+    case "overlay":
+      return { name: "overlay" };
     case "help":
       return {
         name: "help",

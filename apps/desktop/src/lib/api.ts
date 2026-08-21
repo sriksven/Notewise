@@ -602,7 +602,10 @@ export interface AssistantCapabilities {
   /** Whether this build can put text into another application. */
   can_insert: boolean;
   reason: string | null;
+  /** The dictation hotkey. Its own field so a client written before the panel existed still works. */
   hotkey: string;
+  /** Every feature's binding, including the one above. */
+  hotkeys: Array<{ feature: string; hotkey: string }>;
   mode: "raw" | "cleaned";
   permissions: AssistantPermission[];
 }
@@ -635,6 +638,82 @@ export interface Dictated {
   /** One sentence for the user, when there is something worth saying. */
   note: string | null;
   duration_ms: number;
+}
+
+/** What to do to a piece of highlighted text. */
+export type AssistantAct =
+  | "rewrite"
+  | "shorten"
+  | "expand"
+  | "fix_grammar"
+  | "formalise"
+  | "summarise"
+  | "explain"
+  | { translate: { language: string } };
+
+export interface AssistantAction {
+  action: AssistantAct;
+  label: string;
+  /** Whether choosing this replaces the selection or produces something new. */
+  replaces: boolean;
+}
+
+export interface ScreenContext {
+  app: string | null;
+  window_title: string | null;
+  selection: string | null;
+  focused_text: string | null;
+  /** Read from pixels rather than from the application. May contain recognition errors. */
+  recognised_text: string | null;
+}
+
+export interface ScreenAnswer {
+  text: string;
+  model: string;
+  /** Whether there was any screen context behind the answer. */
+  grounded: boolean;
+  /** Exactly what was put in front of the model, so "what did you send" is answerable. */
+  context: ScreenContext | null;
+  context_prompt: string;
+}
+
+export interface SelectionInfo {
+  text: string | null;
+  /** Whether the target will accept a replacement. */
+  replaceable: boolean;
+  length: number;
+}
+
+export interface ActResult {
+  action: AssistantAct;
+  original: string;
+  result: string;
+  model: string;
+  insertion: Insertion | null;
+  note: string | null;
+}
+
+/** Why nothing is being suggested — the question inline completion generates most. */
+export type CompletionDecision =
+  | "ask"
+  | "still_typing"
+  | "idle"
+  | "too_short"
+  | "too_long"
+  | "too_soon";
+
+export interface Completion {
+  /** Already spaced correctly for insertion at the caret. */
+  suggestion: string | null;
+  decision: CompletionDecision;
+  model: string | null;
+  text: string;
+}
+
+export interface TypingActivity {
+  running: boolean;
+  last_keystroke_ms: number | null;
+  keystrokes: number;
 }
 
 export const api = {
@@ -1535,10 +1614,14 @@ export const api = {
 
   assistant: () => request<AssistantCapabilities>("/v1/assistant"),
 
-  setAssistantHotkey: (hotkey: string, mode?: "raw" | "cleaned") =>
-    request<{ hotkey: string; mode: string; warning: string | null }>(
+  setAssistantHotkey: (
+    hotkey: string,
+    mode?: "raw" | "cleaned",
+    feature: "dictation" | "overlay" = "dictation",
+  ) =>
+    request<{ feature: string; hotkey: string; mode: string; warning: string | null }>(
       "/v1/assistant/hotkey",
-      { method: "PUT", body: JSON.stringify({ hotkey, mode }) },
+      { method: "PUT", body: JSON.stringify({ hotkey, mode, feature }) },
     ),
 
   dictationStatus: () => request<DictationStatus>("/v1/dictation"),
@@ -1555,6 +1638,45 @@ export const api = {
 
   cancelDictation: () =>
     request<{ cancelled: boolean }>("/v1/dictation/cancel", { method: "POST" }),
+
+  /** Ask about whatever is on screen. Reads the frontmost app's text as context. */
+  askAboutScreen: (question: string, ignoreScreen = false) =>
+    request<ScreenAnswer>("/v1/assistant/ask", {
+      method: "POST",
+      body: JSON.stringify({ question, ignore_screen: ignoreScreen }),
+    }),
+
+  assistantActions: () => request<AssistantAction[]>("/v1/assistant/actions"),
+
+  currentSelection: () => request<SelectionInfo>("/v1/assistant/selection"),
+
+  /** Transform a selection. Nothing is written back unless `replace` is set. */
+  actOnSelection: (input: { action: AssistantAct; text?: string; replace?: boolean }) =>
+    request<ActResult>("/v1/assistant/act", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /** Ask for a continuation. Suggests only — accepting is a separate step. */
+  suggestCompletion: (input: { text?: string; last_asked_ms?: number; force?: boolean }) =>
+    request<Completion>("/v1/assistant/complete", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  typingActivity: () =>
+    request<{ activity: TypingActivity; supported: boolean }>("/v1/assistant/typing"),
+
+  /** Start watching for typing pauses. Needs Input Monitoring; never implicit. */
+  startTypingMonitor: () =>
+    request<{ activity: TypingActivity; supported: boolean }>("/v1/assistant/typing", {
+      method: "POST",
+    }),
+
+  stopTypingMonitor: () =>
+    request<{ activity: TypingActivity; supported: boolean }>("/v1/assistant/typing", {
+      method: "DELETE",
+    }),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

@@ -24,54 +24,113 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use notewise_os_input::{native, Binding};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Register the hotkey and start listening for presses.
+/// Register the assistant's hotkeys and start listening for presses.
 ///
 /// Must be called on the main thread, before the event loop starts. Failures are logged and not
-/// fatal: an app that will not open because another program holds a key combination is worse than
-/// one whose dictation shortcut does not work.
-pub fn install(engine: SocketAddr, hotkey: &str) {
-    let binding = match Binding::parse(hotkey) {
-        Ok(binding) => binding,
-        Err(e) => {
-            tracing::warn!(hotkey, error = %e, "the dictation hotkey is not usable");
-            return;
-        }
-    };
-
+/// fatal, per key: an app that will not open because another program holds one combination is worse
+/// than one whose dictation shortcut does not work, and a user who lost the panel's key should still
+/// have dictation.
+pub fn install(app: &AppHandle, engine: SocketAddr, hotkeys: &[(String, String)]) {
     let Some(presses) = native::listen() else {
         tracing::warn!("something is already listening for hotkeys");
         return;
     };
 
-    match native::register("dictation", &binding) {
-        Ok(registration) => {
-            tracing::info!(hotkey = %binding, "dictation hotkey ready");
-            // Lives for the process; see the module docs.
-            std::mem::forget(registration);
-        }
-        Err(e) => {
-            tracing::warn!(hotkey = %binding, error = %e, "could not claim the dictation hotkey");
-            return;
+    for (feature, hotkey) in hotkeys {
+        let binding = match Binding::parse(hotkey) {
+            Ok(binding) => binding,
+            Err(e) => {
+                tracing::warn!(%feature, hotkey, error = %e, "that hotkey is not usable");
+                continue;
+            }
+        };
+
+        match native::register(feature, &binding) {
+            Ok(registration) => {
+                tracing::info!(%feature, hotkey = %binding, "global hotkey ready");
+                // Lives for the process; see the module docs.
+                std::mem::forget(registration);
+            }
+            Err(e) => {
+                tracing::warn!(%feature, hotkey = %binding, error = %e, "could not claim it")
+            }
         }
     }
 
     // The receiver is `Send`, so the work happens off the main thread — a dictation that takes
-    // several seconds to transcribe must not freeze the window.
+    // several seconds to transcribe must not freeze the window. Showing the panel is the exception:
+    // window work has to be back on the main thread, which `run_on_main_thread` does.
+    let app = app.clone();
     std::thread::Builder::new()
-        .name("notewise-dictation-hotkey".into())
+        .name("notewise-assistant-hotkeys".into())
         .spawn(move || {
             let listening = Arc::new(AtomicBool::new(false));
 
             while let Ok(feature) = presses.recv() {
-                if feature != "dictation" {
-                    continue;
+                match feature.as_str() {
+                    "dictation" => toggle(engine, &listening),
+                    "overlay" => {
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || show_overlay(&handle, engine));
+                    }
+                    other => tracing::debug!(other, "a hotkey nothing is listening for"),
                 }
-                toggle(engine, &listening);
             }
         })
         .map(|_| ())
         .unwrap_or_else(|e| tracing::warn!(error = %e, "could not start the hotkey thread"));
+}
+
+/// Show the assistant panel, building it the first time.
+///
+/// Built lazily rather than at launch: the window reads the focused application when it opens, and
+/// one created at startup and hidden would have to be told to re-read. Kept afterwards rather than
+/// destroyed, because rebuilding a webview on every press is a visible delay on the thing a user
+/// presses most.
+///
+/// Must run on the main thread. Window creation on macOS is main-thread-only, and Tauri will panic
+/// rather than misbehave — which is the right trade but not one to discover at runtime.
+fn show_overlay(app: &AppHandle, engine: SocketAddr) {
+    const LABEL: &str = "assistant";
+
+    if let Some(window) = app.get_webview_window(LABEL) {
+        // Already there: bring it forward and give it the keyboard. A panel that appears behind the
+        // window the user was looking at is a panel they will think did not open.
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    let url = format!("http://{engine}/#/overlay");
+    let parsed = match url.parse() {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not address the assistant panel");
+            return;
+        }
+    };
+
+    let built = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(parsed))
+        .title("Notewise Assistant")
+        .inner_size(520.0, 360.0)
+        .min_inner_size(380.0, 220.0)
+        // Above whatever the user is working in, because that is the point of it.
+        .always_on_top(true)
+        .resizable(true)
+        // No traffic lights: this is a panel, not a document window, and Escape closes it.
+        .decorations(false)
+        .center()
+        .focused(true)
+        .build();
+
+    match built {
+        Ok(window) => {
+            let _ = window.set_focus();
+        }
+        Err(e) => tracing::warn!(error = %e, "could not open the assistant panel"),
+    }
 }
 
 /// One press: start listening, or stop and insert.

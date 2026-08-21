@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Keyboard, Loader2, Mic, Square } from "lucide-react";
+import { AlertTriangle, Check, Keyboard, Loader2, Mic, Sparkles, Square, TextCursorInput } from "lucide-react";
 
 import {
   api,
@@ -7,6 +7,7 @@ import {
   type AssistantCapabilities,
   type AssistantPermission,
   type Dictated,
+  type TypingActivity,
 } from "../lib/api";
 
 /**
@@ -36,12 +37,23 @@ export function AssistantSettings() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Dictated | null>(null);
 
+  const [overlayHotkey, setOverlayHotkey] = useState("");
+  const [typing, setTyping] = useState<TypingActivity | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [found, status] = await Promise.all([api.assistant(), api.dictationStatus()]);
+      const [found, status, watch] = await Promise.all([
+        api.assistant(),
+        api.dictationStatus(),
+        api.typingActivity().catch(() => null),
+      ]);
       setCapabilities(found);
       setHotkey(found.hotkey);
+      setOverlayHotkey(
+        found.hotkeys.find((entry) => entry.feature === "overlay")?.hotkey ?? "",
+      );
       setListening(status.listening);
+      setTyping(watch?.activity ?? null);
     } catch {
       // A capabilities read that fails is not worth a banner over the whole settings screen.
     }
@@ -51,18 +63,33 @@ export function AssistantSettings() {
     void load();
   }, [load]);
 
-  const saveHotkey = async (next: string) => {
+  const saveHotkey = async (next: string, feature: "dictation" | "overlay" = "dictation") => {
     setSaving(true);
     setError(null);
     try {
-      const saved = await api.setAssistantHotkey(next, capabilities?.mode);
-      setHotkey(saved.hotkey);
+      const saved = await api.setAssistantHotkey(next, capabilities?.mode, feature);
+      if (feature === "dictation") setHotkey(saved.hotkey);
+      else setOverlayHotkey(saved.hotkey);
       setWarning(saved.warning);
     } catch (e) {
+      // The engine refuses a combination another feature already holds, and names it. Reload so the
+      // field shows what is actually stored rather than what was typed.
       setError(e instanceof ApiError ? e.message : "Could not save that hotkey.");
-      setHotkey(capabilities?.hotkey ?? "");
+      await load();
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleTyping = async () => {
+    setError(null);
+    try {
+      const next = typing?.running
+        ? await api.stopTypingMonitor()
+        : await api.startTypingMonitor();
+      setTyping(next.activity);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not change that.");
     }
   };
 
@@ -214,6 +241,76 @@ export function AssistantSettings() {
 
             {result && <Outcome result={result} canInsert={capabilities.can_insert} />}
           </div>
+        )}
+      </div>
+
+      {/* 9b and 9c: one hotkey, because from the user's side it is one gesture — the panel offers
+          actions when something is highlighted and answers questions when nothing is. */}
+      <h3 className="mb-1 mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+        <Sparkles size={12} className="text-ink-faint" aria-hidden />
+        Assistant panel
+      </h3>
+      <p className="mb-2 text-[12px] leading-relaxed text-ink-muted">
+        Opens over whatever you are working in. Ask about the window in front of you, or highlight
+        something first and rewrite, shorten, or translate it in place. What gets sent to the model
+        is shown in the panel every time.
+      </p>
+      <div className="space-y-2 rounded-lg border border-hairline p-3">
+        <label className="block">
+          <span className="mb-1 flex items-center gap-1.5 text-[12px] text-ink">
+            <Keyboard size={12} className="text-ink-faint" aria-hidden />
+            Hotkey
+          </span>
+          <input
+            value={overlayHotkey}
+            onChange={(event) => setOverlayHotkey(event.target.value)}
+            onBlur={() => void saveHotkey(overlayHotkey, "overlay")}
+            placeholder="super+shift+a"
+            spellCheck={false}
+            className="w-56 rounded border border-hairline bg-transparent px-2 py-1 font-mono
+                       text-[12px] text-ink placeholder:text-ink-faint"
+          />
+        </label>
+        <p className="text-[11.5px] leading-relaxed text-ink-faint">
+          Reading the window in front needs the Accessibility permission above. Reading text that
+          is only on screen as pixels — a PDF, a screenshot — additionally needs a signed build,
+          which a development build is not.
+        </p>
+      </div>
+
+      {/* 9d, with its limits stated rather than implied. */}
+      <h3 className="mb-1 mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+        <TextCursorInput size={12} className="text-ink-faint" aria-hidden />
+        Inline suggestions
+      </h3>
+      <p className="mb-2 text-[12px] leading-relaxed text-ink-muted">
+        Notices when you stop typing and offers to finish the sentence. The suggestion appears in
+        Notewise, not as greyed-out text inside the other app — macOS gives no way to draw into
+        another application&rsquo;s window, and pretending otherwise would show you nothing.
+      </p>
+      <div className="space-y-2 rounded-lg border border-hairline p-3">
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={typing?.running ?? false}
+            onChange={() => void toggleTyping()}
+            className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+          />
+          <span className="min-w-0">
+            <span className="block text-[12px] text-ink">Watch for typing pauses</span>
+            <span className="block text-[11.5px] leading-relaxed text-ink-faint">
+              Needs Input Monitoring, the most invasive permission macOS has. Notewise records only
+              that a key was pressed and when — no key codes, no characters, nothing kept. Off
+              until you turn it on, and never turned on by another feature.
+            </span>
+          </span>
+        </label>
+
+        {typing?.running && (
+          <p className="text-[11.5px] text-ink-faint">
+            Watching. {typing.keystrokes} keystroke{typing.keystrokes === 1 ? "" : "s"} counted this
+            session.
+          </p>
         )}
       </div>
     </section>

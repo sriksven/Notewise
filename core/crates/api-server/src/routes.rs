@@ -114,6 +114,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::tools::routes())
         // Dictation, and what the desktop assistant can do on this machine.
         .merge(crate::dictation::routes())
+        // Asking about the screen, acting on a selection, continuing a sentence.
+        .merge(crate::assistant::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",

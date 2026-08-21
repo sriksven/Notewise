@@ -31,6 +31,7 @@
 
 mod agent;
 mod ask;
+pub mod assistant;
 pub mod calendar;
 mod connectors;
 pub mod diarization;

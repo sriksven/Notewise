@@ -33,6 +33,7 @@
 #![warn(missing_debug_implementations)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod completion;
 mod context;
 mod error;
 mod hotkey;
@@ -42,6 +43,7 @@ mod keycode;
 #[cfg(all(target_os = "macos", feature = "os-input"))]
 pub mod native;
 
+pub use completion::{continuation_of, decide, join, CompletionPolicy, Decision, TypingActivity};
 pub use context::{ScreenContext, PROMPT_LIMIT};
 pub use error::{not_compiled_in, unsupported_platform, OsInputError, Result};
 pub use hotkey::{
@@ -119,6 +121,91 @@ pub fn screen_context() -> Result<ScreenContext> {
     }
 }
 
+/// Whether the focused element will let its selection be replaced.
+///
+/// The check "replace this text" needs before it is offered: on a target that will not take it the
+/// user loses their selection and gets nothing.
+pub fn selection_is_replaceable() -> Result<bool> {
+    #[cfg(all(target_os = "macos", feature = "os-input"))]
+    {
+        native::selection_is_replaceable()
+    }
+
+    #[cfg(all(target_os = "macos", not(feature = "os-input")))]
+    {
+        Err(not_compiled_in("Replacing the selected text"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(unsupported_platform("Replacing the selected text"))
+    }
+}
+
+/// Read text off the screen as pixels.
+///
+/// Needs the Screen Recording grant, which macOS will not give a build without a Developer ID
+/// signature — so on a development build this refuses with that reason rather than a permission
+/// prompt that would do nothing.
+pub fn recognise_text_on_screen() -> Result<String> {
+    #[cfg(all(target_os = "macos", feature = "os-input"))]
+    {
+        native::recognise_text_on_screen()
+    }
+
+    #[cfg(all(target_os = "macos", not(feature = "os-input")))]
+    {
+        Err(not_compiled_in("Reading text from the screen"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(unsupported_platform("Reading text from the screen"))
+    }
+}
+
+/// Start noticing when the user pauses while typing.
+///
+/// Records timing and a count. Not keys — see `native::keystrokes` for why that distinction is the
+/// whole argument for asking for Input Monitoring at all.
+pub fn start_typing_monitor() -> Result<()> {
+    #[cfg(all(target_os = "macos", feature = "os-input"))]
+    {
+        native::start_typing_monitor()
+    }
+
+    #[cfg(all(target_os = "macos", not(feature = "os-input")))]
+    {
+        Err(not_compiled_in("Noticing when you pause while typing"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(unsupported_platform("Noticing when you pause while typing"))
+    }
+}
+
+pub fn stop_typing_monitor() {
+    #[cfg(all(target_os = "macos", feature = "os-input"))]
+    native::stop_typing_monitor();
+}
+
+/// What has been typed lately, as timing.
+///
+/// A default — nothing running, nothing seen — on a build that cannot watch. Not an error: a caller
+/// asking "should I suggest something" gets "no" rather than a failure to handle.
+pub fn typing_activity() -> TypingActivity {
+    #[cfg(all(target_os = "macos", feature = "os-input"))]
+    {
+        native::typing_activity()
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "os-input")))]
+    {
+        TypingActivity::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +226,9 @@ mod tests {
             insert_at_cursor("text").err(),
             read_selection().err(),
             screen_context().err(),
+            selection_is_replaceable().err(),
+            recognise_text_on_screen().err(),
+            start_typing_monitor().err(),
         ] {
             let error = error.expect("a build without the platform layer must refuse");
             assert!(
@@ -146,6 +236,17 @@ mod tests {
                 "{error:?}"
             );
             assert!(!error.to_string().is_empty());
+        }
+    }
+
+    /// A caller asking "should I suggest something" gets "no" rather than a failure to handle.
+    #[test]
+    fn typing_activity_answers_on_every_build() {
+        let activity = typing_activity();
+        if !SUPPORTED {
+            assert!(!activity.running);
+            assert_eq!(activity.keystrokes, 0);
+            assert_eq!(activity.last_keystroke_ms, None);
         }
     }
 

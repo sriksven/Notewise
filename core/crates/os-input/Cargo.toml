@@ -18,6 +18,15 @@ tracing.workspace = true
 # build that could not use it.
 notewise-macos-permissions.workspace = true
 
+# Text recognition. Vision is Objective-C only — there is no C entry point — so this is the one
+# place the crate needs the objc2 runtime rather than a framework's plain C interface.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSString", "NSError", "NSValue", "NSGeometry", "NSEnumerator", "NSObject", "NSDictionary"] }
+objc2-vision = { version = "0.3", optional = true, default-features = false, features = ["std", "alloc", "objc2-core-foundation", "objc2-core-graphics", "VNRequest", "VNRequestHandler", "VNObservation", "VNRecognizeTextRequest", "VNTypes", "VNError"] }
+objc2-core-graphics = { version = "0.3", optional = true, default-features = false, features = ["std", "CGImage", "CGColorSpace", "CGDataProvider", "CGContext", "CGBitmapContext", "CGWindow", "CGDirectDisplay", "CGError"] }
+objc2-core-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "CFData", "CFCGTypes"] }
+
 [dev-dependencies]
 # The insertion outcome is reported over HTTP, so its serialised shape is worth pinning.
 serde_json.workspace = true
@@ -27,4 +36,10 @@ default = []
 # The platform layer. Off by default, exactly as `os-capture` is: engine CI must not need an
 # Accessibility grant or a windowing toolchain. Turning it on is what makes `unsafe` exist in this
 # crate at all.
-os-input = []
+os-input = [
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-vision",
+    "dep:objc2-core-graphics",
+    "dep:objc2-core-foundation",
+]
