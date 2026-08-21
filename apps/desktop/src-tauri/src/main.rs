@@ -43,7 +43,7 @@ fn main() {
         .setup(|app| {
             // Bind before opening the window. If the window loaded first it would race the
             // server and show a connection error on a cold launch.
-            let (addr, hotkeys) = start_engine(app.handle())?;
+            let Started { addr, hotkeys } = start_engine(app.handle())?;
             let url = format!("http://{addr}");
             tracing::info!(%url, "engine ready");
 
@@ -71,14 +71,24 @@ fn main() {
         .expect("failed to start the Notewise shell");
 }
 
+/// What the shell needs from a started engine.
+///
+/// A named type rather than a tuple: `(SocketAddr, Vec<(String, String)>)` says nothing about which
+/// half of each pair is the feature and which is the key, and a reader of the call site would have
+/// to come here to find out.
+#[derive(Debug)]
+struct Started {
+    addr: SocketAddr,
+    /// Feature name to key binding, as stored in the workspace.
+    hotkeys: Vec<(String, String)>,
+}
+
 /// Start the engine on loopback and return the address it actually bound, plus the assistant
 /// hotkeys the workspace has stored.
 ///
 /// The hotkeys come back from here because this is where the database is open. Reading them later
 /// would mean a second connection to a file the engine already owns.
-fn start_engine(
-    app: &tauri::AppHandle,
-) -> Result<(SocketAddr, Vec<(String, String)>), Box<dyn std::error::Error>> {
+fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::Error>> {
     let data_dir = data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
 
@@ -172,7 +182,7 @@ fn start_engine(
         .map_err(|_| "the engine did not start in time")?
         .map_err(|e: String| -> Box<dyn std::error::Error> { e.into() })?;
 
-    Ok((addr, hotkeys))
+    Ok(Started { addr, hotkeys })
 }
 
 /// Where the database lives.

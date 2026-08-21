@@ -28,6 +28,10 @@ fn allowing(server: &str, tool: &str) -> Allowlist {
 
 /// A POSIX-shell MCP server.
 ///
+/// Gated with the tests that use it. Without that, a Windows build has three unused items and CI
+/// builds with `-D warnings` — so the whole test target fails to compile on a platform where the
+/// only thing wrong is that a shell script is not runnable.
+///
 /// Chosen over a compiled helper binary on purpose: a helper would need its own crate target, and
 /// the one thing worth testing here is that we talk correctly to a process that is not ours. A
 /// shell script is unmistakably not ours.
@@ -35,6 +39,7 @@ fn allowing(server: &str, tool: &str) -> Allowlist {
 /// It answers three methods, and it also does two things a well-behaved server would not, because
 /// real ones do them: it prints a banner on stdout before the protocol starts, and it writes to
 /// stderr during a call.
+#[cfg(unix)]
 const SHELL_SERVER: &str = r#"
 echo 'shell-stub starting'
 while IFS= read -r line; do
@@ -58,6 +63,7 @@ done
 "#;
 
 /// A server that reports its own process id, so a test can check the process actually dies.
+#[cfg(unix)]
 const PID_SERVER: &str = r#"
 while IFS= read -r line; do
   id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -77,6 +83,7 @@ while IFS= read -r line; do
 done
 "#;
 
+#[cfg(unix)]
 fn shell_server(id: &str, name: &str, script: &str) -> ServerConfig {
     ServerConfig {
         id: id.into(),

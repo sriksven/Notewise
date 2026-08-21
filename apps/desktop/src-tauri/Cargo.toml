@@ -3,7 +3,13 @@ name = "notewise-shell"
 description = "Notewise desktop shell"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# Higher than the engine's, and not by choice: the Tauri dependency tree needs it. `darling`,
+# `plist` and `serde_with` all require 1.88, which is the sort of thing a GUI toolchain drags in and
+# part of why this crate is outside the workspace.
+#
+# It said 1.82 until this was checked, which was wrong by six releases — nothing in CI builds this
+# crate, so the declaration had never been tested against anything.
+rust-version = "1.88"
 license = "MIT"
 
 # Deliberately NOT a workspace member (see the root Cargo.toml `exclude`). Tauri pulls a

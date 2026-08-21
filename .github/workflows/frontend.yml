@@ -52,6 +52,58 @@ jobs:
       - name: Build
         run: npx vite build
 
+  # The Tauri shell, which nothing checked at all.
+  #
+  # Not in the `core` workflow: that one says outright that a broken desktop toolchain must not block
+  # an engine fix, and `tauri-build` needs the frontend's `dist/` — which is gitignored, so it only
+  # exists after a build. So it goes here, where the build already happens, and after it.
+  #
+  # Its own job rather than a step on `apps`, because that one is a matrix over two frontends and the
+  # shell belongs to one of them.
+  #
+  # This crate is outside the cargo workspace and had never been compiled by CI in any form. Adding
+  # it found a clippy error on the first run.
+  shell:
+    name: desktop shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      # Tauri on Linux needs a webview and a window toolkit at *build* time, not just at run time.
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Frontend
+        run: npm ci && npx vite build
+        working-directory: apps/desktop
+
+      # Both ways round. Without the feature is what a default build ships; with it is the only
+      # thing in the repository that compiles `unsafe`, and it is not in the workspace clippy runs
+      # over.
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Lints with the assistant
+        run: cargo clippy --all-targets --features assistant -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
   website:
     name: website
     runs-on: ubuntu-latest

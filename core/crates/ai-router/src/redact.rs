@@ -470,7 +470,7 @@ fn luhn(digits: &[u32]) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 fn is_email(token: &str) -> bool {

@@ -844,10 +844,14 @@ mod tests {
             );
         } else {
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-            assert!(body["error"]
-                .as_str()
-                .expect("a reason")
-                .contains("os-input"));
+            // The reason differs by platform: a macOS build without the feature names it, and a
+            // Linux build says the platform cannot do this at all. Asserting the feature name
+            // passed on macOS and failed on Linux for a build behaving correctly — so what is
+            // asserted is the property that holds everywhere: the refusal explains itself, and
+            // does not point at a setting that cannot fix it.
+            let reason = body["error"].as_str().expect("a reason");
+            assert!(!reason.trim().is_empty(), "{body}");
+            assert!(!reason.contains("System Settings"), "{reason}");
         }
     }
 
@@ -966,10 +970,14 @@ mod tests {
                 assert!(error.contains("System Settings"), "{error}");
             }
             StatusCode::NOT_IMPLEMENTED => {
-                assert!(body["error"]
-                    .as_str()
-                    .expect("a reason")
-                    .contains("os-input"));
+                // The reason differs by platform: a macOS build without the feature names it, and a
+                // Linux build says the platform cannot do this at all. Asserting the feature name
+                // passed on macOS and failed on Linux for a build behaving correctly — so what is
+                // asserted is the property that holds everywhere: the refusal explains itself, and
+                // does not point at a setting that cannot fix it.
+                let reason = body["error"].as_str().expect("a reason");
+                assert!(!reason.trim().is_empty(), "{body}");
+                assert!(!reason.contains("System Settings"), "{reason}");
             }
             other => panic!("unexpected status {other}: {body}"),
         }

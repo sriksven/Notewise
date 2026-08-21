@@ -290,7 +290,7 @@ fn encode_vector(vector: &[f32]) -> Vec<u8> {
 /// Little-endian f32s. Fixed by this function rather than by the host, so a database copied
 /// between machines of different endianness still reads correctly.
 fn decode_vector(blob: &[u8]) -> Result<Vec<f32>> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(StorageError::Corrupt {
             column: "people.voice_print",
             reason: format!("{} bytes is not a whole number of f32s", blob.len()),

@@ -78,12 +78,17 @@ jobs:
       # Pinned to rust-version in the workspace manifest. Raising the MSRV should be a
       # deliberate change, not something that happens because a dependency moved.
       #
-      # Raised 1.82 → 1.86, verified by checking against each toolchain rather than
-      # inferred. Edition 2024 forces 1.85 — 22 crates already in the lockfile (clap,
-      # indexmap, hashbrown, rand, getrandom, zeroize, ort) have adopted it — and the
-      # `icu` crates reqwest pulls in need 1.86 on top of that. Holding 1.82 would mean
-      # pinning all of them to older releases and forgoing their security updates.
-      - uses: dtolnay/rust-toolchain@1.86.0
+      # Raised 1.82 → 1.86 → 1.87, each time verified by checking against the toolchain rather
+      # than inferred. Edition 2024 forces 1.85 — 22 crates already in the lockfile (clap,
+      # indexmap, hashbrown, rand, getrandom, zeroize, ort) have adopted it — and the `icu` crates
+      # reqwest pulls in need 1.86 on top of that.
+      #
+      # 1.87 is `cron`, which calls `u32::is_multiple_of`; that stabilised in 1.87 and nothing else
+      # in the tree needs it. The policy above says an MSRV should not move because a dependency
+      # moved, and the alternative here is pinning `cron` to a release predating it and forgoing its
+      # fixes for a scheduler that parses user-supplied expressions. So it moves, deliberately, with
+      # the reason written down — which is what the policy is actually asking for.
+      - uses: dtolnay/rust-toolchain@1.87.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -159,9 +164,11 @@ jobs:
       - name: os-input platform layer
         run: cargo test -p notewise-os-input --features os-input
 
-      - name: shell with the assistant
-        run: cargo check --features assistant
-        working-directory: apps/desktop/src-tauri
+      # No shell check here, deliberately. This workflow's own header says platform app builds are
+      # separate because "a broken desktop toolchain must not block an engine fix", and I added one
+      # anyway — which then failed for a third reason: the shell's `frontendDist` points at a `dist/`
+      # that is gitignored, so `tauri-build` cannot run on a fresh checkout without the frontend
+      # being built first. That is the frontend workflow's job, and the shell check belongs beside it.
 
   # The combination nothing else checks, on a schedule rather than never.
   #

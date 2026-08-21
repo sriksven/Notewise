@@ -205,7 +205,7 @@ fn to_blob(vector: &[f32]) -> Vec<u8> {
 /// vector would make every comparison against it score zero — a wrong answer that looks like a
 /// weak match rather than a fault.
 fn from_blob(bytes: &[u8], dims: i64) -> std::result::Result<Vec<f32>, String> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(format!(
             "{} bytes is not a whole number of f32s",
             bytes.len()
