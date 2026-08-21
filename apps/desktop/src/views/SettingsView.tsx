@@ -21,6 +21,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { RoutingSettings } from "./RoutingSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ToolServersSettings } from "./ToolServersSettings";
+import { AssistantSettings } from "./AssistantSettings";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
@@ -192,6 +193,10 @@ export function SettingsView({ theme, onModeChange, onAccentChange }: SettingsVi
             change something outside itself, so it reads after everything that only changes what it
             knows. */}
         <ToolServersSettings />
+
+        {/* Beside external tools, and for the same reason it comes after them: both are ways for
+            Notewise to act outside itself, and this one needs the more alarming permission. */}
+        <AssistantSettings />
 
         <SearchIndexSettings />
 

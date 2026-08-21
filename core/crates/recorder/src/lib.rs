@@ -197,9 +197,15 @@ impl Pipeline {
     ///
     /// The writer is consumed by the run that uses it, so a pipeline reused for a second meeting
     /// retains nothing rather than appending to the first meeting's file.
-    pub fn retaining_audio(mut self, path: impl AsRef<std::path::Path>) -> Result<Self> {
+    ///
+    /// Takes `&mut self` rather than consuming the pipeline, unlike the other builder methods here.
+    /// The difference is that this one can fail at runtime — it opens a file — and a fallible
+    /// builder that consumes `self` gives a caller no way to carry on without it. The import path
+    /// wants exactly that: retention is a preference, and a directory that cannot be written to
+    /// should cost the recording its audio file and nothing else.
+    pub fn retaining_audio(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.retain = Some(WavWriter::create(path, AudioFormat::transcription())?);
-        Ok(self)
+        Ok(())
     }
 
     pub fn with_diarizer(mut self, diarizer: Box<dyn Diarizer + Send>) -> Self {
@@ -986,9 +992,8 @@ mod tests {
         let db = db();
         let id = meeting(&db);
 
-        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()))
-            .retaining_audio(&path)
-            .expect("retain");
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()));
+        pipeline.retaining_audio(&path).expect("retain");
 
         let stats = pipeline
             .run(&db, id, &mut tone(1000), never_stop())
@@ -1045,9 +1050,8 @@ mod tests {
         let path = dir.path().join("first.wav");
         let db = db();
 
-        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()))
-            .retaining_audio(&path)
-            .expect("retain");
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()));
+        pipeline.retaining_audio(&path).expect("retain");
 
         let first = meeting(&db);
         let stats = pipeline

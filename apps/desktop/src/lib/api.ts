@@ -585,6 +585,58 @@ export interface ToolProposalResult {
   tools_considered: number;
 }
 
+/** One OS permission the assistant needs, and what to do about it. */
+export interface AssistantPermission {
+  capability: "microphone" | "accessibility" | "screen_recording" | "input_monitoring";
+  /** Spelled the way System Settings spells it, so the row is findable. */
+  label: string;
+  status: "granted" | "denied" | "not_determined" | "unknown";
+  /** Present when it is not granted. Names the pane and says a restart is needed. */
+  how_to_grant: string | null;
+  settings_url: string;
+}
+
+export interface AssistantCapabilities {
+  /** Whether this build can capture and transcribe. */
+  can_dictate: boolean;
+  /** Whether this build can put text into another application. */
+  can_insert: boolean;
+  reason: string | null;
+  hotkey: string;
+  mode: "raw" | "cleaned";
+  permissions: AssistantPermission[];
+}
+
+export interface DictationStatus {
+  supported: boolean;
+  reason: string | null;
+  listening: boolean;
+  started_at: string | null;
+  mode: "raw" | "cleaned" | null;
+}
+
+/**
+ * How dictated text got where it went.
+ *
+ * `clipboard_restored: false` means the clipboard was borrowed and could not be put back — worth
+ * telling the user at the time rather than letting them find out at their next paste.
+ */
+export type Insertion =
+  | "accessibility"
+  | { clipboard: { clipboard_restored: boolean } }
+  | { refused: { reason: string } };
+
+export interface Dictated {
+  text: string;
+  /** What was heard before cleaning, when cleaning changed it. */
+  raw_text: string | null;
+  mode: "raw" | "cleaned";
+  insertion: Insertion | null;
+  /** One sentence for the user, when there is something worth saying. */
+  note: string | null;
+  duration_ms: number;
+}
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -1478,6 +1530,31 @@ export const api = {
   /** Send a call that was confirmed and never went out. Not a retry: a failed call stays failed. */
   executeToolCall: (id: string) =>
     request<ToolExecution>(`/v1/mcp/executions/${id}/execute`, { method: "POST" }),
+
+  // -------------------------------------------------------------- the desktop assistant
+
+  assistant: () => request<AssistantCapabilities>("/v1/assistant"),
+
+  setAssistantHotkey: (hotkey: string, mode?: "raw" | "cleaned") =>
+    request<{ hotkey: string; mode: string; warning: string | null }>(
+      "/v1/assistant/hotkey",
+      { method: "PUT", body: JSON.stringify({ hotkey, mode }) },
+    ),
+
+  dictationStatus: () => request<DictationStatus>("/v1/dictation"),
+
+  /** Start listening. Nothing is transcribed until it stops. */
+  startDictation: (input: { mode?: "raw" | "cleaned" } = {}) =>
+    request<DictationStatus>("/v1/dictation", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /** Stop listening, transcribe, and put the words at the cursor. */
+  stopDictation: () => request<Dictated>("/v1/dictation", { method: "DELETE" }),
+
+  cancelDictation: () =>
+    request<{ cancelled: boolean }>("/v1/dictation/cancel", { method: "POST" }),
 
   search: (query: string, limit = 25) =>
     request<SearchHit[]>(

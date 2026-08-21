@@ -1508,7 +1508,9 @@ dependencies = [
  "notewise-connectors",
  "notewise-diarization",
  "notewise-graph",
+ "notewise-macos-permissions",
  "notewise-mcp-client",
+ "notewise-os-input",
  "notewise-recorder",
  "notewise-storage",
  "notewise-transcription",
@@ -1665,6 +1667,7 @@ dependencies = [
 name = "notewise-os-input"
 version = "0.1.0"
 dependencies = [
+ "notewise-macos-permissions",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

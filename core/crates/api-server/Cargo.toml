@@ -15,6 +15,17 @@ notewise-ai-router.workspace = true
 notewise-transcription.workspace = true
 notewise-connectors.workspace = true
 notewise-mcp-client.workspace = true
+
+# The desktop assistant's foundation: hotkey validation, insertion tiers, screen-context reduction.
+#
+# Not optional, and the reason is worth stating because the spec's architecture says the engine
+# should not depend on this crate. With its `os-input` feature off — the default, and what CI
+# builds — it is pure logic: no platform SDK, no `unsafe`, no permission of any kind. What that
+# rule protects against is the assistant's *platform* requirements reaching an engine build, and a
+# feature that is off does not reach anything. Depending on it unconditionally is what lets the
+# dictation endpoints exist in every build and say honestly that they cannot run.
+notewise-os-input.workspace = true
+notewise-macos-permissions.workspace = true
 cron.workspace = true
 iana-time-zone = "0.1"
 chrono-tz.workspace = true
@@ -80,6 +91,15 @@ speaker-diarization-download = [
     "notewise-diarization/onnx-download",
 ]
 
+# The desktop assistant's platform layer: global hotkeys, and typing into other applications.
+#
+# Off by default because it is the only thing in this crate that compiles `unsafe`, and because
+# every path behind it needs the Accessibility grant — which no CI machine can hold. Without it the
+# dictation endpoints still exist and report why they cannot insert, which is the honest shape.
+assistant = ["notewise-os-input/os-input"]
+
 # Everything needed for the desktop app to actually record.
 full = ["record", "whisper"]
 full-metal = ["record", "whisper-metal"]
+# Everything, including the assistant.
+full-assistant = ["full", "assistant"]

@@ -112,6 +112,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::join::routes())
         // External tools: server configuration, proposals, and the confirmation that runs one.
         .merge(crate::tools::routes())
+        // Dictation, and what the desktop assistant can do on this machine.
+        .merge(crate::dictation::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",

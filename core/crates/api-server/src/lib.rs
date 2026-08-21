@@ -34,6 +34,7 @@ mod ask;
 pub mod calendar;
 mod connectors;
 pub mod diarization;
+pub mod dictation;
 pub mod downloads;
 mod error;
 pub mod indexing;

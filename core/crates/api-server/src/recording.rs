@@ -542,12 +542,11 @@ mod imp {
                     if notewise_storage::retention_policy(&db).keeps_anything() {
                         if let Some(dir) = audio_dir(&db) {
                             let path = notewise_storage::audio_path_for(&dir, meeting.id);
-                            match pipeline.retaining_audio(&path) {
-                                Ok(p) => pipeline = p,
-                                Err(e) => tracing::warn!(
+                            if let Err(e) = pipeline.retaining_audio(&path) {
+                                tracing::warn!(
                                     error = %e,
                                     "could not open a file for retained audio; transcribing without it"
-                                ),
+                                );
                             }
                         }
                     }

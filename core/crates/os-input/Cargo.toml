@@ -13,6 +13,18 @@ thiserror.workspace = true
 serde.workspace = true
 tracing.workspace = true
 
+# Only for reading the Accessibility grant, which is what decides whether the insertion path can
+# work at all. Not optional: the crate needs to be able to *say* the grant is missing even in a
+# build that could not use it.
+notewise-macos-permissions.workspace = true
+
 [dev-dependencies]
 # The insertion outcome is reported over HTTP, so its serialised shape is worth pinning.
 serde_json.workspace = true
+
+[features]
+default = []
+# The platform layer. Off by default, exactly as `os-capture` is: engine CI must not need an
+# Accessibility grant or a windowing toolchain. Turning it on is what makes `unsafe` exist in this
+# crate at all.
+os-input = []

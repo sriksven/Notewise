@@ -60,6 +60,8 @@ pub struct AppState {
     /// in the database and is handed to the client per call, so there is no in-memory copy to drift
     /// out of step with the rows the user edited. Nothing starts until a tool is listed or called.
     mcp: Arc<notewise_mcp_client::McpClient>,
+    /// The at-most-one dictation. One microphone, one cursor.
+    dictation: crate::dictation::DictationManager,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -98,6 +100,7 @@ impl AppState {
             embedder: tokio::sync::RwLock::new(None),
             join: tokio::sync::Mutex::new(crate::join::JoinTracker::default()),
             mcp: Arc::new(notewise_mcp_client::McpClient::new()),
+            dictation: crate::dictation::DictationManager::new(),
             speaker_timelines: Default::default(),
         }
     }
@@ -126,6 +129,11 @@ impl AppState {
     /// not holding anything anybody else needs.
     pub fn mcp(&self) -> Arc<notewise_mcp_client::McpClient> {
         Arc::clone(&self.mcp)
+    }
+
+    /// The at-most-one dictation.
+    pub fn dictation(&self) -> &crate::dictation::DictationManager {
+        &self.dictation
     }
 
     /// The at-most-one live recording.

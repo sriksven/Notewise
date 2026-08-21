@@ -22,6 +22,9 @@ notewise-api-server = { path = "../../../core/crates/api-server" }
 notewise-ai-router = { path = "../../../core/crates/ai-router" }
 notewise-storage = { path = "../../../core/crates/storage" }
 notewise-audio-capture = { path = "../../../core/crates/audio-capture", features = ["os-capture"] }
+# The dictation hotkey. Optional because it is the only thing in the shell that compiles `unsafe`,
+# and because a hotkey the app cannot register is better absent than broken.
+notewise-os-input = { path = "../../../core/crates/os-input", optional = true }
 
 [features]
 # A default `cargo build` produces a shell that can browse, search, summarize, and export but
@@ -32,12 +35,18 @@ default = []
 # Recording is driven through the engine's HTTP surface, so these are forwarded rather than
 # implemented here — the shell owns the window, not the pipeline.
 record = ["notewise-api-server/record"]
+# The desktop assistant: a global hotkey that dictates into whatever has focus.
+#
+# Needs the Accessibility grant at runtime, which the app asks for and cannot grant itself. Without
+# the grant the engine's dictation endpoints still answer and say which pane to open, so a build with
+# this feature and without the grant is informative rather than broken.
+assistant = ["notewise-api-server/assistant", "dep:notewise-os-input", "notewise-os-input/os-input"]
 whisper = ["notewise-api-server/whisper"]
 whisper-metal = ["notewise-api-server/whisper-metal"]
 # What a shipped macOS app is built with. Metal is an Apple GPU API, so this feature cannot be
 # used anywhere else — see `bundle-cpu`.
-bundle = ["record", "whisper-metal"]
+bundle = ["record", "whisper-metal", "assistant"]
 # The same for Windows and Linux: capture plus Whisper on the CPU. Metal has no equivalent here
 # that is safe to assume — CUDA needs an NVIDIA card and Vulkan needs a working loader, and a
 # release build that fails on machines without either is worse than one that is merely slower.
-bundle-cpu = ["record", "whisper"]
+bundle-cpu = ["record", "whisper", "assistant"]

@@ -1,8 +1,13 @@
 //! What macOS has already decided about privacy-gated capabilities.
 //!
-//! Reads TCC through AVFoundation. Reading is not asking: this never raises a dialog, so it is
-//! safe to call while a window is painting, which is the whole reason it exists separately from
-//! the code that requests a permission.
+//! Four capabilities, read through four different frameworks because Apple put them in four
+//! different places: the microphone through AVFoundation, screen recording through CoreGraphics,
+//! Accessibility through ApplicationServices, and Input Monitoring through IOKit. There is no
+//! single TCC API, which is why this file is longer than the idea deserves.
+//!
+//! Reading is not asking: none of the status calls raises a dialog, so they are safe to call while
+//! a window is painting, which is the whole reason they exist separately from the code that
+//! requests a permission.
 //!
 //! # Why this is its own crate
 //!
@@ -255,6 +260,294 @@ pub fn can_hold_screen_recording() -> bool {
     true
 }
 
+/// Which privacy setting a capability lives under.
+///
+/// Carried so an error can name the pane rather than saying "check your settings", which is the
+/// class of dead end `63f6f6d` was about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capability {
+    Microphone,
+    ScreenRecording,
+    /// Controlling other applications: reading a focused text field, and typing into one.
+    Accessibility,
+    /// Watching keystrokes globally. The most invasive grant in the set.
+    InputMonitoring,
+}
+
+impl Capability {
+    /// What to call it in a sentence, spelled the way System Settings spells it.
+    ///
+    /// Matching Apple's wording exactly is not pedantry: a user told to enable "keyboard access"
+    /// will not find "Input Monitoring" in a list of eleven similar-sounding rows.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Capability::Microphone => "Microphone",
+            Capability::ScreenRecording => "Screen & System Audio Recording",
+            Capability::Accessibility => "Accessibility",
+            Capability::InputMonitoring => "Input Monitoring",
+        }
+    }
+
+    /// The System Settings pane, deep-linked.
+    ///
+    /// The anchors are undocumented and stable in practice. A wrong one opens the top of Privacy &
+    /// Security rather than failing, which is a mild cost against the benefit of landing on the
+    /// right row.
+    pub fn settings_url(&self) -> &'static str {
+        match self {
+            Capability::Microphone => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
+            Capability::ScreenRecording => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            }
+            Capability::Accessibility => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            Capability::InputMonitoring => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
+        }
+    }
+
+    /// What to tell someone who has to grant this by hand.
+    ///
+    /// Both of the new capabilities need a restart after being granted, and a feature that silently
+    /// stays broken until the next launch reads as a feature that does not work.
+    pub fn how_to_grant(&self) -> String {
+        let base = format!(
+            "Open System Settings → Privacy & Security → {} and turn on Notewise.",
+            self.label()
+        );
+
+        match self {
+            // Both of these are read once per process by the frameworks that enforce them, so a
+            // grant given while the app is running does not take effect until it restarts.
+            Capability::Accessibility | Capability::InputMonitoring => {
+                format!("{base} Then quit and reopen Notewise — macOS only applies this at launch.")
+            }
+            Capability::ScreenRecording => {
+                format!("{base} This needs a signed build; a development build cannot hold it.")
+            }
+            Capability::Microphone => base,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod accessibility {
+    use std::ffi::c_void;
+
+    // ApplicationServices, not AVFoundation: Accessibility is not a capture device. `AXIsProcessTrusted`
+    // is the only way to read this grant without prompting.
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+        static kAXTrustedCheckOptionPrompt: *const c_void;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFDictionaryCreate(
+            allocator: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+        static kCFBooleanTrue: *const c_void;
+    }
+
+    pub fn trusted() -> bool {
+        // SAFETY: no arguments, returns a plain bool, and reads only this process's TCC state.
+        unsafe { AXIsProcessTrusted() }
+    }
+
+    /// Ask, which on this grant means "open the pane and highlight us".
+    ///
+    /// There is no dialog that grants Accessibility. macOS shows a panel offering to open System
+    /// Settings, and the user flips a switch there — so this returns the status as it stands
+    /// afterwards, which is almost always still `false`.
+    pub fn prompt() -> bool {
+        // SAFETY: a one-entry dictionary is built with the framework's own key and boolean
+        // constants, passed by borrow to a function that does not retain it, and released here.
+        // Null callback tables mean "do not retain or release the contents", which is correct for
+        // constants that outlive the dictionary.
+        unsafe {
+            if kAXTrustedCheckOptionPrompt.is_null() || kCFBooleanTrue.is_null() {
+                // The framework did not load. Fall back to the plain read rather than guessing.
+                return trusted();
+            }
+
+            let keys = [kAXTrustedCheckOptionPrompt];
+            let values = [kCFBooleanTrue];
+            let options = CFDictionaryCreate(
+                std::ptr::null(),
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                std::ptr::null(),
+                std::ptr::null(),
+            );
+
+            if options.is_null() {
+                return trusted();
+            }
+
+            let answer = AXIsProcessTrustedWithOptions(options);
+            CFRelease(options);
+            answer
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod input_monitoring {
+    // IOKit, and a third spelling of the same idea. `IOHIDCheckAccess` reads; `IOHIDRequestAccess`
+    // prompts.
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOHIDCheckAccess(request: u32) -> u32;
+        fn IOHIDRequestAccess(request: u32) -> bool;
+    }
+
+    /// `kIOHIDRequestTypeListenEvent` — watching keystrokes, which is what inline completion needs.
+    ///
+    /// Not `kIOHIDRequestTypePostEvent` (1), which is *sending* them and is covered by
+    /// Accessibility. Asking for the wrong one puts the app in the wrong list, and the user turns on
+    /// a switch that changes nothing.
+    const LISTEN_EVENT: u32 = 0;
+
+    /// `kIOHIDAccessTypeGranted`.
+    const GRANTED: u32 = 0;
+    /// `kIOHIDAccessTypeDenied`.
+    const DENIED: u32 = 1;
+
+    pub enum Access {
+        Granted,
+        Denied,
+        Unknown,
+    }
+
+    pub fn check() -> Access {
+        // SAFETY: one integer in, one integer out, reading this process's TCC state.
+        match unsafe { IOHIDCheckAccess(LISTEN_EVENT) } {
+            GRANTED => Access::Granted,
+            DENIED => Access::Denied,
+            // `kIOHIDAccessTypeUnknown` is 2, and anything else is a value this build does not
+            // know. Both mean "do not claim a grant".
+            _ => Access::Unknown,
+        }
+    }
+
+    pub fn request() -> bool {
+        // SAFETY: same shape. The side effect is TCC's and the window server's.
+        unsafe { IOHIDRequestAccess(LISTEN_EVENT) }
+    }
+}
+
+/// Whether this process may read and control other applications' windows.
+///
+/// Two answers, like screen recording and for the same reason: `AXIsProcessTrusted` cannot tell
+/// "never asked" from "asked and refused". What it *can* tell, and what matters, is whether the
+/// grant is in force right now — a grant given a minute ago in System Settings still reads as
+/// absent until the app restarts, and reporting that honestly is better than a feature that half
+/// works.
+#[cfg(target_os = "macos")]
+pub fn accessibility() -> Authorization {
+    if accessibility::trusted() {
+        Authorization::Granted
+    } else {
+        Authorization::Denied
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn accessibility() -> Authorization {
+    Authorization::Unknown
+}
+
+/// Ask for Accessibility, which opens the pane rather than raising a dialog.
+///
+/// Returns the grant as it stands afterwards, which is nearly always still denied: the user has to
+/// find the switch, and macOS applies it at the next launch. A caller must treat `Denied` here as
+/// "not yet", not as a refusal.
+#[cfg(target_os = "macos")]
+pub fn request_accessibility() -> Authorization {
+    if accessibility::prompt() {
+        Authorization::Granted
+    } else {
+        Authorization::Denied
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_accessibility() -> Authorization {
+    Authorization::Unknown
+}
+
+/// Whether this process may watch keystrokes globally.
+///
+/// Three answers here, unlike the other two, because IOKit actually distinguishes them.
+#[cfg(target_os = "macos")]
+pub fn input_monitoring() -> Authorization {
+    match input_monitoring::check() {
+        input_monitoring::Access::Granted => Authorization::Granted,
+        input_monitoring::Access::Denied => Authorization::Denied,
+        input_monitoring::Access::Unknown => Authorization::NotDetermined,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn input_monitoring() -> Authorization {
+    Authorization::Unknown
+}
+
+/// Ask for Input Monitoring.
+///
+/// The most invasive grant in the set, and asking for it is a trust event for a product sold on
+/// privacy. Nothing should call this unless the user has just turned on a feature that cannot work
+/// without it.
+#[cfg(target_os = "macos")]
+pub fn request_input_monitoring() -> Authorization {
+    if input_monitoring::request() {
+        Authorization::Granted
+    } else {
+        input_monitoring()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_input_monitoring() -> Authorization {
+    Authorization::Unknown
+}
+
+/// The current status of one capability.
+///
+/// One entry point so a readiness screen does not have to know which framework answers which
+/// question.
+pub fn status(capability: Capability) -> Authorization {
+    match capability {
+        Capability::Microphone => microphone(),
+        Capability::ScreenRecording => {
+            if !can_hold_screen_recording() {
+                // A build that cannot hold the grant does not have it and never will. Reporting
+                // `Denied` would invite a request that does nothing.
+                Authorization::Unknown
+            } else if screen_recording_granted() {
+                Authorization::Granted
+            } else {
+                Authorization::Denied
+            }
+        }
+        Capability::Accessibility => accessibility(),
+        Capability::InputMonitoring => input_monitoring(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +562,112 @@ mod tests {
             !can_hold_screen_recording(),
             "cargo's test binary is not Developer ID signed, so this must be false"
         );
+    }
+
+    /// Reading Accessibility must not prompt, panic, or block. It runs on every readiness check.
+    #[test]
+    fn reading_accessibility_is_harmless_and_terminates() {
+        // A test binary is not in the Accessibility list, so the honest answer is `Denied` on
+        // macOS and `Unknown` elsewhere. Asserting the *shape* rather than the value keeps this
+        // passing on a developer machine that happens to have granted the terminal.
+        assert!(matches!(
+            accessibility(),
+            Authorization::Granted | Authorization::Denied | Authorization::Unknown
+        ));
+    }
+
+    /// Same, through IOKit rather than ApplicationServices.
+    #[test]
+    fn reading_input_monitoring_is_harmless_and_terminates() {
+        assert!(matches!(
+            input_monitoring(),
+            Authorization::Granted
+                | Authorization::Denied
+                | Authorization::NotDetermined
+                | Authorization::Unknown
+        ));
+    }
+
+    /// Every capability answers, so a readiness screen cannot hit a hole.
+    #[test]
+    fn every_capability_has_a_status() {
+        for capability in [
+            Capability::Microphone,
+            Capability::ScreenRecording,
+            Capability::Accessibility,
+            Capability::InputMonitoring,
+        ] {
+            let _ = status(capability);
+            assert!(!capability.label().is_empty());
+            assert!(capability
+                .settings_url()
+                .starts_with("x-apple.systempreferences:"));
+        }
+    }
+
+    /// A build with no team identifier cannot hold screen recording, so asking is pointless — and
+    /// `Denied` would invite exactly that. This is the case every development build is in.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn an_unsignable_build_reports_screen_recording_as_unknown_rather_than_denied() {
+        assert_eq!(status(Capability::ScreenRecording), Authorization::Unknown);
+    }
+
+    /// A user told to enable "keyboard access" will not find "Input Monitoring" in a list of
+    /// eleven similar-sounding rows.
+    #[test]
+    fn the_labels_match_what_system_settings_calls_them() {
+        assert_eq!(Capability::InputMonitoring.label(), "Input Monitoring");
+        assert_eq!(Capability::Accessibility.label(), "Accessibility");
+        assert_eq!(
+            Capability::ScreenRecording.label(),
+            "Screen & System Audio Recording"
+        );
+    }
+
+    /// The two new grants only take effect at launch, and a feature that silently stays broken
+    /// until the next one reads as a feature that does not work.
+    #[test]
+    fn the_grants_that_need_a_restart_say_so() {
+        for capability in [Capability::Accessibility, Capability::InputMonitoring] {
+            let how = capability.how_to_grant();
+            assert!(how.contains("reopen"), "{capability:?}: {how}");
+            assert!(how.contains(capability.label()), "{capability:?}: {how}");
+        }
+
+        assert!(
+            !Capability::Microphone.how_to_grant().contains("reopen"),
+            "the microphone applies immediately, so saying otherwise would be wrong"
+        );
+    }
+
+    /// Every deep link is distinct, or two of them open the same pane and one feature's
+    /// instructions send the user to the wrong list.
+    #[test]
+    fn each_capability_deep_links_somewhere_different() {
+        let urls: std::collections::BTreeSet<&str> = [
+            Capability::Microphone,
+            Capability::ScreenRecording,
+            Capability::Accessibility,
+            Capability::InputMonitoring,
+        ]
+        .iter()
+        .map(|c| c.settings_url())
+        .collect();
+        assert_eq!(urls.len(), 4);
+    }
+
+    /// Asking for Accessibility or Input Monitoring is a visible event on the user's machine.
+    #[test]
+    #[ignore = "opens a System Settings pane and waits for a person; nothing in CI can answer it"]
+    fn requesting_accessibility_opens_the_pane() {
+        let _ = request_accessibility();
+    }
+
+    #[test]
+    #[ignore = "raises the Input Monitoring prompt; needs a person and a windowed session"]
+    fn requesting_input_monitoring_prompts() {
+        let _ = request_input_monitoring();
     }
 
     /// Calling it must not prompt, panic, or block — this runs on every readiness check, on a

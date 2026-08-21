@@ -28,6 +28,9 @@ use notewise_api_server::{AppState, Server};
 use notewise_storage::Database;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(feature = "assistant")]
+mod assistant;
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -40,9 +43,17 @@ fn main() {
         .setup(|app| {
             // Bind before opening the window. If the window loaded first it would race the
             // server and show a connection error on a cold launch.
-            let addr = start_engine(app.handle())?;
+            let (addr, hotkey) = start_engine(app.handle())?;
             let url = format!("http://{addr}");
             tracing::info!(%url, "engine ready");
+
+            // On the main thread and before the event loop, which is where Carbon delivers a
+            // hot-key event. Registering it from the engine's runtime thread would succeed and
+            // never fire.
+            #[cfg(feature = "assistant")]
+            assistant::install(addr, &hotkey);
+            #[cfg(not(feature = "assistant"))]
+            let _ = hotkey;
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 .title("Notewise")
@@ -60,8 +71,14 @@ fn main() {
         .expect("failed to start the Notewise shell");
 }
 
-/// Start the engine on loopback and return the address it actually bound.
-fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error::Error>> {
+/// Start the engine on loopback and return the address it actually bound, plus the dictation
+/// hotkey the workspace has stored.
+///
+/// The hotkey comes back from here because this is where the database is open. Reading it later
+/// would mean a second connection to a file the engine already owns.
+fn start_engine(
+    app: &tauri::AppHandle,
+) -> Result<(SocketAddr, String), Box<dyn std::error::Error>> {
     let data_dir = data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
 
@@ -85,6 +102,13 @@ fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error
 
     let db = Database::open(&db_path)?;
     let ai = AiRouter::from_config(backend_config())?;
+
+    // Read before the database moves into the state.
+    let hotkey = notewise_storage::SettingsRepository::new(&db)
+        .get("assistant.dictation.hotkey")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| notewise_api_server::dictation::DEFAULT_HOTKEY.to_string());
 
     tracing::info!(
         db = %db_path.display(),
@@ -135,9 +159,12 @@ fn start_engine(app: &tauri::AppHandle) -> Result<SocketAddr, Box<dyn std::error
             });
         })?;
 
-    rx.recv_timeout(std::time::Duration::from_secs(10))
+    let addr = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
         .map_err(|_| "the engine did not start in time")?
-        .map_err(|e| e.into())
+        .map_err(|e: String| -> Box<dyn std::error::Error> { e.into() })?;
+
+    Ok((addr, hotkey))
 }
 
 /// Where the database lives.
