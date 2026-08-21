@@ -50,6 +50,7 @@ pub mod schedule;
 mod setup;
 pub mod speakers;
 mod state;
+pub mod sync;
 mod tools;
 pub mod vault;
 mod voiceprints;
@@ -183,6 +184,7 @@ impl Server {
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
         crate::memory::spawn(Arc::clone(&state));
+        crate::sync::spawn(Arc::clone(&state));
         self.serve_router(app(Arc::clone(&state)), state).await
     }
 
@@ -196,6 +198,7 @@ impl Server {
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
         crate::memory::spawn(Arc::clone(&state));
+        crate::sync::spawn(Arc::clone(&state));
         self.serve_router(app_with_frontend(Arc::clone(&state), dir), state)
             .await
     }
@@ -255,6 +258,7 @@ impl Server {
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
         crate::memory::spawn(Arc::clone(&state));
+        crate::sync::spawn(Arc::clone(&state));
         let router = app_with_frontend(Arc::clone(&state), dir);
 
         Ok((bound, async move {

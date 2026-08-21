@@ -383,7 +383,10 @@ fn page(heading: &str, detail: &str) -> String {
 
 /// What the browser shows once the code is in hand.
 fn success_page() -> String {
-    page("Connected", "You can close this tab and go back to Notewise.")
+    page(
+        "Connected",
+        "You can close this tab and go back to Notewise.",
+    )
 }
 
 /// Shown to anything that reaches this port before the redirect does — a favicon fetch, usually.

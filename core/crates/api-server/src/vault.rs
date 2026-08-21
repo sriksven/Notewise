@@ -11,13 +11,16 @@
 //! repository were in tests. A conflict-resolution screen for a mirror that never ran would be
 //! furniture, so mirroring is a request here.
 //!
-//! # Why a push is synchronous
+//! # Why a push is synchronous even though a background drain exists
 //!
-//! The outbox exists so a delivery can be retried without duplicating, and nothing in the engine
-//! drains it — there is no background dispatcher loop, by omission rather than by design. Rather
-//! than add one that talks to external systems unasked, mirroring enqueues and drains in the same
-//! request: the user pressed a button and the answer they want is what happened, including "that
-//! file has your edits in it, here are three things you can do".
+//! [`crate::sync`] drains the outbox on a timer, so a delivery deferred by a transient failure is
+//! retried without anybody asking. Mirroring still drains in the same request, because the user
+//! pressed a button and the answer they want is what happened — including "that file has your edits
+//! in it, here are three things you can do". Waiting up to half a minute to be told that is a worse
+//! screen than one that says it immediately.
+//!
+//! The two are safe together: the outbox leases a claimed row, so a background pass and a button
+//! press cannot deliver the same thing twice.
 //!
 //! # How "overwrite" is implemented, and why it is not a file write
 //!
@@ -126,24 +129,12 @@ async fn push(
     title: &str,
     markdown: &str,
 ) -> ApiResult<Json<MirrorResult>> {
-    let Some(db_path) = state.db_path().map(std::path::Path::to_path_buf) else {
-        return Ok(Json(MirrorResult {
-            outcome: "unavailable",
-            path: None,
-            divergence_id: None,
-            message: "Mirroring needs a workspace stored on disk; this engine is in memory only."
-                .into(),
-        }));
-    };
-
     let registry = state.connectors();
     let payload = serde_json::json!({ "title": title, "markdown": markdown }).to_string();
     let key = format!("{}:{meeting_id}:{}", VaultSink::ID, Id::new());
 
-    let outcome = tokio::task::spawn_blocking(move || -> Result<PushOutcome, String> {
-        let db = notewise_storage::Database::open(&db_path).map_err(|e| e.to_string())?;
-
-        notewise_storage::OutboxRepository::new(&db)
+    let outcome = crate::sync::on_a_worker(state, move |db, runtime| {
+        notewise_storage::OutboxRepository::new(db)
             .enqueue(NewOutboxEntry {
                 connector_id: VaultSink::ID.to_string(),
                 node_kind: "meeting".to_string(),
@@ -154,23 +145,18 @@ async fn push(
             })
             .map_err(|e| e.to_string())?;
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-
         let dispatcher = Dispatcher::new(registry, RetryPolicy::default());
         let report = runtime
-            .block_on(dispatcher.drain(&db))
+            .block_on(dispatcher.drain(db))
             .map_err(|e| e.to_string())?;
 
         // The divergence for *this* meeting, found through the graph rather than by matching the
         // path. The vault names a file from the title plus twelve hex characters of the id, so a
         // path never contains the whole id — a filter on it silently matched nothing, which is how
         // this reported "the vault could not be written to" for a perfectly ordinary conflict.
-        let diverged = vault_item_for(&db, meeting_id)
+        let diverged = vault_item_for(db, meeting_id)
             .and_then(|item_id| {
-                DocumentRepository::new(&db)
+                DocumentRepository::new(db)
                     .divergence_for(item_id)
                     .ok()
                     .flatten()
@@ -182,9 +168,23 @@ async fn push(
             diverged,
         })
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("the mirroring thread stopped: {e}")))?
-    .map_err(ApiError::Internal)?;
+    .await;
+
+    // An in-memory engine cannot mirror, and says so rather than failing obscurely.
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(reason) if reason.contains("in memory") => {
+            return Ok(Json(MirrorResult {
+                outcome: "unavailable",
+                path: None,
+                divergence_id: None,
+                message: "Mirroring needs a workspace stored on disk; this engine is in memory \
+                          only."
+                    .into(),
+            }))
+        }
+        Err(reason) => return Err(ApiError::Internal(reason)),
+    };
 
     if outcome.delivered > 0 {
         return Ok(Json(MirrorResult {

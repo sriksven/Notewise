@@ -1641,7 +1641,7 @@ export const api = {
       "/v1/connectors/microsoft/signin",
     ),
 
-  /** Pull every connected source once. There is no background pull, so this is how events arrive. */
+  /** Pull every connected source now. Notewise also pulls on a timer; this is the impatient path. */
   syncConnectors: () =>
     request<{ pulled: number; upserted: number; failures: string[] }>("/v1/connectors/sync", {
       method: "POST",

@@ -890,17 +890,26 @@ mod setup_tests {
         assert_eq!(state.microsoft_signin().lock().await.state, "pending");
     }
 
-    /// Syncing needs a workspace on disk, and says so rather than failing obscurely.
+    /// An in-memory engine with nothing connected has nothing to sync, and that is the answer.
+    ///
+    /// Syncing does need a workspace on disk — a second connection cannot be opened to an in-memory
+    /// database — but the check is where it bites, in `sync::on_a_worker`, and is tested there. This
+    /// asserts the ordering: a limitation that is not blocking anything is not reported as an error,
+    /// which is the difference between "nothing to do" and "this build cannot".
     #[tokio::test]
-    async fn syncing_an_in_memory_engine_says_why_it_cannot() {
+    async fn syncing_an_in_memory_engine_with_nothing_connected_is_not_an_error() {
         let state = Arc::new(AppState::new(
             Database::open_in_memory().expect("db"),
             notewise_ai_router::Router::from_config(notewise_ai_router::RouterConfig::mock())
                 .expect("mock"),
         ));
 
-        let refused = sync_now(axum::extract::State(state)).await;
-        assert!(matches!(refused, Err(ApiError::Conflict(_))), "{refused:?}");
+        let report = sync_now(axum::extract::State(state))
+            .await
+            .expect("nothing to sync is not a failure")
+            .0;
+        assert_eq!(report.pulled, 0);
+        assert!(report.failures.is_empty());
     }
 
     /// With nothing connected, a sync is a no-op rather than an error.
@@ -1194,34 +1203,26 @@ pub struct SyncReport {
 
 /// Pull every connected source once.
 ///
-/// Synchronous, because the user pressed a button. There is no background pull loop yet, so this is
-/// how calendar events arrive at all — worth saying plainly rather than leaving somebody to wonder
-/// why nothing appeared overnight.
+/// Synchronous, because the user pressed a button and wants to know what happened. [`crate::sync`]
+/// pulls on a timer as well, so this is "now" rather than "at all".
 pub async fn sync_now(State(state): State<Arc<AppState>>) -> ApiResult<Json<SyncReport>> {
-    let Some(db_path) = state.db_path().map(std::path::Path::to_path_buf) else {
-        return Err(ApiError::Conflict(
-            "syncing needs a workspace stored on disk; this engine is in memory only".into(),
-        ));
+    let report =
+        crate::sync::pull_once(&state)
+            .await
+            .map_err(|e| match e.contains("in memory") {
+                true => ApiError::Conflict(e),
+                false => ApiError::Internal(e),
+            })?;
+
+    // Nothing connected is an empty report rather than an error: a user who pressed Sync with no
+    // account linked has made a mistake the screen can explain, not one worth a failed request.
+    let Some(report) = report else {
+        return Ok(Json(SyncReport {
+            pulled: 0,
+            upserted: 0,
+            failures: Vec::new(),
+        }));
     };
-
-    let registry = state.connectors();
-
-    // Its own connection on its own thread, for the reason the vault mirror needs one: `Importer`
-    // borrows the database across its awaits and `Database` is `Send` but not `Sync`.
-    let report = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let db = notewise_storage::Database::open(&db_path).map_err(|e| e.to_string())?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        runtime
-            .block_on(notewise_connectors::Importer::new(registry).run(&db))
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| ApiError::Internal(format!("the sync thread stopped: {e}")))?
-    .map_err(ApiError::Internal)?;
 
     Ok(Json(SyncReport {
         pulled: report.pulled,
@@ -1245,16 +1246,13 @@ pub async fn sync_now(State(state): State<Arc<AppState>>) -> ApiResult<Json<Sync
 /// gate is at the enqueue: an account connected for calendar only never gets a mail delivery queued
 /// against it, rather than getting one that fails at the provider with a 403.
 ///
-/// Enqueue and drain in the same call, because the alternative is a queue nothing drains — see
-/// [`crate::vault`] for the same reasoning at more length.
+/// Enqueue and drain in the same call, so an approval that can reach a mailbox reaches it now
+/// rather than on the next background pass — see [`crate::vault`] for the same reasoning at more
+/// length, and [`crate::sync`] for the pass that catches whatever this misses.
 pub async fn enqueue_mail_draft(
     state: &Arc<AppState>,
     draft: &notewise_storage::EmailDraft,
 ) -> Result<(), String> {
-    let Some(db_path) = state.db_path().map(std::path::Path::to_path_buf) else {
-        return Err("mailbox drafts need a workspace stored on disk".into());
-    };
-
     // The first connected account that may write mail. One vendor at a time: a draft in two
     // mailboxes is two drafts to remember not to send.
     let connector_id = {
@@ -1291,10 +1289,8 @@ pub async fn enqueue_mail_draft(
     let draft_id = draft.id;
     let registry = state.connectors();
 
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let db = notewise_storage::Database::open(&db_path).map_err(|e| e.to_string())?;
-
-        OutboxRepository::new(&db)
+    crate::sync::on_a_worker(state, move |db, runtime| {
+        OutboxRepository::new(db)
             .enqueue(notewise_storage::NewOutboxEntry {
                 connector_id,
                 node_kind: "email_draft".to_string(),
@@ -1305,20 +1301,14 @@ pub async fn enqueue_mail_draft(
             })
             .map_err(|e| e.to_string())?;
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-
         let dispatcher = notewise_connectors::Dispatcher::new(
             registry,
             notewise_connectors::RetryPolicy::default(),
         );
         runtime
-            .block_on(dispatcher.drain(&db))
+            .block_on(dispatcher.drain(db))
             .map(|_| ())
             .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| format!("the delivery thread stopped: {e}"))?
 }

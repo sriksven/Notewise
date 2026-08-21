@@ -103,7 +103,7 @@ export function CalendarSetup({ connectors, onChanged }: Props) {
             Sync now
           </button>
           <p className="min-w-0 flex-1 truncate text-[11.5px] text-ink-faint">
-            {synced ?? "Nothing pulls on a schedule yet, so events arrive when you ask."}
+            {synced ?? "Notewise checks every ten minutes on its own. This asks now."}
           </p>
         </div>
       )}
