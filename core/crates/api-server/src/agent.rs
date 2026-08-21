@@ -447,7 +447,18 @@ async fn drive(
             });
         }
 
-        let request = ChatRequest::new(messages).with_context(vec![system_prompt(task)]);
+        // Standing facts about the person, global only: an agent run has no project, and one that
+        // researched across the workspace would be scoped to whichever project it happened to read
+        // first. Fetched once per turn rather than once per run so a memory added mid-run is not
+        // ignored, which costs one cheap read against a call that is already talking to a model.
+        let memories = crate::memory::for_prompt(state, None, task).await;
+
+        let mut context = vec![system_prompt(task)];
+        if !memories.is_empty() {
+            context.push(memories);
+        }
+
+        let request = ChatRequest::new(messages).with_context(context);
         let response = state
             .ai()
             .chat(&request)

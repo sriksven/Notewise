@@ -504,6 +504,36 @@ export interface JobRun {
   finished_at: string | null;
 }
 
+export interface ExtractionStatus {
+  enabled: boolean;
+  /** Meetings never read for facts. */
+  unprocessed: number;
+  would_run: boolean;
+  /** Why not, when it would not. */
+  blocked_by: string | null;
+}
+
+/** What a candidate fact became. */
+export interface ExtractionDecision {
+  text: string;
+  verdict: "kept" | "duplicate" | "third_party" | "secret" | "unusable";
+  reason: string | null;
+}
+
+/**
+ * What a run did, and what it decided not to do.
+ *
+ * The decisions are the useful part: "why does it not remember that" and "why does it think that"
+ * are the two questions this feature generates, and a trace is the only honest answer to either.
+ */
+export interface ExtractionReport {
+  skipped: string | null;
+  meetings_read: number;
+  proposed: number;
+  kept: number;
+  decisions: ExtractionDecision[];
+}
+
 export interface MemoryItem {
   id: string;
   scope: string;
@@ -854,6 +884,18 @@ export const api = {
 
   deleteMemory: (id: string) =>
     request<{ deleted: boolean }>(`/v1/memories/${id}`, { method: "DELETE" }),
+
+  /** Whether the app reads meetings for durable facts, and why a run would not happen. */
+  extractionStatus: () => request<ExtractionStatus>("/v1/memories/extraction"),
+
+  setExtractionEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean }>("/v1/memories/extraction", {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  /** Read recent meetings now, ignoring the gates. Returns what it decided about each candidate. */
+  runExtraction: () => request<ExtractionReport>("/v1/memories/extract", { method: "POST" }),
 
   /** Whether a meeting has retained audio to play, and how large it is. */
   audioInfo: (meetingId: string) =>

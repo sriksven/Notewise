@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Brain, Trash2 } from "lucide-react";
+import { AlertTriangle, Brain, Loader2, Sparkles, Trash2 } from "lucide-react";
 
-import { api, ApiError, type MemoryItem } from "../lib/api";
+import {
+  api,
+  ApiError,
+  type ExtractionReport,
+  type ExtractionStatus,
+  type MemoryItem,
+} from "../lib/api";
 
 /**
  * What the app remembers about you.
@@ -26,6 +32,10 @@ export function MemorySettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [extraction, setExtraction] = useState<ExtractionStatus | null>(null);
+  const [report, setReport] = useState<ExtractionReport | null>(null);
+  const [running, setRunning] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const r = await api.memories();
@@ -35,7 +45,37 @@ export function MemorySettings() {
     } catch {
       /* Nothing remembered is the ordinary state and not worth an error banner. */
     }
+    try {
+      setExtraction(await api.extractionStatus());
+    } catch {
+      /* Same: a status that will not load is not worth a banner. */
+    }
   }, []);
+
+  async function toggleExtraction(enabled: boolean) {
+    setError(null);
+    // Optimistic, because the switch should move when it is clicked; the reload below corrects it.
+    setExtraction((current) => (current ? { ...current, enabled } : current));
+    try {
+      await api.setExtractionEnabled(enabled);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "could not change that");
+    }
+    await load();
+  }
+
+  async function runNow() {
+    setRunning(true);
+    setError(null);
+    try {
+      setReport(await api.runExtraction());
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "could not read your meetings");
+    } finally {
+      setRunning(false);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -149,9 +189,106 @@ export function MemorySettings() {
           Nothing yet. Anything you add here applies to every meeting.
         </p>
       )}
+
+      {/* Automatic extraction, off until asked for. A feature that reads every transcript to build a
+          durable profile belongs in the same category as voiceprints and acoustic separation, both of
+          which ship off — and the manual list above works whether or not this is ever turned on. */}
+      {extraction && (
+        <div className="mt-5 rounded-lg border border-hairline p-3">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={extraction.enabled}
+              onChange={(e) => void toggleExtraction(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+            />
+            <span className="min-w-0">
+              <span className="flex items-center gap-1.5 text-[12.5px] text-ink">
+                <Sparkles className="h-3 w-3 text-ink-faint" />
+                Learn from my meetings
+              </span>
+              <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-faint">
+                Reads meetings you have already recorded and notes durable facts about you — your
+                role, your projects, how you like things written. Never facts about other people:
+                anything that describes somebody else is discarded, and everything kept appears in
+                the list above where you can change or delete it.
+              </span>
+            </span>
+          </label>
+
+          <div className="mt-2.5 flex items-center gap-2 border-t border-hairline pt-2.5">
+            <button
+              type="button"
+              onClick={() => void runNow()}
+              disabled={running}
+              className="btn-ghost flex items-center gap-1.5 px-2.5 py-1 text-[12px] disabled:opacity-50"
+            >
+              {running && <Loader2 className="h-3 w-3 animate-spin" />}
+              Read my meetings now
+            </button>
+            <p className="min-w-0 flex-1 text-[11.5px] text-ink-faint">
+              {extraction.unprocessed === 0
+                ? "Nothing new to read."
+                : `${extraction.unprocessed} meeting${
+                    extraction.unprocessed === 1 ? "" : "s"
+                  } not read yet.`}
+              {extraction.blocked_by && extraction.enabled && ` Automatically: ${extraction.blocked_by}.`}
+            </p>
+          </div>
+
+          {report && <RunReport report={report} />}
+        </div>
+      )}
     </section>
   );
 }
+
+/**
+ * What the last run decided, candidate by candidate.
+ *
+ * Shown rather than summarised because the two questions this feature generates are "why does it not
+ * remember that" and "why does it think that", and a count answers neither. A refusal is more
+ * interesting than an acceptance here — it is the only visible evidence that the third-party rule and
+ * the secret rule are doing anything.
+ */
+function RunReport({ report }: { report: ExtractionReport }) {
+  const label: Record<ExtractionDecisionVerdict, string> = {
+    kept: "remembered",
+    duplicate: "already known",
+    third_party: "about someone else — discarded",
+    secret: "looked like a secret — discarded",
+    unusable: "not usable",
+  };
+
+  return (
+    <div className="mt-2.5 border-t border-hairline pt-2.5">
+      {report.skipped ? (
+        <p className="text-[11.5px] text-ink-faint">{report.skipped}</p>
+      ) : (
+        <p className="text-[11.5px] text-ink-faint">
+          Read {report.meetings_read} meeting{report.meetings_read === 1 ? "" : "s"}, considered{" "}
+          {report.proposed}, remembered {report.kept}.
+          {report.proposed === 0 && " Most meetings contain nothing durable, which is normal."}
+        </p>
+      )}
+
+      {report.decisions.length > 0 && (
+        <ul className="mt-1.5 space-y-1">
+          {report.decisions.map((decision, index) => (
+            <li key={index} className="text-[11.5px] leading-relaxed">
+              <span className={decision.verdict === "kept" ? "text-ink" : "text-ink-faint"}>
+                {decision.text}
+              </span>
+              <span className="text-ink-faint"> — {label[decision.verdict]}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+type ExtractionDecisionVerdict = ExtractionReport["decisions"][number]["verdict"];
 
 /**
  * One memory, correctable in place.

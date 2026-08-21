@@ -116,6 +116,8 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .merge(crate::dictation::routes())
         // Asking about the screen, acting on a selection, continuing a sentence.
         .merge(crate::assistant::routes())
+        // Extraction settings and a manual run. The memory CRUD lives in `routing`.
+        .merge(crate::memory::routes())
         .route("/v1/import", post(import_audio))
         .route(
             "/v1/import/upload",
@@ -1404,11 +1406,15 @@ async fn summarize_meeting(
         }
     };
 
-    let (title, transcript) = {
+    let (title, transcript, project_id) = {
         let db = state.db().await;
         let repo = MeetingRepository::new(&db);
         let meeting = repo.get(meeting_id)?;
-        (meeting.title, repo.transcript_text(meeting_id)?)
+        (
+            meeting.title,
+            repo.transcript_text(meeting_id)?,
+            meeting.project_id,
+        )
     }; // lock released here, before any model call
 
     if transcript.trim().is_empty() {
@@ -1417,9 +1423,22 @@ async fn summarize_meeting(
         ));
     }
 
+    // What the workspace knows about the person, so a summary is written for them rather than for
+    // nobody. Ranked against the meeting's title, which is the only query this call has.
+    let memories = crate::memory::for_prompt(&state, project_id, &title).await;
+
     let mut input = TranscriptInput::new(title, transcript);
-    if let Some(template) = &template {
-        input = input.with_instructions(template.prompt.clone());
+
+    // Memories go in front of the template rather than replacing it: a template is an instruction
+    // about shape and a memory is context about the reader, and the two are not competing.
+    let instructions = match (memories.is_empty(), &template) {
+        (true, None) => None,
+        (true, Some(template)) => Some(template.prompt.clone()),
+        (false, None) => Some(memories.clone()),
+        (false, Some(template)) => Some(format!("{memories}\n{}", template.prompt)),
+    };
+    if let Some(instructions) = instructions {
+        input = input.with_instructions(instructions);
     }
     // Only the summary honours the template. Decisions and action items are extractions with a
     // fixed output shape, and a prompt written to change prose would break the parse.
@@ -1557,11 +1576,15 @@ async fn chat_about_meeting(
         return Err(ApiError::BadRequest("messages must not be empty".into()));
     }
 
-    let (title, transcript) = {
+    let (title, transcript, project_id) = {
         let db = state.db().await;
         let repo = MeetingRepository::new(&db);
         let meeting = repo.get(meeting_id)?;
-        (meeting.title, repo.transcript_text(meeting_id)?)
+        (
+            meeting.title,
+            repo.transcript_text(meeting_id)?,
+            meeting.project_id,
+        )
     }; // lock released before the model call
 
     if transcript.trim().is_empty() {
@@ -1569,6 +1592,16 @@ async fn chat_about_meeting(
             "this meeting has no transcript to ask about".into(),
         ));
     }
+
+    // Ranked against what was actually asked, which is the case cosine ordering exists for.
+    let asked = body
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role != "assistant")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    let memories = crate::memory::for_prompt(&state, project_id, &asked).await;
 
     let messages: Vec<ChatMessage> = body
         .messages
@@ -1585,9 +1618,14 @@ async fn chat_about_meeting(
         })
         .collect();
 
-    let request = ChatRequest::new(messages).with_context(vec![format!(
-        "Meeting: {title}\n\nTranscript:\n{transcript}"
-    )]);
+    // The memory block first, so the transcript is the last thing the model reads.
+    let mut context = Vec::new();
+    if !memories.is_empty() {
+        context.push(memories);
+    }
+    context.push(format!("Meeting: {title}\n\nTranscript:\n{transcript}"));
+
+    let request = ChatRequest::new(messages).with_context(context);
 
     let response = state.ai().chat(&request).await?;
 

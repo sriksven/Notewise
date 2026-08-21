@@ -42,7 +42,7 @@ mod clarify;
 mod email;
 mod embed;
 mod error;
-mod memory;
+pub mod memory;
 mod policy;
 mod redact;
 mod router;

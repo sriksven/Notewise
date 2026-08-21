@@ -206,11 +206,21 @@ async fn answer(
     passages: Vec<Passage>,
     considered: usize,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let context = vec![format!(
+    // Global memories only. A note or a workspace-wide question has no project to scope to, and
+    // guessing one from whatever the retrieval happened to find would mean the same question
+    // answered twice with different context depending on what matched.
+    let asked = latest_question(&messages).unwrap_or_default().to_string();
+    let memories = crate::memory::for_prompt(state, None, &asked).await;
+
+    let mut context = Vec::new();
+    if !memories.is_empty() {
+        context.push(memories);
+    }
+    context.push(format!(
         "{}\n\n{}",
         retrieval::as_context(&passages),
         retrieval::GROUNDING_RULES
-    )];
+    ));
 
     let request = ChatRequest::new(to_router_messages(messages)).with_context(context);
     let response = state.ai().chat(&request).await?;

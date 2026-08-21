@@ -21,8 +21,17 @@
 //! The rejection here is a heuristic over a model's output, not a guarantee. It is one of three
 //! defences: the prompt asks only for facts about the user, this filters what comes back, and every
 //! stored memory is visible and deletable. None is sufficient alone.
+//!
+//! # Why a secret is refused rather than redacted
+//!
+//! A memory goes into the system prompt of every future call it applies to. Storing "my key is
+//! sk-abc" and relying on redaction to mask it each time is one missed code path away from leaking
+//! it forever; refusing to store it has no such failure mode. So [`reflect`] rejects anything the
+//! redactor recognises, at write time.
 
 use serde::{Deserialize, Serialize};
+
+use crate::redact::{redact, Category, RedactionPolicy};
 
 /// A fact the observer thinks is worth keeping.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +51,8 @@ pub enum Verdict {
     Duplicate { existing: String },
     /// A claim about somebody other than the user.
     ThirdParty { reason: String },
+    /// Something that should not be written down at all — a key, a card number, a phone number.
+    Secret { category: Category },
     /// Too vague, too long, or empty.
     Unusable { reason: String },
 }
@@ -94,6 +105,13 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
         };
     }
 
+    // Before anything else about who it is about. A key is not storable whether or not it belongs to
+    // the user, and the strictest policy is used deliberately: this is deciding what to *keep
+    // forever*, not what to send once, so a contact detail counts too.
+    if let Some(category) = contains_secret(text) {
+        return Verdict::Secret { category };
+    }
+
     // Checked before duplication: a third-party claim that happens to duplicate an existing one
     // should still be reported as the thing that makes it unacceptable.
     let is_first_person = FIRST_PERSON.iter().any(|p| lower.contains(p));
@@ -129,6 +147,17 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
     Verdict::Keep {
         global: candidate.global,
     }
+}
+
+/// The first thing in this text the redactor recognises, if any.
+///
+/// Uses [`RedactionPolicy::SecretsAndContacts`] — the strictest — rather than whatever policy the
+/// router happens to be on. The question here is not "what should be masked on the way out" but
+/// "what should never be written down", and a phone number in a durable fact injected into every
+/// future prompt is in the second category even when it would have been fine in the first.
+pub fn contains_secret(text: &str) -> Option<Category> {
+    let (_, report) = redact(text, RedactionPolicy::SecretsAndContacts);
+    report.counts().first().map(|(category, _)| *category)
 }
 
 /// Whether two memories say the same thing.
@@ -187,6 +216,121 @@ pub fn reflect_batch(
     }
 
     out
+}
+
+/// How many candidates one run may propose.
+///
+/// Three, because the caps are five and twenty: a run that proposed ten would fill the global scope
+/// from one meeting and leave nothing for the next month of them. It also bounds the damage from a
+/// model that has decided everything is worth remembering.
+pub const MAX_CANDIDATES: usize = 3;
+
+/// The instruction block for the observer.
+///
+/// Written as one string so the whole contract is visible at once, and stated in the negative more
+/// than the positive — the failure that matters is not "it missed a fact" but "it wrote down
+/// something about a colleague", and a prompt guards against that by forbidding it explicitly rather
+/// than by describing what is wanted and hoping.
+pub fn observer_prompt() -> String {
+    format!(
+        "You read a person's meeting transcripts and note durable facts **about that person** which \
+would help you help them in future.
+
+Reply with EXACTLY ONE JSON object and nothing else:
+
+{{\"memories\": [{{\"text\": \"<one short fact>\", \"global\": true}}]}}
+
+Return at most {MAX_CANDIDATES}. Return `{{\"memories\": []}}` if there is nothing worth keeping — \
+that is the common and correct answer for most meetings.
+
+What to record:
+- Their role, what they are responsible for, what they work on.
+- Vocabulary their team uses that you would otherwise misread.
+- How they like things done — the format of a summary, the tone of a message.
+- Long-running projects and what they are for.
+
+What NOT to record, ever:
+- Anything about another person. Not their role, not their performance, not their plans, not \
+their health, not who they report to. If a fact is about somebody who is not the person you are \
+helping, leave it out. There is no version of it that is acceptable.
+- Anything that happened once. A decision, a date, an action item — those live in the meeting.
+- Secrets. Keys, tokens, card numbers, phone numbers, addresses.
+- Anything you inferred rather than heard.
+
+Set `global` to true when the fact is true everywhere, and false when it only applies to the \
+project this meeting belongs to.
+
+Write each fact in the person's own voice, starting with \"I\" or \"my\" — \"I own the billing \
+service\", not \"the user owns the billing service\"."
+    )
+}
+
+/// Read candidates out of whatever the model actually said.
+///
+/// Tolerant of code fences and surrounding prose, like every other JSON protocol in this codebase:
+/// a model asked for JSON wraps it. An unreadable reply yields nothing, which the caller treats as
+/// "this meeting had nothing worth keeping" — the same outcome as an honest empty answer, and the
+/// safe direction for a feature whose failure mode is remembering too much.
+pub fn parse_candidates(reply: &str) -> Vec<Candidate> {
+    #[derive(Deserialize)]
+    struct Envelope {
+        #[serde(default)]
+        memories: Vec<Candidate>,
+    }
+
+    let Some(object) = first_object(reply) else {
+        return Vec::new();
+    };
+
+    let mut candidates = match serde_json::from_str::<Envelope>(&object) {
+        Ok(envelope) => envelope.memories,
+        // A bare array, which models produce about a third of the time.
+        Err(_) => serde_json::from_str::<Vec<Candidate>>(&object).unwrap_or_default(),
+    };
+
+    // Truncated rather than rejected: a model that returned six useful facts should not cost the
+    // user all six, and the cap is about prompt budget rather than about correctness.
+    candidates.truncate(MAX_CANDIDATES);
+    candidates
+}
+
+/// The first balanced JSON object or array in a string.
+fn first_object(text: &str) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let start = chars.iter().position(|c| *c == '{' || *c == '[')?;
+    let (open, close) = if chars[start] == '{' {
+        ('{', '}')
+    } else {
+        ('[', ']')
+    };
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (offset, ch) in chars[start..].iter().enumerate() {
+        if in_string {
+            match ch {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match *ch {
+            '"' => in_string = true,
+            c if c == open => depth += 1,
+            c if c == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(chars[start..=start + offset].iter().collect());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The system-prompt section memories are injected as.
@@ -354,5 +498,154 @@ mod tests {
         ]);
         assert!(section.contains("- I prefer short summaries"));
         assert!(section.contains("- I work in Europe/London"));
+    }
+    // ------------------------------------------------------------ secrets, refused at write time
+
+    /// A memory goes into every future prompt it applies to. Relying on redaction to mask it each
+    /// time is one missed code path away from leaking it forever.
+    #[test]
+    fn a_candidate_carrying_a_secret_is_refused_rather_than_stored() {
+        let cases = [
+            "my api key is sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "I pay for it with 4111 1111 1111 1111",
+            "my number is +1 415 555 0132",
+            "I use https://admin:hunter2@internal.example.com every morning",
+        ];
+
+        for text in cases {
+            match reflect(&candidate(text), &[]) {
+                Verdict::Secret { .. } => {}
+                other => panic!("{text:?} should have been refused, got {other:?}"),
+            }
+        }
+    }
+
+    /// Checked before who it is about: a key is not storable whether or not it belongs to the user.
+    #[test]
+    fn a_secret_is_refused_even_when_the_sentence_is_about_the_user() {
+        let text = "my card is 4111 1111 1111 1111 and I use it for the team subscription";
+        assert!(matches!(
+            reflect(&candidate(text), &[]),
+            Verdict::Secret { .. }
+        ));
+    }
+
+    /// An ordinary fact must not be refused for looking vaguely numeric.
+    #[test]
+    fn an_ordinary_fact_is_not_mistaken_for_a_secret() {
+        for text in [
+            "I own the billing service and the 3 workers behind it",
+            "I run the platform standup at 9am on Mondays",
+            "my team calls the ingest pipeline the funnel",
+        ] {
+            assert!(
+                !matches!(reflect(&candidate(text), &[]), Verdict::Secret { .. }),
+                "{text:?} was refused as a secret"
+            );
+            assert_eq!(contains_secret(text), None, "{text:?}");
+        }
+    }
+
+    // ------------------------------------------------------------ the observer's output
+
+    #[test]
+    fn candidates_are_read_out_of_a_bare_object() {
+        let parsed = parse_candidates(
+            r#"{"memories":[{"text":"I own the billing service","global":true}]}"#,
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].text, "I own the billing service");
+        assert!(parsed[0].global);
+    }
+
+    /// A model asked for JSON wraps it.
+    #[test]
+    fn a_fenced_reply_is_read() {
+        let parsed = parse_candidates(
+            "Here is what I found:\n```json\n{\"memories\": [{\"text\": \"I prefer short summaries\"}]}\n```",
+        );
+        assert_eq!(parsed.len(), 1);
+        assert!(!parsed[0].global, "global defaults to false");
+    }
+
+    /// Models produce a bare array about a third of the time.
+    #[test]
+    fn a_bare_array_is_read() {
+        let parsed = parse_candidates(r#"[{"text":"I own the billing service"}]"#);
+        assert_eq!(parsed.len(), 1);
+    }
+
+    /// The common and correct answer for most meetings.
+    #[test]
+    fn an_empty_answer_is_read_as_nothing_to_keep() {
+        assert!(parse_candidates(r#"{"memories": []}"#).is_empty());
+        assert!(parse_candidates("Nothing stood out.").is_empty());
+        assert!(parse_candidates("").is_empty());
+    }
+
+    /// The safe direction for a feature whose failure mode is remembering too much.
+    #[test]
+    fn an_unreadable_reply_yields_nothing_rather_than_guessing() {
+        assert!(parse_candidates(r#"{"memories": "I own billing"}"#).is_empty());
+        assert!(parse_candidates("{ this is not json }").is_empty());
+        assert!(parse_candidates(r#"{"memories":[{"text":"#).is_empty());
+    }
+
+    /// A run that proposed ten would fill the global scope from one meeting.
+    #[test]
+    fn more_candidates_than_the_cap_are_truncated_rather_than_rejected() {
+        let many: String = (0..8)
+            .map(|n| format!(r#"{{"text":"I do thing number {n} every week"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let parsed = parse_candidates(&format!(r#"{{"memories":[{many}]}}"#));
+
+        assert_eq!(parsed.len(), MAX_CANDIDATES);
+        assert!(
+            parsed[0].text.contains("number 0"),
+            "the first ones are kept"
+        );
+    }
+
+    /// A brace inside a memory must not truncate the object.
+    #[test]
+    fn a_brace_inside_a_memory_does_not_end_the_object() {
+        let parsed =
+            parse_candidates(r#"{"memories":[{"text":"I write my notes as {topic}: detail"}]}"#);
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].text.contains("{topic}"), "{:?}", parsed[0].text);
+    }
+
+    // ------------------------------------------------------------ the prompt
+
+    /// The failure that matters is not a missed fact but a fact about a colleague, so the prompt
+    /// forbids it explicitly rather than describing what is wanted and hoping.
+    #[test]
+    fn the_prompt_forbids_third_party_facts_in_so_many_words() {
+        let prompt = observer_prompt();
+        assert!(prompt.contains("about another person"), "{prompt}");
+        assert!(
+            prompt.contains("no version of it that is acceptable"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Secrets"), "{prompt}");
+        assert!(
+            prompt.contains(&MAX_CANDIDATES.to_string()),
+            "the prompt must state the limit it is held to"
+        );
+    }
+
+    /// Asking for the user's own voice is what makes the reflector's first-person check work at all.
+    #[test]
+    fn the_prompt_asks_for_the_first_person() {
+        let prompt = observer_prompt();
+        assert!(prompt.contains("own voice"), "{prompt}");
+        assert!(prompt.contains("I own the billing service"), "{prompt}");
+    }
+
+    /// "Nothing worth keeping" has to be presented as normal, or a model invents something.
+    #[test]
+    fn the_prompt_makes_an_empty_answer_the_expected_one() {
+        assert!(observer_prompt().contains("common and correct answer"));
     }
 }

@@ -41,6 +41,7 @@ mod error;
 pub mod indexing;
 pub mod jobs;
 pub mod join;
+pub mod memory;
 pub mod recording;
 mod retrieval;
 mod routes;
@@ -180,6 +181,7 @@ impl Server {
         // and by an embedder that only wants the route table, and neither wants a background loop.
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
+        crate::memory::spawn(Arc::clone(&state));
         self.serve_router(app(Arc::clone(&state)), state).await
     }
 
@@ -192,6 +194,7 @@ impl Server {
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
+        crate::memory::spawn(Arc::clone(&state));
         self.serve_router(app_with_frontend(Arc::clone(&state), dir), state)
             .await
     }
@@ -250,6 +253,7 @@ impl Server {
         let state = Arc::new(state);
         crate::jobs::spawn(Arc::clone(&state));
         crate::join::spawn(Arc::clone(&state));
+        crate::memory::spawn(Arc::clone(&state));
         let router = app_with_frontend(Arc::clone(&state), dir);
 
         Ok((bound, async move {
