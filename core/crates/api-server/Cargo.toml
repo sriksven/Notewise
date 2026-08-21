@@ -46,6 +46,9 @@ thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
+# Exchanging a Microsoft authorization code. One POST, on a path the connectors crate cannot own
+# because the loopback listener is what has the PKCE verifier.
+reqwest.workspace = true
 tokio-stream.workspace = true
 
 # Capture is optional. A default build is a read/query/summarize engine with no platform audio

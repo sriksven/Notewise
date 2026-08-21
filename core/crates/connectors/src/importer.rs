@@ -45,12 +45,20 @@ impl ImportReport {
 /// Pulls from every registered source.
 #[derive(Debug)]
 pub struct Importer {
-    registry: ConnectorRegistry,
+    registry: std::sync::Arc<ConnectorRegistry>,
 }
 
 impl Importer {
-    pub fn new(registry: ConnectorRegistry) -> Self {
-        Self { registry }
+    /// Build an importer.
+    ///
+    /// Takes anything that becomes an `Arc<ConnectorRegistry>`, for the same reason
+    /// [`crate::Dispatcher::new`] does: `api-server` keeps its registry shared so connecting an
+    /// account in one window does not block a request in another, and rebuilding it per pull would
+    /// re-read every credential from the keychain.
+    pub fn new(registry: impl Into<std::sync::Arc<ConnectorRegistry>>) -> Self {
+        Self {
+            registry: registry.into(),
+        }
     }
 
     pub fn registry(&self) -> &ConnectorRegistry {

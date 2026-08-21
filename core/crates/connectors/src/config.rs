@@ -66,8 +66,13 @@ pub fn build_registry(
                 let key = credentials.get(GoogleBridge::ID, crate::sources::SHARED_KEY)?;
                 match key {
                     Some(key) => {
+                        // Registered in both maps: one deployment reads the calendar and creates
+                        // drafts, which is what the direction-split traits are for. Registering only
+                        // as a source was the drift the missing sink implementation left behind — the
+                        // comment above claimed both and the code did one.
                         let bridge = Arc::new(GoogleBridge::new(target, key));
-                        registry.register_source(bridge);
+                        registry.register_source(bridge.clone());
+                        registry.register_sink(bridge);
                     }
                     None => tracing::warn!(
                         "the Google bridge has no shared key; skipping it rather than calling a \
@@ -81,7 +86,8 @@ pub fn build_registry(
                         // The account label holds the client id: a tenant that requires its own app
                         // registration supplies one, and otherwise it is the build's own.
                         let graph = Arc::new(MicrosoftGraph::new(target, token));
-                        registry.register_source(graph);
+                        registry.register_source(graph.clone());
+                        registry.register_sink(graph);
                     }
                     None => tracing::warn!(
                         "Microsoft has no refresh token; skipping it rather than registering a \

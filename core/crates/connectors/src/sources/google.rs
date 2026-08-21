@@ -26,10 +26,11 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::connector::{Connector, SourceConnector};
+use crate::connector::{Connector, SinkConnector, SourceConnector};
 use crate::credentials::Secret;
 use crate::error::{ConnectorError, Result};
-use crate::types::{Cursor, Health, Inbound, PullBatch};
+use crate::sources::microsoft::DraftPayload;
+use crate::types::{Cursor, ExternalRef, Health, Inbound, Outbound, PullBatch};
 
 /// Credential key holding the deployment URL.
 pub const DEPLOYMENT_URL_KEY: &str = "deployment_url";
@@ -254,6 +255,42 @@ pub struct Calendar {
     pub selected: bool,
     #[serde(default)]
     pub owned: bool,
+}
+
+#[async_trait]
+impl SinkConnector for GoogleBridge {
+    /// Create a draft in the user's own Gmail.
+    ///
+    /// The deployed script's `createDraft` is `GmailApp.createDraft`, and there is deliberately no
+    /// `send` action in the script we ship — so this cannot send mail even if this code asked it to.
+    /// That is a stronger guarantee than a comment: the capability is absent from the thing holding
+    /// the authorization, which the user can read before deploying it.
+    ///
+    /// A second push returns the first draft rather than creating another, for the same reason
+    /// Microsoft's does — see [`MicrosoftGraph`](crate::sources::MicrosoftGraph)'s `push`.
+    async fn push(&self, outbound: &Outbound) -> Result<ExternalRef> {
+        if let Some(existing) = &outbound.existing {
+            tracing::debug!(
+                external_id = %existing.external_id,
+                "the draft is already in Gmail; not creating a second"
+            );
+            return Ok(existing.clone());
+        }
+
+        let draft = DraftPayload::from_outbound(&outbound.payload)?;
+        let created = self
+            .create_draft(&draft.recipients(), &draft.subject, &draft.body)
+            .await?;
+
+        Ok(ExternalRef {
+            // The draft id rather than the message id: it is what the script's own URL points at,
+            // and what a future update would address.
+            external_id: created.id,
+            url: Some(created.url),
+            title: Some(draft.subject),
+            remote_version: None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -762,5 +799,172 @@ mod tests {
         let reply: EventsReply = serde_json::from_str(raw).expect("deserializes");
         assert_eq!(reply.events.len(), 1);
         assert!(to_inbound(&reply.events[0]).is_ok());
+    }
+    /// The sink, through the same stub the pull path uses. Proves the payload shape reaches the
+    /// script and the link comes back — which is what the interface turns into "Open in Gmail".
+    #[tokio::test]
+    async fn the_sink_creates_a_draft_and_returns_its_link() {
+        let url = stub(
+            serde_json::json!({
+                "version": REQUIRED_VERSION,
+                "draft": { "id": "d-1", "messageId": "m-1", "url": "https://mail.google.com/d/1" }
+            }),
+            false,
+        )
+        .await;
+
+        let bridge = GoogleBridge::new(url, Secret::new("secret"));
+        let reference = bridge
+            .push(&draft_outbound(serde_json::json!({
+                "to": ["priya@example.com"],
+                "subject": "Follow-up: Platform standup",
+                "body": "Here is what we agreed."
+            })))
+            .await
+            .expect("a draft");
+
+        assert_eq!(reference.external_id, "d-1");
+        assert_eq!(
+            reference.url.as_deref(),
+            Some("https://mail.google.com/d/1")
+        );
+        assert_eq!(
+            reference.title.as_deref(),
+            Some("Follow-up: Platform standup")
+        );
+    }
+
+    /// Two identical follow-ups in somebody's drafts folder is precisely the duplicate the outbox
+    /// exists to prevent.
+    #[tokio::test]
+    async fn a_second_push_returns_the_first_draft_without_creating_another() {
+        // A stub that would answer, so a second creation would visibly succeed if it happened.
+        let url = stub(
+            serde_json::json!({
+                "version": REQUIRED_VERSION,
+                "draft": { "id": "d-2", "messageId": "m-2", "url": "https://mail.google.com/d/2" }
+            }),
+            false,
+        )
+        .await;
+
+        let bridge = GoogleBridge::new(url, Secret::new("secret"));
+        let mut outbound = draft_outbound(serde_json::json!({
+            "to": ["priya@example.com"],
+            "subject": "Follow-up",
+            "body": "body"
+        }));
+        outbound.existing = Some(ExternalRef {
+            external_id: "d-1".into(),
+            url: Some("https://mail.google.com/d/1".into()),
+            title: Some("Follow-up".into()),
+            remote_version: None,
+        });
+
+        let reference = bridge.push(&outbound).await.expect("the existing draft");
+        assert_eq!(
+            reference.external_id, "d-1",
+            "the first draft, not a second"
+        );
+    }
+
+    /// A draft the user cannot send is not worth creating, and a 400 three layers down says nothing
+    /// about why.
+    #[tokio::test]
+    async fn a_draft_with_no_recipient_is_refused_before_the_script_is_called() {
+        let bridge = GoogleBridge::new("http://127.0.0.1:1/exec", Secret::new("k"));
+
+        let refused = bridge
+            .push(&draft_outbound(serde_json::json!({
+                "to": [],
+                "subject": "Follow-up",
+                "body": "body"
+            })))
+            .await;
+
+        // The URL points at nothing, so reaching the network would be a transient error. A
+        // permanent one proves the refusal happened first.
+        assert!(
+            matches!(refused, Err(ConnectorError::Permanent(ref m)) if m.contains("recipient")),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_draft_with_no_subject_is_refused() {
+        let bridge = GoogleBridge::new("http://127.0.0.1:1/exec", Secret::new("k"));
+
+        let refused = bridge
+            .push(&draft_outbound(serde_json::json!({
+                "to": ["a@b.com"],
+                "subject": "   ",
+                "body": "body"
+            })))
+            .await;
+        assert!(
+            matches!(refused, Err(ConnectorError::Permanent(ref m)) if m.contains("subject")),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn something_that_is_not_a_draft_is_refused_rather_than_sent() {
+        let bridge = GoogleBridge::new("http://127.0.0.1:1/exec", Secret::new("k"));
+
+        let refused = bridge
+            .push(&draft_outbound(
+                serde_json::json!({ "markdown": "# a meeting" }),
+            ))
+            .await;
+        assert!(
+            matches!(refused, Err(ConnectorError::Permanent(_))),
+            "{refused:?}"
+        );
+    }
+
+    /// The one guarantee worth asserting structurally: this connector asks the script for four
+    /// things, and none of them sends mail.
+    ///
+    /// Held as an allowlist rather than a denylist. A denylist can only forbid the send action
+    /// somebody thought of; this fails for any action added without being named here, which is the
+    /// same reasoning `MUTATING_TOOLS` uses in `mcp-server`.
+    #[test]
+    fn the_connector_asks_the_script_for_nothing_but_these() {
+        let source = include_str!("google.rs");
+        // Assembled so this test does not match itself.
+        let marker = concat!("\"action\"", ": \"");
+
+        let mut asked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (index, _) in source.match_indices(marker) {
+            let rest = &source[index + marker.len()..];
+            if let Some(end) = rest.find('"') {
+                asked.insert(&rest[..end]);
+            }
+        }
+
+        let permitted: std::collections::BTreeSet<&str> =
+            ["version", "calendars", "events", "createDraft"]
+                .into_iter()
+                .collect();
+
+        assert!(
+            asked.is_subset(&permitted),
+            "the connector asks the script for something unlisted: {:?}",
+            asked.difference(&permitted).collect::<Vec<_>>()
+        );
+        assert!(
+            asked.contains("createDraft"),
+            "the draft action should be in use; found {asked:?}"
+        );
+    }
+
+    fn draft_outbound(payload: serde_json::Value) -> Outbound {
+        Outbound {
+            node_kind: "email_draft".into(),
+            node_id: notewise_storage::Id::new(),
+            operation: crate::types::Operation::Create,
+            payload,
+            existing: None,
+        }
     }
 }

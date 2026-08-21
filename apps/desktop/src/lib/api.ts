@@ -1609,11 +1609,43 @@ export const api = {
    * `signing_secret` comes back exactly once, at first connect. The engine keeps it in the
    * keychain and cannot show it again.
    */
-  connectConnector: (id: string, target: string) =>
+  connectConnector: (
+    id: string,
+    target: string,
+    options: {
+      /** A shared secret the connector needs — the Apps Script deployment key. Goes to the keychain. */
+      key?: string;
+      /** `calendar`, `mail`, or both. Mail is opt-in. */
+      scopes?: string[];
+    } = {},
+  ) =>
     request<{ id: string; signing_secret: string | null }>(
       `/v1/connectors/${encodeURIComponent(id)}`,
-      { method: "POST", body: JSON.stringify({ target }) },
+      { method: "POST", body: JSON.stringify({ target, ...options }) },
     ),
+
+  /**
+   * Begin a Microsoft sign-in. Returns the page to open; the engine catches the redirect.
+   *
+   * Notewise ships no app registration of its own, so a client id from the tenant is required —
+   * the request says so rather than failing at Microsoft with an error about an unknown app.
+   */
+  startMicrosoftSignIn: (input: { client_id?: string; scopes?: string[] } = {}) =>
+    request<{ authorize_url: string; redirect_uri: string }>(
+      "/v1/connectors/microsoft/signin",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+
+  microsoftSignInStatus: () =>
+    request<{ state: "idle" | "pending" | "connected" | "failed"; error: string | null }>(
+      "/v1/connectors/microsoft/signin",
+    ),
+
+  /** Pull every connected source once. There is no background pull, so this is how events arrive. */
+  syncConnectors: () =>
+    request<{ pulled: number; upserted: number; failures: string[] }>("/v1/connectors/sync", {
+      method: "POST",
+    }),
 
   disconnectConnector: (id: string) =>
     request<void>(`/v1/connectors/${encodeURIComponent(id)}`, { method: "DELETE" }),

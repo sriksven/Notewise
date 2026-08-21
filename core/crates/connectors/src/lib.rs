@@ -26,6 +26,7 @@ mod dispatcher;
 mod error;
 mod importer;
 mod keychain;
+mod oauth;
 mod registry;
 mod sinks;
 mod sources;
@@ -38,6 +39,7 @@ pub use dispatcher::{DispatchReport, Dispatcher, RetryPolicy};
 pub use error::{ConnectorError, Result};
 pub use importer::{ImportReport, Importer};
 pub use keychain::KeychainStore;
+pub use oauth::{Callback, CallbackProblem, PendingAuth, CONSENT_TIMEOUT};
 pub use registry::ConnectorRegistry;
 pub use sinks::{vault_fingerprint, MockConnector, VaultSink, WebhookSink, SIGNATURE_HEADER};
 pub use sources::{

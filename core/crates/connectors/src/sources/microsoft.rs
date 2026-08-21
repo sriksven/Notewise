@@ -22,13 +22,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::connector::{Connector, SourceConnector};
+use crate::connector::{Connector, SinkConnector, SourceConnector};
 use crate::credentials::Secret;
 use crate::error::{ConnectorError, Result};
-use crate::types::{Cursor, Health, Inbound, PullBatch};
+use crate::types::{Cursor, ExternalRef, Health, Inbound, Outbound, PullBatch};
 
 /// Credential key holding the refresh token.
 pub const REFRESH_TOKEN_KEY: &str = "refresh_token";
@@ -338,6 +338,144 @@ struct DeltaReply {
     delta_link: Option<String>,
     #[serde(rename = "@odata.nextLink")]
     next_link: Option<String>,
+}
+
+/// The payload a mail draft carries through the outbox.
+///
+/// Shared by both vendors, because a follow-up is a follow-up: the recipients, a subject, and a body
+/// the AI router already generated. Kept here rather than in each sink so the two cannot disagree
+/// about what an enqueued draft looks like.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DraftPayload {
+    #[serde(default)]
+    pub to: Vec<String>,
+    pub subject: String,
+    pub body: String,
+}
+
+impl DraftPayload {
+    /// Read one out of an outbound payload.
+    pub fn from_outbound(payload: &serde_json::Value) -> Result<Self> {
+        let draft: Self = serde_json::from_value(payload.clone()).map_err(|e| {
+            ConnectorError::Permanent(format!("that is not a mail draft payload: {e}"))
+        })?;
+
+        // Refused here rather than by the provider. A draft with no recipient is a draft the user
+        // cannot send, and finding that out from a 400 three layers down is worse than now.
+        if draft.to.iter().all(|address| address.trim().is_empty()) {
+            return Err(ConnectorError::Permanent(
+                "a draft needs at least one recipient".into(),
+            ));
+        }
+        if draft.subject.trim().is_empty() {
+            return Err(ConnectorError::Permanent("a draft needs a subject".into()));
+        }
+
+        Ok(draft)
+    }
+
+    /// The recipients that are actually addresses.
+    pub fn recipients(&self) -> Vec<String> {
+        self.to
+            .iter()
+            .map(|address| address.trim().to_string())
+            .filter(|address| !address.is_empty())
+            .collect()
+    }
+}
+
+#[async_trait]
+impl SinkConnector for MicrosoftGraph {
+    /// Create a draft in the user's own mailbox.
+    ///
+    /// # Never sent
+    ///
+    /// `POST /me/messages` creates a draft and nothing else. The send endpoint is `/me/sendMail`,
+    /// and it does not appear in this file — not behind a flag, not for power users. The user opens
+    /// the draft in Outlook and presses send themselves, which is the only place that decision
+    /// belongs.
+    ///
+    /// # A second push returns the first draft
+    ///
+    /// `existing` means this was already delivered, and for a draft the right response is to hand
+    /// back the artifact rather than make another. Two identical follow-ups in somebody's drafts
+    /// folder is precisely the duplicate the outbox exists to prevent, and Graph would happily
+    /// create the second one.
+    async fn push(&self, outbound: &Outbound) -> Result<ExternalRef> {
+        if let Some(existing) = &outbound.existing {
+            tracing::debug!(
+                external_id = %existing.external_id,
+                "the draft is already in the mailbox; not creating a second"
+            );
+            return Ok(existing.clone());
+        }
+
+        let draft = DraftPayload::from_outbound(&outbound.payload)?;
+        let token = self.access_token().await?;
+
+        let message = serde_json::json!({
+            "subject": draft.subject,
+            "body": { "contentType": "Text", "content": draft.body },
+            "toRecipients": draft
+                .recipients()
+                .iter()
+                .map(|address| serde_json::json!({ "emailAddress": { "address": address } }))
+                .collect::<Vec<_>>(),
+        });
+
+        let response = self
+            .http
+            .post(format!("{}/me/messages", self.graph_base))
+            .bearer_auth(&token)
+            .json(&message)
+            .send()
+            .await
+            .map_err(|e| ConnectorError::Transient(format!("could not reach Graph: {e}")))?;
+
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|e| ConnectorError::Transient(format!("could not read the reply: {e}")))?;
+
+        if status.as_u16() == 401 {
+            return Err(ConnectorError::Auth {
+                connector: Self::ID.to_string(),
+            });
+        }
+        if status.as_u16() == 403 {
+            // Consented to calendar but not mail. Permanent, because retrying cannot grant a scope.
+            return Err(ConnectorError::Permanent(
+                "this Microsoft account has not granted Notewise permission to write mail; \
+                 reconnect it and include mail access"
+                    .into(),
+            ));
+        }
+        if !status.is_success() {
+            return Err(ConnectorError::Transient(format!(
+                "Graph answered {status} creating a draft"
+            )));
+        }
+
+        let created: CreatedMessage = serde_json::from_str(&text)
+            .map_err(|e| ConnectorError::Permanent(format!("unreadable draft reply: {e}")))?;
+
+        Ok(ExternalRef {
+            external_id: created.id,
+            // The link the interface turns into "Open draft in Outlook". Graph gives one; when it
+            // does not, the absence is honest rather than a guessed URL that 404s.
+            url: created.web_link,
+            title: Some(draft.subject),
+            remote_version: None,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CreatedMessage {
+    id: String,
+    #[serde(rename = "webLink")]
+    web_link: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -762,5 +900,191 @@ mod tests {
     fn an_unknown_response_status_is_none_rather_than_a_guess() {
         assert_eq!(normalize_response(Some("notResponded")), "none");
         assert_eq!(normalize_response(None), "none");
+    }
+    /// The draft path against a stub Graph. The message shape is the part worth pinning: Graph
+    /// silently accepts a body it does not understand and creates an empty draft.
+    #[tokio::test]
+    async fn the_sink_creates_a_draft_with_the_right_message_shape() {
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+
+        let (graph_base, token_url) = graph_stub(
+            move |body: serde_json::Value| {
+                recorder.lock().unwrap().push(body);
+                serde_json::json!({ "id": "AAMk-1", "webLink": "https://outlook.office.com/1" })
+            },
+            201,
+        )
+        .await;
+
+        let graph = MicrosoftGraph::new("client", Secret::new("refresh"))
+            .with_endpoints(graph_base, token_url);
+
+        let reference = graph
+            .push(&draft_outbound(serde_json::json!({
+                "to": ["priya@example.com", "  "],
+                "subject": "Follow-up: Platform standup",
+                "body": "Here is what we agreed."
+            })))
+            .await
+            .expect("a draft");
+
+        assert_eq!(reference.external_id, "AAMk-1");
+        assert_eq!(
+            reference.url.as_deref(),
+            Some("https://outlook.office.com/1")
+        );
+
+        let sent = seen.lock().unwrap().first().cloned().expect("a message");
+        assert_eq!(sent["subject"], "Follow-up: Platform standup");
+        assert_eq!(sent["body"]["contentType"], "Text");
+        assert_eq!(sent["body"]["content"], "Here is what we agreed.");
+        let recipients = sent["toRecipients"].as_array().expect("recipients");
+        assert_eq!(recipients.len(), 1, "a blank address is not a recipient");
+        assert_eq!(
+            recipients[0]["emailAddress"]["address"],
+            "priya@example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_push_returns_the_first_draft() {
+        let (graph_base, token_url) = graph_stub(
+            |_| serde_json::json!({ "id": "AAMk-2", "webLink": "https://outlook.office.com/2" }),
+            201,
+        )
+        .await;
+
+        let graph = MicrosoftGraph::new("client", Secret::new("refresh"))
+            .with_endpoints(graph_base, token_url);
+
+        let mut outbound = draft_outbound(serde_json::json!({
+            "to": ["a@b.com"], "subject": "Follow-up", "body": "body"
+        }));
+        outbound.existing = Some(ExternalRef {
+            external_id: "AAMk-1".into(),
+            url: Some("https://outlook.office.com/1".into()),
+            title: Some("Follow-up".into()),
+            remote_version: None,
+        });
+
+        assert_eq!(
+            graph.push(&outbound).await.expect("existing").external_id,
+            "AAMk-1"
+        );
+    }
+
+    /// Consented to calendar but not mail. Retrying cannot grant a scope, so it must not be
+    /// transient — a retry loop here would hide the one thing the user has to fix.
+    #[tokio::test]
+    async fn a_missing_mail_scope_is_permanent_and_says_what_to_do() {
+        let (graph_base, token_url) = graph_stub(|_| serde_json::json!({}), 403).await;
+
+        let graph = MicrosoftGraph::new("client", Secret::new("refresh"))
+            .with_endpoints(graph_base, token_url);
+
+        let refused = graph
+            .push(&draft_outbound(serde_json::json!({
+                "to": ["a@b.com"], "subject": "Follow-up", "body": "body"
+            })))
+            .await;
+
+        match refused {
+            Err(ConnectorError::Permanent(message)) => {
+                assert!(message.contains("mail access"), "{message}");
+            }
+            other => panic!("expected a permanent refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_expired_grant_while_drafting_is_an_auth_error() {
+        let (graph_base, token_url) = graph_stub(|_| serde_json::json!({}), 401).await;
+
+        let graph = MicrosoftGraph::new("client", Secret::new("refresh"))
+            .with_endpoints(graph_base, token_url);
+
+        let refused = graph
+            .push(&draft_outbound(serde_json::json!({
+                "to": ["a@b.com"], "subject": "Follow-up", "body": "body"
+            })))
+            .await;
+        assert!(
+            matches!(refused, Err(ConnectorError::Auth { .. })),
+            "{refused:?}"
+        );
+    }
+
+    /// Structural, and the guarantee that cannot drift: the send endpoint is named in this file
+    /// exactly once, in a sentence explaining that it is not used.
+    ///
+    /// A plain "does not contain" would have to forbid the comment too, which would mean deleting
+    /// the explanation to satisfy the test — so it checks *where* the string appears instead. A
+    /// request builder reaching for it would not be on a comment line.
+    #[test]
+    fn the_send_endpoint_appears_only_in_prose() {
+        let source = include_str!("microsoft.rs");
+        // Assembled so this test does not match itself.
+        let endpoint = concat!("/me/send", "Mail");
+
+        for line in source.lines().filter(|line| line.contains(endpoint)) {
+            let trimmed = line.trim_start();
+            assert!(
+                trimmed.starts_with("//") || trimmed.starts_with("*"),
+                "the send endpoint is used rather than described: {line}"
+            );
+        }
+    }
+
+    fn draft_outbound(payload: serde_json::Value) -> Outbound {
+        Outbound {
+            node_kind: "email_draft".into(),
+            node_id: notewise_storage::Id::new(),
+            operation: crate::types::Operation::Create,
+            payload,
+            existing: None,
+        }
+    }
+
+    /// A Graph that answers the token request and one `POST /me/messages`.
+    async fn graph_stub<F>(handler: F, status: u16) -> (String, String)
+    where
+        F: Fn(serde_json::Value) -> serde_json::Value + Clone + Send + Sync + 'static,
+    {
+        use axum::{routing::post, Router};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+
+        let app = Router::new()
+            .route(
+                "/token",
+                post(|| async { axum::Json(serde_json::json!({ "access_token": "at" })) }),
+            )
+            .route(
+                "/me/messages",
+                post(move |body: String| {
+                    let handler = handler.clone();
+                    async move {
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&body).unwrap_or_default();
+                        let reply = handler(parsed);
+                        (
+                            axum::http::StatusCode::from_u16(status).expect("a status"),
+                            axum::Json(reply),
+                        )
+                    }
+                }),
+            );
+
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        (format!("http://{addr}"), format!("http://{addr}/token"))
     }
 }

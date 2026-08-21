@@ -154,6 +154,14 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             "/v1/connectors/failures",
             get(crate::connectors::list_failed_deliveries),
         )
+        // Registered *before* `:id` for the same reason `failures` is: axum would otherwise match
+        // the literal segment against the parameter.
+        .route(
+            "/v1/connectors/microsoft/signin",
+            post(crate::connectors::start_microsoft_signin)
+                .get(crate::connectors::microsoft_signin_status),
+        )
+        .route("/v1/connectors/sync", post(crate::connectors::sync_now))
         .route(
             "/v1/connectors/:id",
             post(crate::connectors::connect_connector)
@@ -980,15 +988,39 @@ async fn list_email_drafts(
 ///
 /// Approval is not sending. It records that a human read this text and considers it correct —
 /// the prerequisite the state machine enforces before anything could ever send it.
+/// Approve a draft, and put it in the user's mailbox if a vendor with mail access is connected.
+///
+/// # What approving does and does not mean
+///
+/// It moves the draft to `Approved` and creates a *provider-side draft*. It does not send anything,
+/// and `mark_sent` is not called here — creating a Gmail draft is not sending, and recording it as
+/// sent would corrupt the one state machine the email module was built around. The user opens the
+/// draft in Gmail or Outlook and presses send themselves.
+///
+/// # Why the mailbox hop is best effort
+///
+/// The approval is the user's decision and it has already been recorded. A vendor being unreachable,
+/// or not connected, or connected without mail access, must not undo it — the draft is still in
+/// Notewise and still readable. So a failure is reported in the response rather than returned as an
+/// error.
 async fn approve_email_draft(
     State(state): State<Shared>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<EmailDraftBody>> {
     let draft_id = parse_id(&id)?;
-    let db = state.db().await;
-    Ok(Json(
-        EmailDraftRepository::new(&db).approve(draft_id)?.into(),
-    ))
+
+    let draft = {
+        let db = state.db().await;
+        EmailDraftRepository::new(&db).approve(draft_id)?
+    };
+
+    if let Err(e) = crate::connectors::enqueue_mail_draft(&state, &draft).await {
+        // Logged rather than returned: see above. The interface shows the draft either way, and the
+        // outbox row — when one was made — carries its own failure for the connectors screen.
+        tracing::info!(error = %e, "the draft was approved but not put in a mailbox");
+    }
+
+    Ok(Json(draft.into()))
 }
 
 async fn discard_email_draft(

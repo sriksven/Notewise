@@ -7,6 +7,7 @@ import {
   type AvailableConnector,
   type FailedDelivery,
 } from "../lib/api";
+import { CalendarSetup } from "./CalendarSetup";
 import { VaultDivergences } from "./VaultDivergences";
 
 /**
@@ -82,6 +83,10 @@ export function ConnectorsView() {
               ))}
             </div>
           )}
+
+          {/* Its own section: connecting a calendar is a setup ritual rather than a switch, and the
+              two vendors need different rituals for a reason worth stating on the screen. */}
+          <CalendarSetup connectors={connectors} onChanged={load} />
 
           {/* Above failed deliveries, because a divergence is not a failure — it is the vault
               keeping its promise, and it needs an answer rather than a retry. */}

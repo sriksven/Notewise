@@ -62,6 +62,11 @@ pub struct AppState {
     mcp: Arc<notewise_mcp_client::McpClient>,
     /// The at-most-one dictation. One microphone, one cursor.
     dictation: crate::dictation::DictationManager,
+    /// Where a Microsoft sign-in has got to.
+    ///
+    /// In memory: the whole lifetime of one is the minute somebody spends on a consent screen, and a
+    /// half-finished sign-in that survived a restart would be a listener on a port nothing is on.
+    microsoft_signin: tokio::sync::Mutex<crate::connectors::SignInStatus>,
     /// Speaker events posted for meetings that have not ended yet.
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
@@ -101,6 +106,7 @@ impl AppState {
             join: tokio::sync::Mutex::new(crate::join::JoinTracker::default()),
             mcp: Arc::new(notewise_mcp_client::McpClient::new()),
             dictation: crate::dictation::DictationManager::new(),
+            microsoft_signin: tokio::sync::Mutex::new(crate::connectors::SignInStatus::idle()),
             speaker_timelines: Default::default(),
         }
     }
@@ -134,6 +140,11 @@ impl AppState {
     /// The at-most-one dictation.
     pub fn dictation(&self) -> &crate::dictation::DictationManager {
         &self.dictation
+    }
+
+    /// Where a Microsoft sign-in has got to.
+    pub fn microsoft_signin(&self) -> &tokio::sync::Mutex<crate::connectors::SignInStatus> {
+        &self.microsoft_signin
     }
 
     /// The at-most-one live recording.
