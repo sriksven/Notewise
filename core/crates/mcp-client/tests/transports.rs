@@ -11,10 +11,16 @@
 //! So: a real child process reached over real pipes, and a real HTTP server reached over a real
 //! socket. Neither needs a third-party MCP server, so neither is `#[ignore]`d.
 
+// Both of these are for the stdio helper below, which only exists where there is a shell to run.
+// Gating the helper and not its imports is what broke the Windows build: two unused imports, and CI
+// compiles with `-D warnings`.
+#[cfg(unix)]
 use std::collections::BTreeMap;
 
+#[cfg(unix)]
+use notewise_mcp_client::TransportKind;
 use notewise_mcp_client::{
-    text_of, Allowlist, McpClient, McpError, ServerConfig, TransportKind, PROTOCOL_VERSION,
+    text_of, Allowlist, McpClient, McpError, ServerConfig, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
