@@ -20,6 +20,7 @@ export type Route =
   | { name: "notes"; id?: string }
   | { name: "tasks" }
   | { name: "tickets" }
+  | { name: "people"; id?: string }
   | { name: "trash" }
   | { name: "agent" }
   | { name: "jobs" }
@@ -71,6 +72,8 @@ export function parseRoute(hash: string): Route {
       return { name: "tasks" };
     case "tickets":
       return { name: "tickets" };
+    case "people":
+      return { name: "people", id: parts[1] };
     case "trash":
       return { name: "trash" };
     case "agent":
@@ -107,6 +110,8 @@ export function routeToHash(route: Route): string {
       return `#/meetings/${route.id}/${route.tab}`;
     case "notes":
       return route.id ? `#/notes/${route.id}` : "#/notes";
+    case "people":
+      return route.id ? `#/people/${route.id}` : "#/people";
     case "help":
       return route.section ? `#/help/${route.section}` : "#/help";
     case "settings":

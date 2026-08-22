@@ -69,19 +69,13 @@ function apiMethods(text: string): string[] {
  *
  * Grouped by what is missing:
  *
- * - **People have no screen.** `people`, `participants`, `addParticipant`, `personMeetings` — the
- *   graph knows who attends what and nothing renders it.
  * - **Ask.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and `askNote` instead.
  * - **Vault and graph.** `mirrorMeeting`, `related`.
  * - **Odds and ends.** `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
-  "addParticipant",
   "ask",
   "mirrorMeeting",
-  "participants",
-  "people",
-  "personMeetings",
   "related",
   "suggestCompletion",
 ];

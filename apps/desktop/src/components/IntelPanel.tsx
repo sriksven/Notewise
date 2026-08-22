@@ -1,5 +1,6 @@
 import {
   CircleCheck,
+  Users,
   Repeat,
   Gavel,
   HelpCircle,
@@ -10,8 +11,10 @@ import {
 } from "lucide-react";
 
 import { type AmbiguityKind, type ClarifyingQuestion, type Summary } from "../lib/api";
+import type { Route } from "../lib/router";
 import { ActionItems } from "./ActionItems";
 import { Decisions } from "./Decisions";
+import { Participants } from "./Participants";
 import { MeetingBrief } from "./MeetingBrief";
 
 interface Props {
@@ -41,6 +44,8 @@ interface Props {
   summaryOutputToken: number;
   /** Jump to another meeting — the previous instance of a recurring series. */
   onOpenMeeting: (id: string) => void;
+  /** Anywhere else: a participant's page, reached from the roster above. */
+  onNavigate: (route: Route) => void;
   onSummarize: () => void;
   onDismissQuestion: (question: ClarifyingQuestion) => void;
   onClose: () => void;
@@ -125,6 +130,7 @@ export function IntelPanel({
   summarizing,
   summaryOutputToken,
   onOpenMeeting,
+  onNavigate,
   onSummarize,
   onDismissQuestion,
   onClose,
@@ -154,6 +160,12 @@ export function IntelPanel({
         </p>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* First, because who was there is context for every other section — a decision means
+              something different depending on who was in the room to make it. */}
+          <Section icon={<Users size={13} aria-hidden />} title="Who was there">
+            <Participants meetingId={meetingId} onNavigate={onNavigate} />
+          </Section>
+
           <Section
             icon={<HelpCircle size={13} aria-hidden />}
             title="Worth asking"

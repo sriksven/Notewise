@@ -27,6 +27,7 @@ import { NotesView } from "./views/NotesView";
 import { SummaryView } from "./views/SummaryView";
 import { TasksView } from "./views/TasksView";
 import { TicketsView } from "./views/TicketsView";
+import { PeopleView } from "./views/PeopleView";
 import { TrashView } from "./views/TrashView";
 import {
   api,
@@ -727,6 +728,9 @@ export default function App() {
               <TasksView meetings={meetings} onNavigate={navigate} />
             )}
             {route.name === "tickets" && <TicketsView />}
+            {route.name === "people" && (
+              <PeopleView personId={route.id} onNavigate={navigate} />
+            )}
             {route.name === "trash" && <TrashView />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
             {route.name === "jobs" && <JobsView />}
@@ -751,6 +755,7 @@ export default function App() {
               summary={summaryState.summary}
               summaryOutputToken={summaryOutputToken}
               onOpenMeeting={select}
+              onNavigate={navigate}
               questions={selectedId === recordingId ? questions : []}
               questionsReason={selectedId === recordingId ? questionsReason : null}
               isRecording={isRecording && selectedId === recordingId}
