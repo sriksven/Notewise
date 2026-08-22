@@ -247,6 +247,14 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
         return Ok(PathBuf::from(dir));
     }
 
+    // `"dist"` matches the *target* side of `bundle.resources` in tauri.conf.json, which is a map
+    // for this reason. Declared as a list — `["../dist"]` — Tauri bundles it to
+    // `Resources/_up_/dist`, turning the `..` into `_up_`, and this lookup finds nothing.
+    //
+    // Which was survivable-looking and was not: the packaged app fell through to the development
+    // fallback below, whose path comes from `CARGO_MANIFEST_DIR` at compile time. That exists on the
+    // machine that built the app and on no other, so the dmg aborted on launch quoting a directory
+    // on the builder's disk. It worked for whoever built it, every time.
     if let Ok(resource) = app
         .path()
         .resolve("dist", tauri::path::BaseDirectory::Resource)
@@ -256,21 +264,41 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
         }
     }
 
-    // Development fallback: CARGO_MANIFEST_DIR is apps/desktop/src-tauri.
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or("could not resolve the desktop app directory")?
-        .join("dist");
+    // Development only, and gated so it cannot rescue a release build.
+    //
+    // `CARGO_MANIFEST_DIR` is fixed when the binary is compiled, so in a shipped app this points at
+    // a directory on whoever built it. That is what turned a mis-bundled resource into an app that
+    // launched for its author and aborted for everyone else, quoting their home directory. A release
+    // build has exactly one correct place to find the frontend, and if it is not there the honest
+    // outcome is to say so.
+    #[cfg(debug_assertions)]
+    {
+        let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("could not resolve the desktop app directory")?
+            .join("dist");
 
-    if !dev.join("index.html").exists() {
-        return Err(format!(
-            "no frontend found at {} — run `npm run build` in apps/desktop first",
-            dev.display()
-        )
-        .into());
+        // The branch is the function's tail rather than an early return: whichever arm `cfg`
+        // keeps is the last expression, so a `return` here is redundant in that configuration and
+        // clippy says so.
+        if dev.join("index.html").exists() {
+            Ok(dev)
+        } else {
+            Err(format!(
+                "no frontend found at {} — run `npm run build` in apps/desktop first",
+                dev.display()
+            )
+            .into())
+        }
     }
 
-    Ok(dev)
+    #[cfg(not(debug_assertions))]
+    Err(
+        "this build has no bundled frontend: `bundle.resources` in tauri.conf.json should map \
+         the frontend into the app, or set NOTEWISE_FRONTEND_DIR to a directory holding \
+         index.html"
+            .into(),
+    )
 }
 
 /// Choose an AI backend from the environment.

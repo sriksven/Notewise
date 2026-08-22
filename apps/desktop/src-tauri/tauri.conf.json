@@ -24,7 +24,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../dist"],
+    "resources": { "../dist": "dist" },
     "shortDescription": "Local-first meeting intelligence",
     "longDescription": "Records, transcribes, and understands meetings on your own machine.",
     "category": "Productivity",
