@@ -99,6 +99,26 @@ pub struct Server {
     addr: SocketAddr,
 }
 
+/// Start every background loop.
+///
+/// One function rather than the same four lines at each entry point. There are three ways to start
+/// this server — `serve`, `serve_with_frontend`, `bind_with_frontend` — and while the list was
+/// duplicated across all three, adding a loop meant remembering all three. A loop wired into two of
+/// them is the worst outcome available: it works when you test it and does nothing in the build
+/// users run.
+///
+/// The loops start with the *server*, not with the router. `app` is also called by tests and by an
+/// embedder that only wants the route table, and neither wants background work running.
+///
+/// `every_spawn_is_started` below reads this function's own source and fails if a module grows a
+/// `spawn` that is never called from here.
+fn start_background(state: &Arc<AppState>) {
+    crate::jobs::spawn(Arc::clone(state));
+    crate::join::spawn(Arc::clone(state));
+    crate::memory::spawn(Arc::clone(state));
+    crate::sync::spawn(Arc::clone(state));
+}
+
 impl Server {
     /// Default port. Registered nowhere — chosen to sit clear of common dev servers.
     pub const DEFAULT_PORT: u16 = 47_821;
@@ -179,12 +199,7 @@ impl Server {
     /// Serve until the process is signalled.
     pub async fn serve(self, state: AppState) -> Result<(), ServeError> {
         let state = Arc::new(state);
-        // The scheduler starts with the server, not with the router: `app` is also called by tests
-        // and by an embedder that only wants the route table, and neither wants a background loop.
-        crate::jobs::spawn(Arc::clone(&state));
-        crate::join::spawn(Arc::clone(&state));
-        crate::memory::spawn(Arc::clone(&state));
-        crate::sync::spawn(Arc::clone(&state));
+        start_background(&state);
         self.serve_router(app(Arc::clone(&state)), state).await
     }
 
@@ -195,10 +210,7 @@ impl Server {
         dir: impl AsRef<std::path::Path>,
     ) -> Result<(), ServeError> {
         let state = Arc::new(state);
-        crate::jobs::spawn(Arc::clone(&state));
-        crate::join::spawn(Arc::clone(&state));
-        crate::memory::spawn(Arc::clone(&state));
-        crate::sync::spawn(Arc::clone(&state));
+        start_background(&state);
         self.serve_router(app_with_frontend(Arc::clone(&state), dir), state)
             .await
     }
@@ -255,10 +267,7 @@ impl Server {
 
         let bound = listener.local_addr()?;
         let state = Arc::new(state);
-        crate::jobs::spawn(Arc::clone(&state));
-        crate::join::spawn(Arc::clone(&state));
-        crate::memory::spawn(Arc::clone(&state));
-        crate::sync::spawn(Arc::clone(&state));
+        start_background(&state);
         let router = app_with_frontend(Arc::clone(&state), dir);
 
         Ok((bound, async move {
@@ -330,6 +339,110 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
+    /// Every module that defines a background loop has it started.
+    ///
+    /// Reads the crate's own source rather than asserting a hand-written list, because a
+    /// hand-written list is the thing that goes stale. Twice in this crate's history a loop existed
+    /// and ran for nobody: audio retention swept nothing because `sweep_audio` had no caller, and
+    /// the memory reflector never reflected. Both compiled, both passed clippy, and both were `pub`
+    /// so dead-code analysis said nothing.
+    ///
+    /// The rule this encodes: if a module says `pub fn spawn`, `start_background` calls it.
+    #[test]
+    fn every_spawn_is_started() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        let mut defines_a_loop = Vec::new();
+        for entry in std::fs::read_dir(&src).expect("the crate has a src directory") {
+            let path = entry.expect("a readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            // Skipped: this file holds `start_background`, not a loop — and it holds this test,
+            // whose own source would otherwise match the needle below. A drift test that matches
+            // itself reports drift that does not exist.
+            if path.file_name().and_then(|n| n.to_str()) == Some("lib.rs") {
+                continue;
+            }
+
+            let text = std::fs::read_to_string(&path).expect("a readable source file");
+            // Split so that no file containing this test can match on the test's own text.
+            if text.contains(concat!("pub fn ", "spawn(")) {
+                let module = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .expect("a utf-8 file name")
+                    .to_string();
+                defines_a_loop.push(module);
+            }
+        }
+
+        assert!(
+            !defines_a_loop.is_empty(),
+            "found no background loops at all, so this test is no longer checking anything"
+        );
+
+        // Just this function's body, not the whole file: the call has to be in the one place every
+        // entry point goes through. A stray `jobs::spawn` somewhere else is what this rules out.
+        let body = {
+            let start = src.join("lib.rs");
+            let text = std::fs::read_to_string(start).expect("a readable lib.rs");
+            let head = text
+                .find("fn start_background(")
+                .expect("start_background still exists");
+            let rest = &text[head..];
+            let end = rest
+                .find("\n}\n")
+                .expect("the function is brace-terminated");
+            rest[..end].to_string()
+        };
+
+        for module in defines_a_loop {
+            assert!(
+                body.contains(&format!("{module}::spawn(")),
+                "`{module}` defines `pub fn spawn` but `start_background` never calls it, so the \
+                 loop runs for nobody. Add it there, or make the spawn private."
+            );
+        }
+    }
+
+    /// Every way of starting the server starts the background loops.
+    ///
+    /// The counterpart to the test above: that one catches a loop nobody starts, this one catches an
+    /// entry point that starts nothing. Both failures look identical from the outside — a feature
+    /// that quietly never happens — and this is the half that a fourth `serve`-shaped method would
+    /// reintroduce.
+    #[test]
+    fn every_entry_point_starts_them() {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .expect("a readable lib.rs");
+
+        // The entry points are the `Server` methods that bind a listener. `serve_router` is the
+        // shared tail and is reached only from `serve`/`serve_with_frontend`, so it is not one.
+        let entry_points = ["serve", "serve_with_frontend", "bind_with_frontend"];
+
+        for name in entry_points {
+            let at = text
+                .find(&format!("pub async fn {name}("))
+                .unwrap_or_else(|| panic!("`{name}` still exists"));
+            // Up to the end of that method: the next line that starts a new item at indent 4.
+            let rest = &text[at..];
+            let end = rest[1..]
+                .find("\n    /// ")
+                .or_else(|| rest[1..].find("\n    pub "))
+                .or_else(|| rest[1..].find("\n    async fn "))
+                .map(|i| i + 1)
+                .unwrap_or(rest.len());
+            assert!(
+                rest[..end].contains("start_background(&state)"),
+                "`{name}` binds a listener but never starts the background loops, so a server \
+                 started this way does no scheduled work at all"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]
