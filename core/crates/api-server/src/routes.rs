@@ -2143,6 +2143,38 @@ struct RelatedNodeView {
     id: Id,
     distance: u32,
     via: EdgeKind,
+    /// What to call it, for the kinds a person can open.
+    ///
+    /// Added because without it this endpoint could not be rendered by anything: a list of
+    /// `{kind, id, distance, via}` says "a note, two hops away, via mentions" and never which note.
+    /// It had no callers for exactly that reason.
+    ///
+    /// `None` for the kinds with no name of their own — a transcript segment, a summary, a decision
+    /// — which belong to a meeting rather than standing beside it. A client shows what it can name.
+    label: Option<String>,
+}
+
+/// Resolve a node to something worth showing a person.
+///
+/// Only the kinds that are their own destination. A missing row is `None` rather than an error: the
+/// graph can outlive what it points at, and one dangling edge must not fail the whole query.
+fn label_of(db: &notewise_storage::Database, kind: NodeKind, id: Id) -> Option<String> {
+    match kind {
+        NodeKind::Meeting => MeetingRepository::new(db).get(id).ok().map(|m| m.title),
+        NodeKind::Note => notewise_storage::NoteRepository::new(db)
+            .get(id)
+            .ok()
+            .map(|n| n.title),
+        NodeKind::Ticket => notewise_storage::TicketRepository::new(db)
+            .get(id)
+            .ok()
+            .map(|t| t.title),
+        NodeKind::Person => notewise_storage::PersonRepository::new(db)
+            .get(id)
+            .ok()
+            .map(|p| p.display_name),
+        _ => None,
+    }
 }
 
 async fn related_to_meeting(
@@ -2167,6 +2199,7 @@ async fn related_to_meeting(
                 id: r.node.id,
                 distance: r.distance,
                 via: r.via,
+                label: label_of(&db, r.node.kind, r.node.id),
             })
             .collect(),
     ))
@@ -2850,11 +2883,38 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
 
         let (_, related) = call(&app, get(&format!("/v1/meetings/{meeting_id}/related"))).await;
-        assert!(related
+        let note = related
             .as_array()
-            .unwrap()
+            .expect("an array")
             .iter()
-            .any(|n| n["kind"] == "note"));
+            .find(|n| n["kind"] == "note")
+            .unwrap_or_else(|| panic!("the note is reachable from the meeting: {related}"));
+
+        // Named, not just present. A related-items list that can say "a note" and not which note
+        // cannot be rendered, which is why this endpoint went unused for so long.
+        assert_eq!(note["label"], "Follow-up", "{related}");
+    }
+
+    /// Kinds with no name of their own say so, rather than inventing one.
+    ///
+    /// A transcript segment and a summary belong to a meeting; they are not somewhere to go. The
+    /// field is present and null so a client can tell "nothing to call it" from "not asked".
+    #[tokio::test]
+    async fn related_nodes_that_are_not_destinations_have_no_label() {
+        let app = app();
+        let meeting_id = create_test_meeting(&app).await;
+
+        let (_, related) = call(&app, get(&format!("/v1/meetings/{meeting_id}/related"))).await;
+        for node in related.as_array().expect("an array") {
+            let kind = node["kind"].as_str().expect("a kind");
+            if matches!(kind, "meeting" | "note" | "ticket" | "person") {
+                continue;
+            }
+            assert!(
+                node["label"].is_null(),
+                "{kind} is not a destination, so it should carry no label: {node}"
+            );
+        }
     }
 
     #[tokio::test]

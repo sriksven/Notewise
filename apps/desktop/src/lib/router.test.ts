@@ -98,6 +98,7 @@ describe("routeToHash", () => {
       { name: "notes", id: "note-42" },
       { name: "people", id: undefined },
       { name: "people", id: "person-7" },
+      { name: "ask" },
       { name: "tasks" },
       { name: "tickets" },
       { name: "trash" },

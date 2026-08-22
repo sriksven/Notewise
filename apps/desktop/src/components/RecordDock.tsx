@@ -25,6 +25,8 @@ interface Props {
   device: string | null;
   onToggle: () => void;
   onExport: (variant: "full" | "brief") => void;
+  /** Write this meeting into the connected vault folder. */
+  onMirror: () => void;
   canExport: boolean;
   onImport: () => void;
   /** False when the engine cannot transcribe, or is already busy recording. */
@@ -56,6 +58,7 @@ export function RecordDock({
   device,
   onToggle,
   onExport,
+  onMirror,
   canExport,
   onImport,
   canImport,
@@ -216,6 +219,23 @@ export function RecordDock({
                          transition hover:bg-overlay disabled:cursor-not-allowed disabled:text-ink-faint"
             >
               Export summary only
+            </button>
+
+            {/* Beside the exports because it is the same kind of act — getting this meeting out of
+                Notewise — and unlike them it can refuse: the vault may not be connected, and a file
+                edited outside Notewise is not overwritten. The outcome is reported either way. */}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canExport}
+              onClick={() => {
+                setMenuOpen(false);
+                onMirror();
+              }}
+              className="w-full px-3 py-2 text-left text-[13px] text-ink
+                         transition hover:bg-overlay disabled:cursor-not-allowed disabled:text-ink-faint"
+            >
+              Write to vault folder
             </button>
           </div>
         )}

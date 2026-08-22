@@ -356,6 +356,13 @@ export interface RelatedNode {
   id: string;
   distance: number;
   via: string;
+  /**
+   * What to call it, for the kinds that are their own destination.
+   *
+   * Null for a transcript segment, a summary, a decision — things that belong to a meeting rather
+   * than standing beside it. Render only what can be named.
+   */
+  label: string | null;
 }
 
 /** An error carrying the engine's stable machine-readable code. */

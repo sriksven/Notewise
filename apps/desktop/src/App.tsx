@@ -28,6 +28,7 @@ import { SummaryView } from "./views/SummaryView";
 import { TasksView } from "./views/TasksView";
 import { TicketsView } from "./views/TicketsView";
 import { PeopleView } from "./views/PeopleView";
+import { AskView } from "./views/AskView";
 import { TrashView } from "./views/TrashView";
 import {
   api,
@@ -495,6 +496,31 @@ export default function App() {
     window.location.href = api.exportUrl(selectedId, variant);
   };
 
+  /**
+   * Write the open meeting into the vault folder.
+   *
+   * Three outcomes, all worth saying out loud. `written` names the file, because a mirror whose
+   * destination is invisible is indistinguishable from one that did nothing. `diverged` means the
+   * file was edited outside Notewise and has deliberately not been overwritten — that needs a
+   * decision, which lives under Connectors. `unavailable` means no vault is connected, and the
+   * engine's own message says so better than a generic failure would.
+   */
+  const mirrorMeeting = async () => {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      const result = await api.mirrorMeeting(selectedId);
+      setNotice(
+        result.outcome === "written" && result.path
+          ? `Written to ${result.path}`
+          : result.message,
+      );
+      if (result.outcome === "diverged") navigate({ name: "connectors" });
+    } catch (e) {
+      report(e);
+    }
+  };
+
   const select = (id: string) => navigate({ name: "meeting", id, tab: "transcript" });
   const setTab = (next: Tab) =>
     selectedId && navigate({ name: "meeting", id: selectedId, tab: next });
@@ -731,6 +757,7 @@ export default function App() {
             {route.name === "people" && (
               <PeopleView personId={route.id} onNavigate={navigate} />
             )}
+            {route.name === "ask" && <AskView onNavigate={navigate} />}
             {route.name === "trash" && <TrashView />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
             {route.name === "jobs" && <JobsView />}
@@ -783,6 +810,7 @@ export default function App() {
               onImport={importAudio}
               canImport={(health?.can_record ?? false) && !isRecording}
               onExport={exportMeeting}
+              onMirror={() => void mirrorMeeting()}
               canExport={selectedId !== null}
             />
           )}

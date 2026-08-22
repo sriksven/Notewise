@@ -17,6 +17,7 @@ import {
   type AssistantCapabilities,
   type AssistantPermission,
   type Dictated,
+  type Completion,
   type TypingActivity,
 } from "../lib/api";
 
@@ -49,6 +50,9 @@ export function AssistantSettings() {
 
   const [overlayHotkey, setOverlayHotkey] = useState("");
   const [typing, setTyping] = useState<TypingActivity | null>(null);
+  const [completionDraft, setCompletionDraft] = useState("");
+  const [completion, setCompletion] = useState<Completion | null>(null);
+  const [trying, setTrying] = useState(false);
   const [screen, setScreen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -146,6 +150,33 @@ export function AssistantSettings() {
       await load();
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Show what would be suggested for a sentence typed here.
+   *
+   * The same reason the dictation button exists: the real feature needs Input Monitoring, a pause in
+   * typing, and a model — three things that can each be wrong on their own — and nothing else in the
+   * app can tell you which. `force` skips the pause and the rate limit and nothing else, so an empty
+   * field still has nothing to suggest.
+   *
+   * The engine reads the focused window when no text is passed. Text is passed here, because the
+   * focused window while this screen is open is this screen.
+   */
+  const trySuggestion = async () => {
+    const text = completionDraft.trim();
+    if (!text) return;
+
+    setTrying(true);
+    setError(null);
+    setCompletion(null);
+    try {
+      setCompletion(await api.suggestCompletion({ text, force: true }));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not get a suggestion.");
+    } finally {
+      setTrying(false);
     }
   };
 
@@ -396,6 +427,66 @@ export function AssistantSettings() {
             session.
           </p>
         )}
+
+        {/* Independent of the toggle above on purpose: this is how you find out whether a model will
+            suggest anything at all, and needing Input Monitoring first to learn that would be
+            backwards. */}
+        <div className="border-t border-hairline pt-2">
+          <label className="mb-1 block text-[11.5px] text-ink-faint" htmlFor="completion-try">
+            Try it — type half a sentence
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="completion-try"
+              value={completionDraft}
+              onChange={(event) => setCompletionDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void trySuggestion();
+                }
+              }}
+              placeholder="The main risk with this approach is"
+              className="min-w-0 flex-1 rounded border border-hairline bg-transparent px-2 py-1
+                         text-[12px] text-ink placeholder:text-ink-faint"
+            />
+            <button
+              type="button"
+              onClick={() => void trySuggestion()}
+              disabled={trying || !completionDraft.trim()}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-hairline
+                         px-2.5 py-1 text-[11.5px] text-ink-muted transition hover:bg-surface
+                         hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {trying ? (
+                <Loader2 size={11} className="animate-spin" aria-hidden />
+              ) : (
+                <TextCursorInput size={11} aria-hidden />
+              )}
+              Suggest
+            </button>
+          </div>
+
+          {completion && (
+            <p className="mt-1.5 text-[11.5px] leading-relaxed">
+              {completion.suggestion ? (
+                <>
+                  <span className="text-ink-faint">{completion.text}</span>
+                  <span className="font-medium text-ink">{completion.suggestion}</span>
+                  {completion.model && (
+                    <span className="block text-ink-faint">via {completion.model}</span>
+                  )}
+                </>
+              ) : (
+                // The decision, not a shrug. `too_short` and `too_long` are the policy working;
+                // anything else with no suggestion means the model had nothing to add.
+                <span className="text-ink-faint">
+                  Nothing suggested — {completion.decision.replace(/_/g, " ")}.
+                </span>
+              )}
+            </p>
+          )}
+        </div>
       </div>
     </section>
   );

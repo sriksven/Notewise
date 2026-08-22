@@ -1,5 +1,6 @@
 import {
   CircleCheck,
+  Link2,
   Users,
   Repeat,
   Gavel,
@@ -15,6 +16,7 @@ import type { Route } from "../lib/router";
 import { ActionItems } from "./ActionItems";
 import { Decisions } from "./Decisions";
 import { Participants } from "./Participants";
+import { RelatedItems } from "./RelatedItems";
 import { MeetingBrief } from "./MeetingBrief";
 
 interface Props {
@@ -238,6 +240,12 @@ export function IntelPanel({
 
           <Section icon={<CircleCheck size={13} aria-hidden />} title="Action items">
             <ActionItems meetingId={meetingId} refreshToken={summaryOutputToken} />
+          </Section>
+
+          {/* Last of the reading sections: what this meeting is attached to is the widest context
+              and the least urgent, so it sits below what the meeting itself produced. */}
+          <Section icon={<Link2 size={13} aria-hidden />} title="Linked">
+            <RelatedItems meetingId={meetingId} onNavigate={onNavigate} />
           </Section>
 
           {/* The one action in this panel. Placed under the sections it fills in, so what it

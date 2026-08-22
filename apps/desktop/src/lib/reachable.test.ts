@@ -60,25 +60,24 @@ function apiMethods(text: string): string[] {
 }
 
 /**
- * Client methods with no caller in the interface, as of this being written.
+ * Client methods with no caller in the interface.
  *
- * Not an exemption list — a list of known gaps, and the assertions below hold it to being exactly
- * that. Each of these is a capability the engine has, the client can call, and no screen offers. Any
- * one of them is either a screen worth building or a method worth deleting; leaving it here is
- * saying "not yet", in writing, where the next person can see it.
+ * Empty, and that is the point. It started at twenty-two: audio retention could not be switched on,
+ * summary templates were read-only, dictation could not be cancelled, agent runs vanished when you
+ * left the screen, and the graph — the premise of the whole product — was rendered by nothing. Each
+ * one compiled, passed clippy, had tests at every layer, and was reachable only by `curl`.
  *
- * Grouped by what is missing:
+ * Not an exemption list. A method belongs here only while it is a gap somebody has decided not to
+ * close yet, and the assertions below hold the list to exactly that: a new unreachable method fails
+ * `offers every capability somewhere`, and an entry that has become reachable fails `keeps the list
+ * of gaps honest`. So it can be added to deliberately and shrinks on its own.
  *
- * - **Ask.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and `askNote` instead.
- * - **Vault and graph.** `mirrorMeeting`, `related`.
- * - **Odds and ends.** `suggestCompletion`.
+ * The other resolution is deletion. Three methods left this client rather than gaining a screen —
+ * import-by-path, workspace merge, and appending externally transcribed segments — because a web app
+ * over loopback has no filesystem and no bridge to the shell, so it could never have supplied a
+ * path. Those capabilities live on the CLI. See the note above `api`.
  */
-const KNOWN_UNREACHABLE = [
-  "ask",
-  "mirrorMeeting",
-  "related",
-  "suggestCompletion",
-];
+const KNOWN_UNREACHABLE: string[] = [];
 
 describe("the interface can reach the engine", () => {
   const files = Object.entries(sources);
@@ -109,7 +108,8 @@ describe("the interface can reach the engine", () => {
     expect(
       surprises,
       "These engine capabilities have a typed client method and no caller, so nobody using the " +
-        "app can reach them. Add a caller, or record it in KNOWN_UNREACHABLE with a reason.",
+        "app can reach them. Give one a screen, delete it, or — if it is a gap being left on " +
+        "purpose — add it to KNOWN_UNREACHABLE with the reason.",
     ).toEqual([]);
   });
 
