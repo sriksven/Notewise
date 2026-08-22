@@ -1,0 +1,17 @@
+# Line endings are LF everywhere, including on Windows checkouts.
+#
+# The Windows CI image sets `core.autocrlf=true` globally, so without this every file arrives with
+# `\r\n`. That is invisible to the compiler and to rustfmt, and it broke a test that reads the
+# crate's own source: a search for "\n}\n" finds nothing when the file says "}\r\n". The test now
+# normalises what it reads, and this stops the next one from having to know that.
+#
+# No effect on committed content — everything in here is already LF. It only fixes what a checkout
+# hands to the working tree.
+* text=auto eol=lf
+
+# Binary, so never touched.
+*.png binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.onnx binary

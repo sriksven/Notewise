@@ -339,6 +339,18 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
+    /// A source file as text, with `\r` removed.
+    ///
+    /// The tests below match on `\n`-delimited patterns. Windows CI checks out with
+    /// `core.autocrlf=true`, so on that runner every line ends `\r\n` and a search for `"\n}\n"`
+    /// finds nothing — which is exactly how `every_spawn_is_started` failed there while passing on
+    /// every other platform. Normalising once is cheaper than making each pattern tolerate both.
+    fn read_source(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("{} is readable: {e}", path.display()))
+            .replace('\r', "")
+    }
+
     /// Every module that defines a background loop has it started.
     ///
     /// Reads the crate's own source rather than asserting a hand-written list, because a
@@ -365,7 +377,7 @@ mod tests {
                 continue;
             }
 
-            let text = std::fs::read_to_string(&path).expect("a readable source file");
+            let text = read_source(&path);
             // Split so that no file containing this test can match on the test's own text.
             if text.contains(concat!("pub fn ", "spawn(")) {
                 let module = path
@@ -385,8 +397,7 @@ mod tests {
         // Just this function's body, not the whole file: the call has to be in the one place every
         // entry point goes through. A stray `jobs::spawn` somewhere else is what this rules out.
         let body = {
-            let start = src.join("lib.rs");
-            let text = std::fs::read_to_string(start).expect("a readable lib.rs");
+            let text = read_source(&src.join("lib.rs"));
             let head = text
                 .find("fn start_background(")
                 .expect("start_background still exists");
@@ -414,10 +425,8 @@ mod tests {
     /// reintroduce.
     #[test]
     fn every_entry_point_starts_them() {
-        let text = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
-        )
-        .expect("a readable lib.rs");
+        let text =
+            read_source(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"));
 
         // The entry points are the `Server` methods that bind a listener. `serve_router` is the
         // shared tail and is reached only from `serve`/`serve_with_frontend`, so it is not one.
