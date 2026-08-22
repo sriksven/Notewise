@@ -212,6 +212,35 @@ export function ToolServersSettings() {
 
                 {open && (
                   <div className="border-t border-hairline bg-overlay px-3 py-2.5">
+                    {/* Above the tool list, and shown whether or not discovery succeeded: it decides
+                        whether this server may be launched to answer a proposal at all, which is a
+                        question about the server rather than about any one tool.
+
+                        The engine has enforced this from the start — `McpClient` refuses to spawn a
+                        server pinned `auto_start: false` unless the start was explicit — and nothing
+                        could set it. */}
+                    <label className="mb-2.5 flex cursor-pointer items-start gap-2 border-b border-hairline pb-2.5">
+                      <input
+                        type="checkbox"
+                        checked={server.auto_start}
+                        disabled={busy === server.id}
+                        onChange={() =>
+                          void act(server.id, () =>
+                            api.setMcpServerAutoStart(server.id, !server.auto_start),
+                          )
+                        }
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12px] text-ink">Start it when needed</span>
+                        <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-faint">
+                          {server.auto_start
+                            ? "Launched on its own the first time one of its tools is confirmed."
+                            : "Only started by pressing play above. A confirmed tool call on this server fails until it is running."}
+                        </span>
+                      </span>
+                    </label>
+
                     {!found ? (
                       <p className="flex items-center gap-2 text-[12px] text-ink-faint">
                         <Loader2 size={12} className="animate-spin" aria-hidden />

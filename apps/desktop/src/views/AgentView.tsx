@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, type AgentRun } from "../lib/api";
+import { relativeTime } from "../lib/format";
 import type { Route } from "../lib/router";
 
 interface Props {
@@ -56,9 +57,40 @@ export function AgentView({ onNavigate }: Props) {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<AgentRun[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
   const running = run?.status === "running";
+
+  /**
+   * Pick the run back up on return, and list the ones already done.
+   *
+   * The polling effect below claims the run "continues in the engine, and coming back re-reads it".
+   * It did not: the id lived only in this component's state, so navigating away lost it and a run
+   * that was still working became invisible — still running, still writing a note, with nothing on
+   * screen to say so. `agentRuns` is what makes that comment true.
+   *
+   * An in-flight run is adopted rather than listed, because someone returning to this screen while
+   * the agent is working wants to watch it, not choose it from a menu.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .agentRuns()
+      .then((runs) => {
+        if (cancelled) return;
+        setRecent(runs);
+        const live = runs.find((r) => r.status === "running");
+        // Only when nothing is on screen yet: this must not replace a run the user just started.
+        if (live) setRun((current) => current ?? live);
+      })
+      .catch(() => {
+        // A history that will not load should not stop someone starting a new run.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Poll while it works. Stops on the terminal status rather than running forever, and the
   // interval is torn down if the user navigates away mid-run — the run itself continues in the
@@ -82,6 +114,17 @@ export function AgentView({ onNavigate }: Props) {
       clearInterval(id);
     };
   }, [run]);
+
+  // Keep the list current as runs finish, so one just watched is there to go back to.
+  useEffect(() => {
+    if (!run || run.status === "running") return;
+    void api
+      .agentRuns()
+      .then(setRecent)
+      .catch(() => {
+        /* The list is a convenience; a failure to refresh it is not worth saying. */
+      });
+  }, [run?.id, run?.status]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -155,6 +198,54 @@ export function AgentView({ onNavigate }: Props) {
                   </button>
                 ))}
               </div>
+
+              {/* Earlier runs. Each one wrote a note, so this is also the only index of what the
+                  agent has produced — without it a finished run is unreachable the moment this
+                  screen is left. */}
+              {recent.length > 0 && (
+                <div className="mt-8">
+                  <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                    Earlier
+                  </h2>
+                  <ul className="space-y-1">
+                    {recent.map((earlier) => (
+                      <li key={earlier.id}>
+                        <button
+                          type="button"
+                          onClick={() => setRun(earlier)}
+                          className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left
+                                     transition hover:bg-overlay"
+                        >
+                          {earlier.status === "failed" ? (
+                            <AlertTriangle
+                              size={12}
+                              className="mt-1 shrink-0 text-warn-text"
+                              aria-hidden
+                            />
+                          ) : earlier.status === "running" ? (
+                            <Loader2
+                              size={12}
+                              className="mt-1 shrink-0 animate-spin text-ink-faint"
+                              aria-hidden
+                            />
+                          ) : (
+                            <Check size={12} className="mt-1 shrink-0 text-ink-faint" aria-hidden />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[12.5px] text-ink">
+                              {earlier.task}
+                            </span>
+                            <span className="text-[11px] text-ink-faint">
+                              {relativeTime(earlier.started_at)}
+                              {earlier.note_title && ` — ${earlier.note_title}`}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           ) : (
             <>

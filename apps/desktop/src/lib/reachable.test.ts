@@ -71,17 +71,14 @@ function apiMethods(text: string): string[] {
  *
  * - **People have no screen.** `people`, `participants`, `addParticipant`, `personMeetings` — the
  *   graph knows who attends what and nothing renders it.
- * - **Ask and agent runs.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and
- *   `askNote` instead. `agentRuns` is the history of what the agent did, which is exactly the thing
- *   an autonomous feature most needs to show.
+ * - **Ask.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and `askNote` instead.
  * - **Vault and import.** `mirrorMeeting`, `importAudio`, `mergeWorkspace`, `related`,
  *   `appendSegments` — reachable through other paths or not at all.
  * - **Odds and ends.** `createDecision`/`decisions` (the panel reads decisions off the summary and
- *   can delete one, but not add one), `setMcpServerAutoStart`, `suggestCompletion`.
+ *   can delete one, but not add one), `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
   "addParticipant",
-  "agentRuns",
   "appendSegments",
   "ask",
   "createDecision",
@@ -94,7 +91,6 @@ const KNOWN_UNREACHABLE = [
   "people",
   "personMeetings",
   "related",
-  "setMcpServerAutoStart",
   "suggestCompletion",
 ];
 
