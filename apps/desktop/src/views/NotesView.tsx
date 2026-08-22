@@ -72,10 +72,19 @@ export function NotesView({ noteId, onNavigate }: Props) {
   // reload stays on it.
   useEffect(() => {
     let cancelled = false;
-    void load().then((loaded) => {
+    void load().then(async (loaded) => {
       if (cancelled || !noteId) return;
-      const wanted = loaded.find((note) => note.id === noteId);
-      if (!wanted) return;
+
+      // Fetched by id when it is not in the list, rather than only searched for in it. `load` asks
+      // for the newest fifty, so a citation pointing at the fifty-first note found nothing and this
+      // effect returned without a word — the address bar naming a note and no note open. An agent
+      // that has written enough notes would break its own links that way.
+      let wanted = loaded.find((note) => note.id === noteId);
+      if (!wanted) {
+        wanted = await api.note(noteId).catch(() => undefined);
+      }
+      if (cancelled || !wanted) return;
+
       setSelectedId(wanted.id);
       setTitle(wanted.title);
       setBlocks(parse(wanted.body));

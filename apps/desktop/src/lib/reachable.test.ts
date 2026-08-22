@@ -72,18 +72,13 @@ function apiMethods(text: string): string[] {
  * - **People have no screen.** `people`, `participants`, `addParticipant`, `personMeetings` — the
  *   graph knows who attends what and nothing renders it.
  * - **Ask.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and `askNote` instead.
- * - **Vault and import.** `mirrorMeeting`, `importAudio`, `mergeWorkspace`, `related`,
- *   `appendSegments` — reachable through other paths or not at all.
+ * - **Vault and graph.** `mirrorMeeting`, `related`.
  * - **Odds and ends.** `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
   "addParticipant",
-  "appendSegments",
   "ask",
-  "importAudio",
-  "mergeWorkspace",
   "mirrorMeeting",
-  "note",
   "participants",
   "people",
   "personMeetings",

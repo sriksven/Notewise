@@ -450,17 +450,6 @@ export interface RoutingExplain {
   hour_of_day: number;
 }
 
-export interface MergeResult {
-  applied: boolean;
-  summary: string;
-  meetings: number;
-  transcript_segments: number;
-  notes: number;
-  people_added: number;
-  people_merged: number;
-  skipped_conflicts: number;
-}
-
 export interface PendingNotification {
   id: string;
   /** What triggered it, matching graph node naming: `meeting`, `action_item`, and so on. */
@@ -825,6 +814,23 @@ export interface DivergenceResolved {
   message: string;
 }
 
+/*
+ * Deliberately absent, and recorded here rather than re-added by the next person:
+ *
+ * - `POST /v1/import` by path, and `POST /v1/workspace/merge`, both name a file on disk. This
+ *   frontend is a web app served over loopback with no filesystem access and no bridge to the shell
+ *   — there are no Tauri commands and no dialog plugin — so a path is something it can never
+ *   truthfully supply. Importing here goes through `importUpload`, which hands over bytes; that
+ *   replaced a `window.prompt` asking for an absolute path typed from memory. Both capabilities
+ *   live on the CLI, as `notewise import` and `notewise merge`, where a path is a real thing.
+ *
+ * - `POST /v1/meetings/:id/transcript` appends segments transcribed elsewhere. Nothing in this
+ *   repository does that: the recorder writes its own, and the browser extension posts join signals
+ *   and speaker events rather than text. It is there for a third-party client.
+ *
+ * All three endpoints still exist. What is gone is the pretence that this client can reach them.
+ */
+
 export const api = {
   health: () => request<Health>("/health"),
 
@@ -860,20 +866,6 @@ export const api = {
     request<Meeting>(`/v1/meetings/${id}/end`, { method: "POST" }),
 
   transcript: (id: string) => request<Segment[]>(`/v1/meetings/${id}/transcript`),
-
-  appendSegments: (
-    id: string,
-    segments: Array<{
-      text: string;
-      start_ms: number;
-      end_ms: number;
-      speaker?: string | null;
-    }>,
-  ) =>
-    request<{ appended: number; ids: string[] }>(
-      `/v1/meetings/${id}/transcript`,
-      { method: "POST", body: JSON.stringify(segments) },
-    ),
 
   speakers: (id: string) =>
     request<{ speakers: Speaker[] }>(`/v1/meetings/${id}/speakers`),
@@ -1243,18 +1235,6 @@ export const api = {
       body: JSON.stringify({ quality_backend: backend, quality_model: model }),
     }),
 
-  /**
-   * Fold another workspace into this one.
-   *
-   * `dryRun` is required rather than optional so a call site cannot omit it and mutate by
-   * accident. The engine also defaults it to true, but a caller should have to say which it meant.
-   */
-  mergeWorkspace: (from: string, dryRun: boolean) =>
-    request<MergeResult>("/v1/workspace/merge", {
-      method: "POST",
-      body: JSON.stringify({ from, dry_run: dryRun }),
-    }),
-
   /** Desktop notifications the engine has queued and nothing has shown yet. */
   pendingNotifications: () => request<PendingNotification[]>("/v1/notifications/pending"),
 
@@ -1384,20 +1364,6 @@ export const api = {
       },
       body: file,
     }),
-
-  /** Transcribe a file already on this machine into a new meeting. */
-  importAudio: (options: {
-    path: string;
-    title?: string;
-    model?: string;
-    language?: string;
-  }) =>
-    request<{
-      meeting_id: string;
-      segments: number;
-      speakers: number;
-      audio_ms: number;
-    }>("/v1/import", { method: "POST", body: JSON.stringify(options) }),
 
   /**
    * Start capturing. The engine creates the meeting as part of this call, so there is never a
