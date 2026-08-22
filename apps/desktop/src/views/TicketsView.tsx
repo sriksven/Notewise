@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, User } from "lucide-react";
+import { Plus, User, X } from "lucide-react";
 
 import { api, ApiError, type Ticket } from "../lib/api";
 
@@ -62,6 +62,33 @@ export function TicketsView() {
     } catch (e) {
       setTickets(before);
       setError(e instanceof ApiError ? e.message : "Could not move that ticket.");
+    }
+  }
+
+  /**
+   * Delete a ticket.
+   *
+   * Asks first, unlike removing an action item. A ticket is deliberately created work with a status
+   * someone has been moving along, there is no trash to recover it from, and the card it lives on is
+   * a click target for advancing status — so a delete control beside that is one slip away from
+   * being pressed by mistake.
+   */
+  async function remove(ticket: Ticket) {
+    const ok = window.confirm(
+      `Delete "${ticket.title}"?\n\nThere is no undo. Any action item it came from stays.`,
+    );
+    if (!ok) return;
+
+    const before = tickets;
+    setTickets((current) => current.filter((t) => t.id !== ticket.id));
+    try {
+      await api.deleteTicket(ticket.id);
+      setError(null);
+    } catch (e) {
+      // Already deleted is the outcome that was wanted; see the note in `ActionItems`.
+      if (e instanceof ApiError && e.status === 404) return;
+      setTickets(before);
+      setError(e instanceof ApiError ? e.message : "Could not delete that ticket.");
     }
   }
 
@@ -156,7 +183,7 @@ export function TicketsView() {
                 ) : (
                   <ul className="space-y-1.5">
                     {inColumn.map((ticket) => (
-                      <li key={ticket.id}>
+                      <li key={ticket.id} className="group relative">
                         <button
                           type="button"
                           onClick={() => void move(ticket)}
@@ -183,6 +210,21 @@ export function TicketsView() {
                             <User size={10} aria-hidden />
                             {ticket.owner ?? "unassigned"}
                           </span>
+                        </button>
+
+                        {/* Outside the card, not inside it: the card is a button, and nesting one
+                            button in another is invalid HTML. Positioned over the corner so it
+                            reads as belonging to the card without being part of its click target. */}
+                        <button
+                          type="button"
+                          onClick={() => void remove(ticket)}
+                          title="Delete this ticket"
+                          aria-label={`Delete: ${ticket.title}`}
+                          className="absolute right-1 top-1 rounded p-0.5 text-ink-faint opacity-0
+                                     transition hover:bg-overlay hover:text-warn-text
+                                     group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <X size={12} aria-hidden />
                         </button>
                       </li>
                     ))}

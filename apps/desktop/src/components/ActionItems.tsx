@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarClock, Plus, TicketCheck, User } from "lucide-react";
+import { CalendarClock, Plus, TicketCheck, User, X } from "lucide-react";
 
 import { api, ApiError, type ActionItem } from "../lib/api";
 
@@ -86,6 +86,30 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
       setDraft(text);
       setAdding(true);
       setError(e instanceof ApiError ? e.message : "Could not add that item.");
+    }
+  }
+
+  /**
+   * Remove an item outright.
+   *
+   * Optimistic like every other mutation here, and the same shape as removing a decision in
+   * `IntelPanel`: the row goes when it is clicked, and comes back if the engine refuses. The delete
+   * is a hard one — there is no trash for action items, unlike meetings — so the confirmation is
+   * the hover-only control rather than a dialog, which is the pattern already used for the
+   * equivalent action on decisions.
+   */
+  async function remove(item: ActionItem) {
+    const before = items;
+    setItems((current) => current.filter((i) => i.id !== item.id));
+    try {
+      await api.deleteActionItem(item.id);
+      setError(null);
+    } catch (e) {
+      // A 404 means it is already gone — which is what was asked for. Restoring the row and
+      // reporting "not found" would show a phantom item and blame the user for a race.
+      if (e instanceof ApiError && e.status === 404) return;
+      setItems(before);
+      setError(e instanceof ApiError ? e.message : "Could not delete that item.");
     }
   }
 
@@ -177,6 +201,18 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                     <TicketCheck size={13} aria-hidden />
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => void remove(item)}
+                  title="Delete this action item"
+                  aria-label={`Delete: ${item.text}`}
+                  className="mt-[1px] shrink-0 text-ink-faint opacity-0 transition
+                             hover:text-warn-text group-hover:opacity-100
+                             focus-visible:opacity-100"
+                >
+                  <X size={13} aria-hidden />
+                </button>
               </li>
             );
           })}

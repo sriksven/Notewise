@@ -77,8 +77,7 @@ function apiMethods(text: string): string[] {
  * - **Vault and import.** `mirrorMeeting`, `importAudio`, `mergeWorkspace`, `related`,
  *   `appendSegments` — reachable through other paths or not at all.
  * - **Odds and ends.** `createDecision`/`decisions` (the panel reads decisions off the summary and
- *   can delete one, but not add one), `deleteTicket`, `deleteActionItem`,
- *   `setMcpServerAutoStart`, `suggestCompletion`.
+ *   can delete one, but not add one), `setMcpServerAutoStart`, `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
   "addParticipant",
@@ -87,8 +86,6 @@ const KNOWN_UNREACHABLE = [
   "ask",
   "createDecision",
   "decisions",
-  "deleteActionItem",
-  "deleteTicket",
   "importAudio",
   "mergeWorkspace",
   "mirrorMeeting",
