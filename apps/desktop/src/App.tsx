@@ -117,12 +117,12 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   /**
-   * Bumped after a summary run so the action-item list reloads.
+   * Bumped after a summary run so the decision and action-item lists reload.
    *
    * A counter rather than a boolean: two summaries in a row must both trigger a refresh, and
    * a flag that is already true the second time would not.
    */
-  const [actionItemsToken, setActionItemsToken] = useState(0);
+  const [summaryOutputToken, setSummaryOutputToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -410,7 +410,7 @@ export default function App() {
     try {
       const result = await api.summarize(selectedId);
       await summaryState.reload();
-      setActionItemsToken((n) => n + 1);
+      setSummaryOutputToken((n) => n + 1);
       setNotice(
         `Summarized with ${result.model} — ${result.decisions} decision(s), ` +
           `${result.action_items} action item(s).`,
@@ -646,7 +646,7 @@ export default function App() {
                     onSummarize={() => void summarize()}
                     onReload={() => {
                       void summaryState.reload();
-                      setActionItemsToken((n) => n + 1);
+                      setSummaryOutputToken((n) => n + 1);
                     }}
                   />
                 )}
@@ -749,8 +749,7 @@ export default function App() {
             <IntelPanel
               meetingId={selectedId}
               summary={summaryState.summary}
-              summaryLoading={summaryState.loading}
-              actionItemsToken={actionItemsToken}
+              summaryOutputToken={summaryOutputToken}
               onOpenMeeting={select}
               questions={selectedId === recordingId ? questions : []}
               questionsReason={selectedId === recordingId ? questionsReason : null}

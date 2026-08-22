@@ -74,15 +74,12 @@ function apiMethods(text: string): string[] {
  * - **Ask.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and `askNote` instead.
  * - **Vault and import.** `mirrorMeeting`, `importAudio`, `mergeWorkspace`, `related`,
  *   `appendSegments` — reachable through other paths or not at all.
- * - **Odds and ends.** `createDecision`/`decisions` (the panel reads decisions off the summary and
- *   can delete one, but not add one), `suggestCompletion`.
+ * - **Odds and ends.** `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
   "addParticipant",
   "appendSegments",
   "ask",
-  "createDecision",
-  "decisions",
   "importAudio",
   "mergeWorkspace",
   "mirrorMeeting",
