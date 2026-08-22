@@ -243,29 +243,27 @@ function Shortcuts() {
  * Kept in the app and written in terms of what changed for the person using it, not the commit
  * that changed it. Newest first, and short — a release note nobody reads is worse than none,
  * and the way to make one unreadable is to list everything.
+ *
+ * `CHANGELOG.md` at the repository root is the long version, and the two have to agree. This one
+ * said "Unreleased — in development" and listed five things on the day 0.1.0 was tagged, which
+ * would have shipped a release note describing a fraction of the app.
+ *
+ * A first release cannot say what changed, because nothing came before it. So it says what the
+ * thing is, and — the part a release note usually omits — what it cannot do.
  */
 function WhatsNew() {
   const releases: Array<{ version: string; date: string; changes: string[] }> = [
     {
-      version: "Unreleased",
-      date: "in development",
+      version: "0.1.0",
+      date: "21 August 2026",
       changes: [
-        "A home page, a record page, and a library that groups meetings by when they happened.",
-        "Notes attach to a meeting, and every note can be asked questions about itself.",
-        "An agent that searches across your workspace and writes up what it finds.",
-        "Deleting a note now moves it to a trash you can recover from.",
-        "Help, in the app rather than a website you might not be able to reach.",
-      ],
-    },
-    {
-      version: "Earlier",
-      date: "",
-      changes: [
-        "Import an audio file with a real file picker instead of typing a path.",
-        "The input device list no longer hangs when microphone access has not been granted.",
-        "large-v3-turbo and its quantized build, which fix most poor transcripts.",
-        "Recognising people by voice is off by default, and switching it off erases what was stored.",
-        "A theme with eleven accents, and API keys that actually persist to the keychain.",
+        "The first release. Record or import a meeting, transcribe it on this machine, and get a summary, decisions and action items that stay linked to it.",
+        "Ask a question of everything you have recorded and get an answer that cites the meetings it came from.",
+        "Follow-up emails land as a draft in Gmail or Outlook for you to read — never sent for you.",
+        "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
+        "External tools run only when you confirm that specific call. Scheduled jobs can propose one and never run one.",
+        "Keeping the audio after transcription is off until you turn it on, under Settings.",
+        "Not in this build: macOS system audio capture, which needs a signed app. Recording the microphone works.",
       ],
     },
   ];
