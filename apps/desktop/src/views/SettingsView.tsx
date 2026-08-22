@@ -23,6 +23,7 @@ import { MemorySettings } from "./MemorySettings";
 import { ToolServersSettings } from "./ToolServersSettings";
 import { AssistantSettings } from "./AssistantSettings";
 import { MeetingDetectionSettings } from "./MeetingDetectionSettings";
+import { AudioRetentionSettings } from "./AudioRetentionSettings";
 import type { Route } from "../lib/router";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
@@ -197,6 +198,11 @@ export function SettingsView({
         {/* Before routing and models: this is the one setting that decides whether a meeting gets
             captured at all, and everything else here is about what happens to one that was. */}
         <MeetingDetectionSettings onNavigate={onNavigate} />
+
+        {/* Directly after it, for the reason above: that setting decides whether audio is captured,
+            and this one decides whether it survives being turned into text. Everything below is
+            about the text. */}
+        <AudioRetentionSettings />
 
         <RoutingSettings />
 

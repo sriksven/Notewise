@@ -238,6 +238,19 @@ export interface Segment {
   confidence: number | null;
 }
 
+/** Whether the recording is kept after transcription, and what is on disk right now. */
+export interface AudioRetention {
+  /** `off`, `until_deleted`, or `days:N`. */
+  policy: string;
+  /** Meetings that currently have audio, and the space it uses. */
+  retained: number;
+  bytes: number;
+  /** False on an encrypted workspace, where retained audio would be written unencrypted beside it. */
+  can_enable: boolean;
+  /** Why it cannot be enabled. `null` when it can. */
+  blocked_by: string | null;
+}
+
 /** Whether acoustic speaker separation will run, and what is stopping it if not. */
 export interface DiarizationStatus {
   mode: "off" | "acoustic";
@@ -960,19 +973,24 @@ export const api = {
   audioUrl: (meetingId: string) => `/v1/meetings/${meetingId}/audio`,
 
   /** How long retained audio is kept, and how much there is. */
-  audioRetention: () =>
-    request<{
-      policy: string;
-      retained: number;
-      bytes: number;
-      can_enable: boolean;
-      blocked_by: string | null;
-    }>("/v1/audio/retention"),
+  audioRetention: () => request<AudioRetention>("/v1/audio/retention"),
 
+  /** `off`, `until_deleted`, or `days:N`. Setting `off` deletes what is already kept. */
   setAudioRetention: (policy: string) =>
-    request<{ policy: string; retained: number; bytes: number }>("/v1/audio/retention", {
+    request<AudioRetention>("/v1/audio/retention", {
       method: "PUT",
       body: JSON.stringify({ policy }),
+    }),
+
+  /**
+   * Delete audio the policy no longer covers, now.
+   *
+   * The engine sweeps hourly on its own. This is for someone watching a disk fill who does not want
+   * to wait for the next pass.
+   */
+  sweepAudio: () =>
+    request<{ deleted: number; bytes_freed: number; failed: string[] }>("/v1/audio/sweep", {
+      method: "POST",
     }),
 
   /** Named prompts for summarising. Built-ins first, then the user's own. */

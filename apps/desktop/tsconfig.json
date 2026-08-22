@@ -13,7 +13,11 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    // For `import.meta.glob`, which `src/lib/reachable.test.ts` uses to read the app's own
+    // source. Vite ships the types; without this the bundler understands the call and
+    // `tsc` does not.
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }
