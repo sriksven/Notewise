@@ -90,6 +90,54 @@ jobs:
       - name: Build
         run: npx tauri build --features ${{ matrix.features }} --bundles ${{ matrix.bundles }}
 
+      # A release that installs and then cannot find its own interface is worse than a build that
+      # failed. `bundle.resources` written as the list `["../dist"]` bundles the frontend to
+      # `Resources/_up_/dist`, because Tauri rewrites the `..`, while the app resolves `"dist"` and
+      # finds nothing — then falls back to a compile-time source path and aborts on launch quoting a
+      # directory on the build machine. It worked for whoever built it.
+      #
+      # The collect step below would have shipped that: its only test is that an installer file
+      # exists, and a broken dmg is a file. So the installer is opened and looked inside.
+      #
+      # Windows is skipped rather than faked: an NSIS installer is a self-extracting executable, and
+      # reading one on the runner needs a tool that is not there. `bundled-frontend.test.ts` covers
+      # the config half on every platform, and the path rewriting is Tauri's, not the platform's — so
+      # catching it here catches it everywhere.
+      - name: The frontend is inside the installer
+        if: matrix.name != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.name }}" in
+            macos)
+              dmg=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -not -name 'rw.*' | head -1)
+              [ -n "$dmg" ] || { echo "no dmg was produced"; exit 1; }
+              mount=$(mktemp -d)
+              hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
+              found=$(find "$mount" -path '*/Resources/dist/index.html' | head -1)
+              mangled=$(find "$mount" -path '*_up_*' -name index.html | head -1)
+              hdiutil detach "$mount" -quiet
+              ;;
+            linux)
+              deb=$(find src-tauri/target/release/bundle/deb -name '*.deb' | head -1)
+              [ -n "$deb" ] || { echo "no deb was produced"; exit 1; }
+              listing=$(dpkg-deb -c "$deb")
+              found=$(echo "$listing" | grep -E 'dist/index\.html$' | head -1 || true)
+              mangled=$(echo "$listing" | grep '_up_' | head -1 || true)
+              ;;
+          esac
+
+          if [ -n "${mangled:-}" ]; then
+            echo "the frontend was bundled to a rewritten path: $mangled"
+            echo "declare bundle.resources as a map — { \"../dist\": \"dist\" } — not a list."
+            exit 1
+          fi
+          [ -n "${found:-}" ] || {
+            echo "the installer contains no frontend; the installed app would have no interface"
+            exit 1
+          }
+          echo "frontend present: ${found}"
+
       # Collected by name rather than by globbing the whole bundle directory, which also holds
       # the unpacked `.app` and intermediates that need not be uploaded twice.
       #
