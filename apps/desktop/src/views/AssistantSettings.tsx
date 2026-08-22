@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Keyboard, Loader2, Mic, Sparkles, Square, TextCursorInput } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Keyboard,
+  Loader2,
+  Mic,
+  Sparkles,
+  Square,
+  TextCursorInput,
+  X,
+} from "lucide-react";
 
 import {
   api,
@@ -139,6 +149,29 @@ export function AssistantSettings() {
     }
   };
 
+  /**
+   * Stop listening and throw the words away.
+   *
+   * The only other way out of a live session is "Stop and insert", which types wherever the cursor
+   * happens to be. Someone who started this by accident, or said the wrong thing, needs an exit
+   * that does not put text into another application — the engine has had one all along and nothing
+   * offered it.
+   */
+  const discard = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.cancelDictation();
+      setResult(null);
+      setListening(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not stop listening.");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!capabilities) return null;
 
   const blocked = capabilities.permissions.filter((p) => p.status !== "granted");
@@ -226,29 +259,47 @@ export function AssistantSettings() {
 
         {capabilities.can_dictate && (
           <div className="border-t border-hairline pt-3">
-            <button
-              type="button"
-              onClick={() => void toggle()}
-              disabled={busy}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] transition
-                          disabled:opacity-50 ${
-                            listening
-                              ? "bg-warn text-warn-text"
-                              : "bg-accent text-accent-on hover:opacity-90"
-                          }`}
-            >
-              {busy ? (
-                <Loader2 size={12} className="animate-spin" aria-hidden />
-              ) : listening ? (
-                <Square size={11} aria-hidden />
-              ) : (
-                <Mic size={12} aria-hidden />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void toggle()}
+                disabled={busy}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] transition
+                            disabled:opacity-50 ${
+                              listening
+                                ? "bg-warn text-warn-text"
+                                : "bg-accent text-accent-on hover:opacity-90"
+                            }`}
+              >
+                {busy ? (
+                  <Loader2 size={12} className="animate-spin" aria-hidden />
+                ) : listening ? (
+                  <Square size={11} aria-hidden />
+                ) : (
+                  <Mic size={12} aria-hidden />
+                )}
+                {listening ? "Stop and insert" : "Try it"}
+              </button>
+
+              {/* Only while listening, and never the primary action — insert is what the feature is
+                  for. But it has to be here, or the only way out types into another app. */}
+              {listening && (
+                <button
+                  type="button"
+                  onClick={() => void discard()}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded-full border border-hairline px-3 py-1.5
+                             text-[12px] text-ink-muted transition hover:bg-surface hover:text-ink
+                             disabled:opacity-50"
+                >
+                  <X size={12} aria-hidden />
+                  Discard
+                </button>
               )}
-              {listening ? "Stop and insert" : "Try it"}
-            </button>
+            </div>
             <p className="mt-1.5 text-[11.5px] text-ink-faint">
               {listening
-                ? "Listening. Click somewhere you want the text first — it goes wherever the cursor is when you stop."
+                ? "Listening. Click somewhere you want the text first — it goes wherever the cursor is when you stop, or discard it and nothing is inserted."
                 : "Checks whether dictation works on this machine, which is the one thing no test can."}
             </p>
 

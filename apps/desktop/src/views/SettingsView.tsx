@@ -19,6 +19,7 @@ import { PermissionRow } from "../onboarding/steps/PermissionRow";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { RoutingSettings } from "./RoutingSettings";
+import { SummaryTemplateSettings } from "./SummaryTemplateSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ToolServersSettings } from "./ToolServersSettings";
 import { AssistantSettings } from "./AssistantSettings";
@@ -205,6 +206,9 @@ export function SettingsView({
         <AudioRetentionSettings />
 
         <RoutingSettings />
+
+        {/* After routing: that decides which model answers, this decides what it is asked. */}
+        <SummaryTemplateSettings />
 
         <MemorySettings />
 

@@ -69,9 +69,6 @@ function apiMethods(text: string): string[] {
  *
  * Grouped by what is missing:
  *
- * - **Summary templates are read-only.** `SummaryTemplatePicker` lists them and runs one, so the
- *   built-ins work, but nothing creates, edits or deletes one. That is most of what spec 3 called a
- *   template.
  * - **People have no screen.** `people`, `participants`, `addParticipant`, `personMeetings` — the
  *   graph knows who attends what and nothing renders it.
  * - **Ask and agent runs.** `ask` is grounded Q&A with citations; `ChatView` uses `chat` and
@@ -81,20 +78,16 @@ function apiMethods(text: string): string[] {
  *   `appendSegments` — reachable through other paths or not at all.
  * - **Odds and ends.** `createDecision`/`decisions` (the panel reads decisions off the summary and
  *   can delete one, but not add one), `deleteTicket`, `deleteActionItem`,
- *   `setMcpServerAutoStart`, `cancelDictation` (dictation can be started and not stopped from the
- *   interface), `suggestCompletion`.
+ *   `setMcpServerAutoStart`, `suggestCompletion`.
  */
 const KNOWN_UNREACHABLE = [
   "addParticipant",
   "agentRuns",
   "appendSegments",
   "ask",
-  "cancelDictation",
   "createDecision",
-  "createSummaryTemplate",
   "decisions",
   "deleteActionItem",
-  "deleteSummaryTemplate",
   "deleteTicket",
   "importAudio",
   "mergeWorkspace",
@@ -106,7 +99,6 @@ const KNOWN_UNREACHABLE = [
   "related",
   "setMcpServerAutoStart",
   "suggestCompletion",
-  "updateSummaryTemplate",
 ];
 
 describe("the interface can reach the engine", () => {

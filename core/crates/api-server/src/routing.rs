@@ -1104,7 +1104,9 @@ mod tests {
             ),
         )
         .await;
-        assert_ne!(status, StatusCode::OK, "{body}");
+        // Named "a client error", so it checks for one. `assert_ne!(status, OK)` also passes on a
+        // 500, which is the distinction this test exists to make.
+        assert!(status.is_client_error(), "{status} {body}");
     }
 
     /// Range parsing is the only part of seeking that can be subtly wrong, so it is tested directly
@@ -1253,7 +1255,8 @@ mod tests {
             ),
         )
         .await;
-        assert_ne!(status, StatusCode::OK);
+        // A cap being reached is a rule, not a fault: 409, and never logged as a server error.
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
         assert!(body.to_string().contains("Delete one"), "{body}");
     }
 
@@ -1439,7 +1442,21 @@ mod tests {
                 .expect("request"),
         )
         .await;
-        assert_ne!(status, StatusCode::OK, "{body}");
+
+        // The status, not just "not OK". `assert_ne!(status, OK)` is what this said, and a 500
+        // satisfies it — which is exactly what the endpoint returned until `StorageError::Refused`
+        // was mapped. A refusal the product intends has to be a 4xx, or callers cannot tell a rule
+        // from an outage and the message gets logged as a server fault.
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["code"], "refused", "{body}");
+        // The rule, in words, and not a table name.
+        assert!(
+            body["error"]
+                .as_str()
+                .expect("a reason")
+                .contains("built-in"),
+            "{body}"
+        );
     }
 
     #[tokio::test]

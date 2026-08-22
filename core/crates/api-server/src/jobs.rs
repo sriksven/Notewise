@@ -529,7 +529,13 @@ mod tests {
             send("POST", "/v1/jobs", a_job("Weekly", "0 9 * * TUE")),
         )
         .await;
-        assert_ne!(status, StatusCode::OK, "a name has to identify one job");
+        // 409 exactly: the name is already taken, which is a conflict with the current state
+        // rather than a malformed request or a crash.
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "a name has to identify one job, and a taken name is a conflict"
+        );
     }
 
     #[tokio::test]

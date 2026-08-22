@@ -71,6 +71,25 @@ impl ApiError {
             ApiError::Storage(StorageError::Invalid { .. }) => {
                 (StatusCode::BAD_REQUEST, "bad_request")
             }
+            // A rule the product chose, not a fault. `StorageError::Refused` is documented as
+            // "valid SQL and deliberately not allowed", and its message explains the rule rather
+            // than naming a table — it is written to be read by the person who hit it.
+            //
+            // This fell through to 500 for a long time, which was wrong three ways: the client was
+            // told to retry something that will never work, an explanation meant for a user arrived
+            // labelled `storage_error`, and `into_response` logged every deliberate refusal at
+            // error level. Found by deleting a built-in summary template over HTTP and getting a
+            // 500 back — the test covering that asserted only `assert_ne!(status, OK)`, which a 500
+            // satisfies.
+            //
+            // 409 rather than 400: the request is well-formed, and it is the current state that
+            // forbids it — a seeded template, a name already taken, a cap already reached.
+            ApiError::Storage(StorageError::Refused(_)) => (StatusCode::CONFLICT, "refused"),
+            // Also the caller's, and by the variant's own documentation: "every one of these is a
+            // condition the user can act on — a missing file, a schema mismatch, the same workspace
+            // twice — and the message says which." A 500 told them to retry a path that does not
+            // exist. Same reasoning as `Invalid` above: retrying this body fails identically.
+            ApiError::Storage(StorageError::Merge(_)) => (StatusCode::BAD_REQUEST, "cannot_merge"),
             ApiError::Storage(_) => (StatusCode::INTERNAL_SERVER_ERROR, "storage_error"),
 
             ApiError::Graph(notewise_graph::GraphError::DepthTooLarge(_)) => {
@@ -128,6 +147,33 @@ mod tests {
     use super::*;
     use notewise_ai_router::AiError;
     use notewise_storage::{Id, StorageError};
+
+    /// Merging names a file the caller chose, so a file that cannot be merged is their error.
+    ///
+    /// `merging_a_missing_workspace_is_a_client_error` in `routing.rs` asserted only that the status
+    /// was not 200 and so passed on the 500 this used to return — the test named the right property
+    /// and checked a weaker one.
+    #[test]
+    fn an_unmergeable_source_is_the_callers_error() {
+        let err = ApiError::Storage(StorageError::Merge(
+            "no workspace at /nope/missing.db".into(),
+        ));
+        assert_eq!(err.parts(), (StatusCode::BAD_REQUEST, "cannot_merge"));
+        assert!(!err.parts().0.is_server_error());
+    }
+
+    #[test]
+    fn a_deliberate_refusal_is_a_conflict_and_not_a_server_error() {
+        let err = ApiError::Storage(StorageError::Refused(
+            "a built-in template cannot be deleted; edit it instead, or copy it".into(),
+        ));
+        assert_eq!(err.parts(), (StatusCode::CONFLICT, "refused"));
+
+        // The half that matters as much as the code: `into_response` logs at error level for
+        // anything in the 5xx range, so a product rule landing there fills the log with faults
+        // that are not faults.
+        assert!(!err.parts().0.is_server_error());
+    }
 
     #[test]
     fn missing_records_map_to_404() {
