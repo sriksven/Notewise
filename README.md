@@ -75,7 +75,7 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | Markdown export | Implemented |
 | `recorder` | **Pipeline implemented** — capture → mix → transcribe → diarize → store |
 | `transcription` | **Whisper implemented** (`--features whisper-metal`), Parakeet pending |
-| `audio-capture` | **Microphone capture implemented** (`--features os-capture`); system audio pending |
+| `audio-capture` | **Microphone and macOS system audio implemented** (`--features os-capture`); system audio not yet verified in a release build |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
 | `apps/desktop` | **Runs** — React UI served by the engine, in a Tauri window; records from the app |
 | `apps/mobile`, `cloud/` | Scaffolded, awaiting their phase |
@@ -83,10 +83,47 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 See `docs/roadmap.md` for what lands when, and each directory's `README.md` for
 its specific state. Directories that are scaffolds say so at the top.
 
+## Install
+
+Each tagged version attaches installers to
+[GitHub Releases](https://github.com/sriksven/Notewise/releases).
+
+| Platform | File | First launch |
+|---|---|---|
+| macOS, Apple silicon | `.dmg` | **Open Anyway**, once per download — below |
+| Windows | `.msi` or `.exe` | Unsigned: SmartScreen warns, choose *More info → Run anyway* |
+| Linux | `.deb` or `.AppImage` | Nothing extra |
+
+### macOS: the first launch
+
+Notewise is signed with the project's own certificate rather than an Apple Developer ID, so
+macOS cannot confirm who made it and stops the first launch:
+
+1. Drag Notewise from the `.dmg` into Applications, and open it from there.
+2. macOS says it could not verify that Notewise is free of malware. Choose **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down to **Security**, and choose
+   **Open Anyway** beside the line about Notewise — it stays there for about an hour after the
+   blocked attempt. Confirm with your login password.
+
+You do that once for each download. Permissions you grant — Microphone, Screen & System Audio
+Recording, Accessibility, Input Monitoring — carry over to later versions, because every release
+is signed with the same certificate. One thing does not: after an update, macOS may ask whether
+Notewise can use what it saved in your keychain (connector sign-ins). Choose **Always Allow** —
+without an Apple Developer ID, macOS ties those items to each version.
+
+To check that a copy is the released one:
+
+```sh
+codesign -d -r- /Applications/Notewise.app
+```
+
+The requirement it prints should end in `H"…"` with the fingerprint pinned as
+`MACOS_CERTIFICATE_SHA1` in [`release.yml`](.github/workflows/release.yml).
+
 ## Quick start
 
 ```sh
-# Requires Rust 1.82+
+# Requires Rust 1.87+
 cargo build --workspace
 cargo test --workspace
 ```

@@ -368,8 +368,8 @@ export function AssistantSettings() {
         </label>
         <p className="text-[11.5px] leading-relaxed text-ink-faint">
           Reading the window in front needs the Accessibility permission above. Reading text that
-          is only on screen as pixels — a PDF, a screenshot — additionally needs a signed build,
-          which a development build is not.
+          is only on screen as pixels — a PDF, a screenshot — additionally needs Screen &amp;
+          System Audio Recording, which a copy run with cargo run cannot hold.
         </p>
 
         {/* "What does it see" answerable before the panel is used rather than after. This is the

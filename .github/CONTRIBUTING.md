@@ -13,7 +13,7 @@ status at the top — read it before assuming something is implemented, and chec
 ## Setup
 
 ```sh
-# Rust 1.82+
+# Rust 1.87+
 cargo build --workspace
 cargo test --workspace
 ```

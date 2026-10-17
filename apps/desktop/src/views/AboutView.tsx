@@ -44,7 +44,11 @@ function capabilities(health: Health | null): Array<{
     note: "writes a note; changes nothing else",
   },
   { label: "Recoverable delete", done: true, note: "notes only" },
-  { label: "System audio capture", done: false, note: "needs a signed app and screen-audio permission" },
+  {
+    label: "System audio capture",
+    done: false,
+    note: "macOS only, with the Screen & System Audio Recording permission; not yet verified in a release",
+  },
   {
     label: "Semantic search",
     done: true,

@@ -67,8 +67,16 @@ branches off `main`. `core/` is semver-versioned independently of the apps consu
 
 ## Things that will bite you
 
-- **macOS system audio** needs ScreenCaptureKit + a TCC grant against a signed bundle. It
-  cannot be tested headlessly. Mic capture via `cpal` can.
+- **macOS system audio** needs ScreenCaptureKit + the Screen & System Audio Recording grant,
+  which macOS gives to an app bundle and never to `cargo run` or a test binary. A person has to
+  switch it on, so it cannot be tested headlessly. Mic capture via `cpal` can. It does *not* need
+  a Developer ID — that belief was measured wrong; see `macos_permissions::can_hold_screen_recording`.
+- **macOS releases are self-signed, and the certificate is pinned.** TCC grants attach to the
+  designated requirement, so every release must be signed with the one certificate named by
+  `MACOS_CERTIFICATE_SHA1` in `release.yml`. A different certificate resets every user's grants.
+- **The hardened runtime refuses the microphone without an entitlement.** Tauri signs with it on,
+  and without `com.apple.security.device.audio-input` in `src-tauri/Entitlements.plist` recording
+  fails with no dialog. The release workflow checks for it inside the dmg.
 - **Whisper inference** needs a cmake build of whisper.cpp and a model download. It sits
   behind a feature flag so the default build stays fast.
 - **The browser extension cannot run Whisper.** It streams tab audio to the desktop app's

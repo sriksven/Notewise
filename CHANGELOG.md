@@ -61,12 +61,14 @@ The first tagged build.
 
 ### Known limits of this build
 
-- **Nothing is signed.** macOS will say the app "is damaged"; it is not, that is the message for any
-  unsigned app. Windows will show a SmartScreen warning. The release notes say how to clear the
-  macOS quarantine. Linux `.deb` and `.AppImage` need no signing and are the only fully
-  first-class artifacts.
-- **macOS system audio capture is not included.** It needs ScreenCaptureKit against a signed
-  bundle, which is the same missing Apple Developer ID. Microphone capture works.
+- **Signed on macOS, but not by Apple.** The app carries the project's own certificate rather than
+  an Apple Developer ID, so the first launch of each download needs **Open Anyway** in System
+  Settings → Privacy & Security — the release notes walk through it. Permissions you grant carry
+  over to later releases, because every release is signed with the same certificate. Windows is
+  unsigned and will show a SmartScreen warning. Linux `.deb` and `.AppImage` need no signing.
+- **macOS system audio has not yet been run end to end in a release build.** It needs the Screen &
+  System Audio Recording permission, switched on by hand in System Settings, and a relaunch.
+  Microphone capture works.
 - **Transcription needs a model download** on first use. The default build stays small on purpose.
 - **The desktop assistant needs permissions macOS cannot grant on your behalf** — Accessibility,
   and Input Monitoring for typing pauses. Without them the app says which pane to open rather than

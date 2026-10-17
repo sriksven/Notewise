@@ -104,19 +104,26 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         </p>
       </Topic>
 
-      <Topic title="Why system audio does not work yet">
+      <Topic title="Recording the other side of a call">
         <p>
           The microphone hears you and whoever is in the room. It does not hear the other
           people on a call, because that audio never reaches it — it goes to your speakers.
         </p>
         <p>
-          Capturing it needs macOS's ScreenCaptureKit, which will only grant screen-recording
-          permission to a signed, bundled application. A development build cannot hold that
-          permission no matter how many times the dialog is accepted, so Notewise stops asking
-          rather than sending you to System Settings for a switch that will not stick.
+          Capturing it needs the permission macOS calls Screen &amp; System Audio Recording, because
+          macOS files system audio under screen recording. Enable System audio under Settings and
+          macOS points you to System Settings → Privacy &amp; Security, where Notewise has a switch.
+          Turn it on, then quit and reopen Notewise: macOS only applies it at launch. Nothing from
+          the screen is kept.
         </p>
         <p>
-          Until then, the practical answer is the meeting app's own recording, imported here.
+          Every release is signed with the same certificate, so the permission carries over to
+          updates. macOS still asks from time to time whether Notewise should keep it — a check
+          Sequoia added for every app that records the screen, not something Notewise does. A copy
+          run with{" "}
+          <code className="text-ink">cargo run</code> is not an application as far as macOS is
+          concerned and cannot hold the permission at all, so it says that rather than sending you
+          to look for a switch.
         </p>
       </Topic>
 
@@ -263,7 +270,7 @@ function WhatsNew() {
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
         "External tools run only when you confirm that specific call. Scheduled jobs can propose one and never run one.",
         "Keeping the audio after transcription is off until you turn it on, under Settings.",
-        "Not in this build: macOS system audio capture, which needs a signed app. Recording the microphone works.",
+        "On macOS, system audio — the other side of a call — needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
       ],
     },
   ];
