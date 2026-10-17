@@ -21,9 +21,10 @@
 //!
 //! # What cannot be verified here
 //!
-//! The Screen Recording grant is a TCC prompt, and TCC keys on a signed bundle identifier. A
-//! `cargo test` binary has no stable one, so the grant cannot be obtained from a test run and
-//! this file's tests are `#[ignore]`d with that reason. They are runnable from a signed build.
+//! The Screen & System Audio Recording grant is a TCC switch a person turns on, and TCC keys it
+//! on an app bundle's identity. A `cargo test` binary has none, so the grant cannot be obtained
+//! from a test run and this file's tests are `#[ignore]`d with that reason. They are runnable from
+//! inside the app once the switch is on.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -72,9 +73,9 @@ impl SystemAudioSource {
             // Overwhelmingly the cause: Screen Recording has not been granted. Say so, rather
             // than reporting the framework's own wording, which mentions neither.
             CaptureError::Platform(format!(
-                "could not read shareable content ({e}). System audio needs the Screen \
-                 Recording permission, granted to a signed build in System Settings › \
-                 Privacy & Security › Screen Recording."
+                "could not read shareable content ({e}). System audio needs the Screen & \
+                 System Audio Recording permission, granted to Notewise in System Settings › \
+                 Privacy & Security."
             ))
         })?;
 
@@ -131,8 +132,8 @@ impl SystemAudioSource {
 
         stream.start_capture().map_err(|e| {
             CaptureError::Platform(format!(
-                "could not start system audio capture ({e}). This needs the Screen Recording \
-                 permission, granted to a signed build."
+                "could not start system audio capture ({e}). This needs the Screen & System \
+                 Audio Recording permission, granted to Notewise."
             ))
         })?;
 
@@ -233,11 +234,11 @@ impl Drop for SystemAudioSource {
 mod tests {
     use super::*;
 
-    /// Opening the stream needs a Screen Recording grant, which TCC will only give to a signed
-    /// bundle. A test binary has no stable bundle identifier, so this cannot pass headlessly
-    /// and must not be allowed to imply that system capture works.
+    /// Opening the stream needs a Screen & System Audio Recording grant, which TCC gives only to
+    /// an app bundle and only once a person has switched it on. A test binary is neither, so this
+    /// cannot pass headlessly and must not be allowed to imply that system capture works.
     #[test]
-    #[ignore = "requires the Screen Recording TCC grant against a signed bundle"]
+    #[ignore = "requires the Screen & System Audio Recording grant, held by an app bundle"]
     fn system_audio_opens_and_delivers_frames() {
         let mut source =
             SystemAudioSource::open(&CaptureConfig::default()).expect("open system audio");

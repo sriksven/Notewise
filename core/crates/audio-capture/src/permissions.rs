@@ -114,8 +114,8 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
     }
 
     match kind {
-        // The microphone path is `cpal`, not `OsBackend` — it needs no signed bundle, and is
-        // the one capability obtainable everywhere `cpal` runs.
+        // The microphone path is `cpal`, not `OsBackend` — it needs no app bundle, and is the
+        // one capability obtainable everywhere `cpal` runs.
         CaptureKind::Microphone => None,
         other => match OsBackend::for_host(other) {
             None => Some(format!(
@@ -132,58 +132,41 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
 
 /// Why a loose binary cannot hold a screen-recording grant.
 ///
-/// macOS ties the Screen Recording permission to an application bundle. Run as a bare
-/// executable — `cargo run`, or the binary out of `target/` — there is nothing for the grant to
-/// attach to, so ScreenCaptureKit refuses and the OS reports a denial.
+/// macOS ties the Screen & System Audio Recording permission to an application bundle. Run as a
+/// bare executable — `cargo run`, or the binary out of `target/` — there is nothing for the grant
+/// to attach to: the request is attributed to whatever launched it, and the OS reports a denial.
 ///
 /// Without this the refusal surfaces as "Declined. Grant it in System Settings, then re-check",
 /// which sends the user to a pane where the app does not appear and cannot be added. The cause
 /// is the build, not their answer, and saying so is the difference between a limitation and a
 /// wild goose chase.
+///
+/// Reported as unavailable rather than denied because `required` follows from this, and a
+/// capability nobody can grant must not gate anyone. Left as "denied" it would leave the setup
+/// step permanently unsatisfied and the banner permanently complaining about a build property
+/// the user cannot change.
+///
+/// A bundle is all it takes. This used to demand a Developer ID as well, which no build of this
+/// project has, so system audio was refused in every build that could have had it — see
+/// `notewise_macos_permissions::can_hold_screen_recording` for how that was measured.
 #[cfg(target_os = "macos")]
 fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
     if !matches!(kind, CaptureKind::SystemAudio) {
         return None;
     }
 
-    let in_bundle = std::env::current_exe()
-        .ok()
-        .map(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
-        .unwrap_or(false);
-
-    if !in_bundle {
-        return Some(
-            "system audio needs macOS to recognise this as an application — it is running as a \
-             loose binary, which cannot be granted screen recording"
-                .to_string(),
-        );
-    }
-
-    // A bundle is necessary and not sufficient. Screen recording attaches to a verifiable app
-    // identity, so an ad-hoc or unsigned build cannot hold it however it is packaged — the
-    // request returns false with no dialog and writes nothing, and the app never appears in the
-    // Privacy pane to be switched on.
-    //
-    // Reported as unavailable rather than denied because `required` follows from this, and a
-    // capability nobody can grant must not gate anyone. Left as "denied" it would leave the
-    // setup step permanently unsatisfied and the banner permanently complaining about a build
-    // property the user cannot change.
-    //
-    // Feature-gated because the crate that reads the signature is an optional dependency of
+    // Feature-gated because the crate that answers this is an optional dependency of
     // `os-capture`. Without that feature `unavailable_reason` has already returned, so this is
     // unreachable rather than merely unused — but it still has to compile.
     #[cfg(feature = "os-capture")]
-    let signable = notewise_macos_permissions::can_hold_screen_recording();
+    let in_bundle = notewise_macos_permissions::can_hold_screen_recording();
 
-    // Without the capture feature `unavailable_reason` has already returned above, so this is
-    // unreachable rather than merely unused — but it still has to compile.
     #[cfg(not(feature = "os-capture"))]
-    let signable = true;
+    let in_bundle = true;
 
-    (!signable).then(|| {
-        "system audio needs a signed release build — macOS attaches screen recording to a \
-         verifiable app identity, and this build is ad-hoc signed, so it cannot be added in \
-         System Settings"
+    (!in_bundle).then(|| {
+        "system audio needs macOS to recognise this as an application — it is running as a \
+         loose binary, which cannot be granted screen recording"
             .to_string()
     })
 }
@@ -372,8 +355,8 @@ mod tests {
         assert!(!is_permission_error("device disconnected"));
     }
 
-    /// Requires a real device and, on macOS, a TCC grant against a signed bundle. Neither
-    /// exists in CI, and a green run must not imply this was verified.
+    /// Requires a real device and, on macOS, a TCC grant somebody has given. Neither exists in
+    /// CI, and a green run must not imply this was verified.
     #[test]
     #[ignore = "requires a microphone and an OS permission grant"]
     #[cfg(feature = "os-capture")]

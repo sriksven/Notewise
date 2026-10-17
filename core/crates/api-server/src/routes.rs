@@ -2009,15 +2009,18 @@ async fn request_permission(
 
 /// What a refusal means, when "you declined this" is not the whole story.
 ///
-/// Screen recording has a failure that looks identical to a decline and is not one: macOS will
-/// not add an app to the Screen & System Audio Recording list unless it carries a distributable
-/// signature. `CGRequestScreenCaptureAccess` then returns false immediately, no dialog appears,
-/// and nothing is written to TCC — so "grant it in System Settings" points at a list the app is
-/// missing from, with no way to put it there.
+/// A screen-recording request is answered `false` straight away even when it worked — the alert
+/// that sends the user to System Settings arrives on its own, and the grant applies only after a
+/// relaunch. So a "denied" here is as often "not switched on yet" as a refusal, and from inside
+/// the process the two look identical.
 ///
-/// Both outcomes are covered rather than guessed between, because the two are indistinguishable
-/// from inside the process. Telling the user what to look for lets them tell the difference in
-/// one glance, which is more use than a confident wrong diagnosis.
+/// Both outcomes are covered rather than guessed between. And if Notewise is missing from the list
+/// altogether, the pane's own + button adds it: any application can be added there by hand.
+///
+/// The case that reads as "it will never work" is a switch that is already on. macOS keeps the
+/// grant against the designated requirement of the build that was granted, and a build signed
+/// differently fails to match it — tccd denies without a dialog, and the switch still shows on.
+/// Removing the entry and adding the app again is what clears it.
 #[cfg(feature = "record")]
 fn denial_detail(kind: CaptureKindArg) -> Option<String> {
     if !matches!(kind, CaptureKindArg::SystemAudio) || !cfg!(target_os = "macos") {
@@ -2025,9 +2028,11 @@ fn denial_detail(kind: CaptureKindArg) -> Option<String> {
     }
 
     Some(
-        "Look under Privacy & Security → Screen & System Audio Recording. If Notewise is \
-         listed, switch it on and press Re-check. If it is not listed, macOS refused to \
-         register this build — that needs a signed release build, and no setting will add it."
+        "Look under Privacy & Security → Screen & System Audio Recording, and switch Notewise \
+         on — or add it with the + button if it is missing. If it is already on, the switch \
+         belongs to a differently signed build: remove Notewise with −, add it again with +, \
+         and switch it on. Then quit and reopen Notewise and press Re-check — macOS only \
+         applies this at launch."
             .into(),
     )
 }
@@ -4134,8 +4139,9 @@ mod tests {
         );
         assert_eq!(body["steps"]["model"]["required"], true);
 
-        // System audio has no working backend on any current build, so it must be excluded
-        // from the gate rather than left permanently blocking.
+        // A test binary is not an app bundle, and without the capture feature there is no backend
+        // at all — either way system audio cannot be granted here, so it must be excluded from the
+        // gate rather than left permanently blocking.
         assert_eq!(
             body["steps"]["permissions"]["system_audio"]["status"],
             "unavailable"

@@ -12,14 +12,14 @@
 //! Vision found. That needs no permission at all, so it is tested against an image this crate draws
 //! itself.
 //!
-//! *Capturing* the screen is the part that cannot happen. It needs the Screen Recording grant, and
-//! macOS will not give that to a build without a Developer ID Team ID — the same wall system audio
-//! hits, already encoded in `macos_permissions::can_hold_screen_recording`. So
+//! *Capturing* the screen is the part a test run cannot do. It needs the Screen & System Audio
+//! Recording grant, which macOS gives to an app bundle and never to a loose test binary — the same
+//! condition system audio has, encoded once in `macos_permissions::can_hold_screen_recording`. So
 //! [`super::recognise_text_on_screen`] refuses with that reason rather than returning an empty
 //! string, which would read as "there was no text on screen".
 //!
-//! The split matters: when somebody builds this signed, the recognition half is already known to
-//! work, and only the capture half is new.
+//! The split matters: in the app, the recognition half is already known to work, and only the
+//! capture half is new.
 
 use objc2::rc::Retained;
 use objc2::AnyThread;
@@ -221,13 +221,13 @@ pub fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
 /// # The one call here that has never run
 ///
 /// Everything else in this module is exercised in CI. This is not, and cannot be: it needs the
-/// Screen Recording grant, and macOS will not give that to a build without a Developer ID Team ID.
-/// `macos_permissions::can_hold_screen_recording` is the same check `audio-capture` makes for system
-/// audio, and it answers `false` for every build produced without a paid signing identity.
+/// Screen & System Audio Recording grant, which only an app bundle can hold and only a person can
+/// switch on. `macos_permissions::can_hold_screen_recording` is the same check `audio-capture` makes
+/// for system audio, and it answers `false` for every test binary.
 ///
-/// So the two failures are reported separately. A build that cannot hold the grant is told about the
-/// signature, because no switch in System Settings will help it. A signed build without the grant is
-/// told which pane to open. Conflating them is the mistake `63f6f6d` was about.
+/// So the two failures are reported separately. A process that cannot hold the grant is told why,
+/// because no switch in System Settings will help it. An app bundle without the grant is told which
+/// pane to open. Conflating them is the mistake `63f6f6d` was about.
 ///
 /// `CGWindowListCreateImage` is deprecated in favour of ScreenCaptureKit, and is used anyway: SCK is
 /// asynchronous, needs a delegate, and cannot be verified here either — so it would trade one
@@ -264,13 +264,13 @@ pub fn capture_screen() -> Result<Bitmap, ScreenCaptureRefusal> {
 
 /// Why the screen could not be captured.
 ///
-/// Three cases and not one, because the fixes differ: buy a signing identity, flip a switch, or
-/// nothing the user can do.
+/// Three cases and not one, because the fixes differ: run it as the app, flip a switch, or nothing
+/// the user can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenCaptureRefusal {
-    /// This build has no Team ID, so the grant is unobtainable. No setting changes this.
+    /// This process is not an app bundle, so the grant is unobtainable. No setting changes this.
     BuildCannotHoldGrant,
-    /// The build could hold it and does not. There is a pane to open.
+    /// The app could hold it and does not. There is a pane to open.
     GrantMissing,
     /// The grant is held and the capture still failed.
     CaptureFailed,
@@ -484,14 +484,14 @@ mod tests {
 
     /// The three refusals have three different fixes, so they must not collapse into one.
     ///
-    /// A development build is always in the first case, which is what this asserts.
+    /// A test binary is always in the first case, which is what this asserts.
     #[test]
     fn capturing_the_screen_is_refused_for_the_reason_that_applies() {
         match capture_screen() {
             Err(ScreenCaptureRefusal::BuildCannotHoldGrant) => {
                 assert!(!notewise_macos_permissions::can_hold_screen_recording());
             }
-            // A signed build running these tests would land here.
+            // These tests run from inside an app bundle would land here.
             Err(ScreenCaptureRefusal::GrantMissing) => {
                 assert!(notewise_macos_permissions::can_hold_screen_recording());
             }

@@ -9,19 +9,19 @@
 //! The interface, the frame and format types, and the conversion helpers ([`to_mono`],
 //! [`resample_linear`]) are complete and tested. The **OS capture backends are behind the
 //! `os-capture` feature and are not implemented**: each needs a platform audio SDK, and on
-//! macOS system-audio capture additionally requires ScreenCaptureKit permission granted to a
-//! signed bundle — a TCC prompt that cannot be answered by a build process. Calling one
+//! macOS system-audio capture additionally requires ScreenCaptureKit permission granted to an
+//! app bundle — a TCC switch that cannot be flipped by a build process. Calling one
 //! returns [`CaptureError::Unsupported`] with a specific reason rather than silently
 //! producing nothing.
 //!
 //! **Microphone capture is implemented** ([`MicrophoneSource`], `os-capture` feature) — it
-//! needs only the OS microphone permission, no signed bundle.
+//! needs only the OS microphone permission, no app bundle.
 //!
 //! **System audio is implemented on macOS** ([`SystemAudioSource`], `os-capture` feature),
 //! via ScreenCaptureKit. It is written and it compiles, but it cannot be *verified* by a test
-//! run: it needs the Screen Recording grant, and TCC issues that against a signed bundle
-//! identifier which a `cargo test` binary does not have. Its tests are therefore `#[ignore]`d
-//! with that reason and are runnable from a signed build. Windows (WASAPI loopback) and Linux
+//! run: it needs the Screen & System Audio Recording grant, and TCC issues that to an app
+//! bundle, which a `cargo test` binary is not. Its tests are therefore `#[ignore]`d with that
+//! reason and are runnable from inside the app. Windows (WASAPI loopback) and Linux
 //! (PipeWire) remain unimplemented and return [`CaptureError::Unsupported`].
 //!
 //! [`FileSource`] and [`SyntheticSource`] are real and work everywhere, which is what lets
@@ -144,7 +144,7 @@ impl AudioFrame {
 pub enum OsBackend {
     /// macOS microphone via Core Audio.
     CoreAudioInput,
-    /// macOS system audio via ScreenCaptureKit. Needs a TCC grant against a signed bundle.
+    /// macOS system audio via ScreenCaptureKit. Needs a TCC grant held by an app bundle.
     ScreenCaptureKit,
     /// Windows loopback via WASAPI.
     WasapiLoopback,
