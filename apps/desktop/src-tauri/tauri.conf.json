@@ -30,7 +30,10 @@
     "category": "Productivity",
     "copyright": "Notewise contributors",
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist"
     },
     "windows": {
       "nsis": {

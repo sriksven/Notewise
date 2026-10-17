@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Tauri signs with the hardened runtime by default, and under it the microphone is an
+         entitlement before it is a permission. Without this key tccd refuses the request in
+         about 12ms with no dialog — logged as "requires entitlement
+         com.apple.security.device.audio-input but it is missing" — so recording fails and
+         nothing on screen says why.
+
+         Screen recording, Accessibility and Input Monitoring need no entitlement; they are
+         permissions only.
+
+         The hardened runtime also turns on library validation, and without an Apple team that
+         refuses every dylib that is not Apple's — including one signed with this app's own
+         certificate. Nothing like that is bundled today. Adding one (Sparkle, a sidecar
+         framework) needs com.apple.security.cs.disable-library-validation here as well. -->
+
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

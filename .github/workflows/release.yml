@@ -3,16 +3,29 @@ name: release
 # Builds the desktop app for all three platforms and attaches the installers to a GitHub
 # Release.
 #
-# # Nothing here is signed
+# # How macOS is signed without an Apple Developer ID
 #
-# Signing macOS needs a paid Apple Developer ID, and notarisation needs an Apple account to
-# submit to. Neither exists for this project, so the macOS artifacts are unsigned and Gatekeeper
-# will refuse to open them until the user clears the quarantine attribute — the release notes say
-# so in as many words. Windows is unsigned too and will show a SmartScreen warning. Linux needs no
-# signing at all, so `.deb` and `.AppImage` are the only fully first-class artifacts here.
+# With the project's own self-signed certificate, which `scripts/macos-signing-identity.sh`
+# makes. That buys two things, and neither needs the paid program:
 #
-# When a Developer ID exists, this file gains `APPLE_CERTIFICATE`, `APPLE_SIGNING_IDENTITY` and
-# notarisation credentials, and the honest warnings below come out.
+# - A signature that is valid. Before this the bundle carried only the ad-hoc signature the linker
+#   puts on the executable, which does not cover the bundle around it — `codesign --verify` says
+#   "code has no resources but signature indicates they must be present". macOS reports a
+#   download in that state as "damaged and can't be opened", which is why the old release notes
+#   told people to strip the quarantine attribute by hand.
+# - A designated requirement that survives an update: `identifier "dev.notewise.app" and
+#   certificate leaf = H"…"`, instead of the hash of one particular build. Microphone, Screen &
+#   System Audio Recording, Accessibility and Input Monitoring are all granted against that
+#   requirement, so they carry over from one release to the next only if every release is signed
+#   with the same certificate. Hence the pin below.
+#
+# What it does not buy is Gatekeeper's trust. Nobody vouches for the certificate, so the first
+# launch of each download is blocked until the user chooses Open Anyway in Privacy & Security —
+# the release notes walk through it. Notarisation removes that, and it does need a Developer ID.
+# The import step takes a Developer ID .p12 unchanged, but switching certificates changes the
+# designated requirement, so every user re-grants once on that update.
+#
+# Windows is unsigned and will show a SmartScreen warning. Linux needs no signing.
 on:
   push:
     tags: ["v*"]
@@ -26,6 +39,13 @@ permissions:
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  # The SHA-1 of the one certificate macOS releases are signed with. It is public — every signed
+  # app carries it — and it lives here rather than in a secret so that changing it is a reviewed
+  # commit. A different certificate in the secret then fails the build, instead of shipping a
+  # release that silently resets every user's permissions. `macos-signing-identity.sh` prints it.
+  MACOS_CERTIFICATE_SHA1: ""
 
 jobs:
   build:
@@ -85,10 +105,78 @@ jobs:
 
       - run: npm ci
 
+      # Tauri signs with `APPLE_SIGNING_IDENTITY` when it is set and with the config's ad-hoc "-"
+      # when it is not. This step decides which, and refuses to let a tag reach the second case.
+      #
+      # The keychain has to be on the search list, not merely named: `codesign` will sign with an
+      # untrusted self-signed identity from a listed keychain, and answers "no identity found" for
+      # the same identity when pointed at it with `--keychain` alone. Nor does `find-identity -v`
+      # list it — it is untrusted, so "valid identities only" is empty — hence no `-v` below.
+      - name: Import the signing certificate
+        if: matrix.name == 'macos'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MACOS_CERTIFICATE:-}" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::No MACOS_CERTIFICATE secret. A release signed with anything else would reset every user's permissions on update — see scripts/macos-signing-identity.sh."
+              exit 1
+            fi
+            echo "::warning::No MACOS_CERTIFICATE secret, so this build is ad-hoc signed. It opens via Open Anyway, but macOS forgets its permissions on every update."
+            exit 0
+          fi
+
+          keychain="$RUNNER_TEMP/notewise-signing.keychain-db"
+          password=$(openssl rand -base64 24)
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/notewise-signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/notewise-signing.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm "$RUNNER_TEMP/notewise-signing.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          # `list-keychains` prints each path in quotes, and xargs honours them — so the existing
+          # entries come back intact, including any path with a space in it.
+          security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
+
+          found=$(security find-identity -p codesigning "$keychain" | awk '$2 ~ /^[0-9A-F]{40}$/ { print $2; exit }')
+          if [ "$found" != "$MACOS_CERTIFICATE_SHA1" ]; then
+            echo "::error::MACOS_CERTIFICATE holds certificate ${found:-<none>}, but releases are pinned to '${MACOS_CERTIFICATE_SHA1}'. If this is the first signed build, set MACOS_CERTIFICATE_SHA1 in release.yml to ${found}."
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$found" >> "$GITHUB_ENV"
+
       # `beforeBuildCommand` in tauri.conf.json runs `npm run build`, which typechecks first, so
       # a broken frontend fails here rather than shipping an app with a blank window.
       - name: Build
         run: npx tauri build --features ${{ matrix.features }} --bundles ${{ matrix.bundles }}
+
+      # Given a real identity, Tauri signs the dmg as well as the app. A signed disk image that is
+      # not notarised is stopped by Gatekeeper before it even mounts (tauri-apps/tauri#12288), which
+      # would make users go through Open Anyway twice — once for the box, once for the app. Tauri
+      # itself stopped signing the dmg for ad-hoc builds for this reason. The app inside is what
+      # carries the signature that matters, so the image is rewritten without one: `codesign
+      # --remove-signature` does not support disk images, and `hdiutil convert` drops it.
+      #
+      # With notarisation this step goes. A notarised dmg should be signed.
+      - name: Ship the dmg unsigned
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src-tauri/target/release/bundle/dmg -name '*.dmg' -not -name 'rw.*' -print0 |
+            while IFS= read -r -d '' dmg; do
+              if codesign -dv "$dmg" > /dev/null 2>&1; then
+                hdiutil convert -quiet "$dmg" -format UDZO -o "$dmg.unsigned.dmg"
+                mv "$dmg.unsigned.dmg" "$dmg"
+                echo "removed the signature from $(basename "$dmg")"
+              fi
+            done
 
       # A release that installs and then cannot find its own interface is worse than a build that
       # failed. `bundle.resources` written as the list `["../dist"]` bundles the frontend to
@@ -138,6 +226,57 @@ jobs:
           }
           echo "frontend present: ${found}"
 
+      # Present is not the same as right. macOS grants permissions against the designated
+      # requirement, so that is what is checked — on the app inside the dmg, which is what a user
+      # installs, rather than the copy in target/. Each check below is a way this has been, or
+      # would have been, wrong without anything else failing.
+      - name: The app inside the installer is signed as intended
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          dmg=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -not -name 'rw.*' | head -1)
+          mount=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
+          trap 'hdiutil detach "$mount" -quiet' EXIT
+          app="$mount/Notewise.app"
+
+          # A signature that does not cover the bundle it is in is what macOS calls "damaged".
+          codesign --verify --deep --strict "$app" || fail "the app's signature does not verify"
+          # And the box must not be signed at all — see "Ship the dmg unsigned".
+          if codesign -dv "$dmg" > /dev/null 2>&1; then
+            fail "the dmg itself is signed, so Gatekeeper would stop it before the app inside"
+          fi
+
+          identifier=$(node -p 'require("./src-tauri/tauri.conf.json").identifier')
+          details=$(codesign -dv "$app" 2>&1)
+          requirement=$(codesign -d -r- "$app" 2>&1 | sed -n -E 's/^(# )?designated => //p')
+          entitlements=$(codesign -d --entitlements - --xml "$app" 2> /dev/null || true)
+
+          # The linker's signature names the binary, `notewise_shell-<hash>`. TCC wants the bundle.
+          grep -qx "Identifier=$identifier" <<< "$details" \
+            || fail "signed as '$(grep '^Identifier=' <<< "$details")', not $identifier"
+          grep -q 'flags=.*runtime' <<< "$details" || fail "signed without the hardened runtime"
+          # Under the hardened runtime, a missing entitlement refuses the microphone with no dialog.
+          grep -q 'com.apple.security.device.audio-input' <<< "$entitlements" \
+            || fail "no audio-input entitlement, so recording would be refused without asking"
+
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            # `leaf` for a certificate with no Organization, which is what the script makes;
+            # `root` for one with an Organization. A self-signed certificate is its own root, so
+            # the hash is the pinned one either way.
+            pinned=$(tr 'A-F' 'a-f' <<< "$MACOS_CERTIFICATE_SHA1")
+            case "$requirement" in
+              "identifier \"$identifier\" and certificate leaf = H\"$pinned\"" | \
+              "identifier \"$identifier\" and certificate root = H\"$pinned\"") ;;
+              *) fail "designated requirement is '$requirement', not the pinned certificate $pinned" ;;
+            esac
+          else
+            grep -qx 'Signature=adhoc' <<< "$details" || fail "expected an ad-hoc signature"
+          fi
+          echo "designated requirement: $requirement"
+
       # Collected by name rather than by globbing the whole bundle directory, which also holds
       # the unpacked `.app` and intermediates that need not be uploaded twice.
       #
@@ -163,6 +302,13 @@ jobs:
           name: notewise-${{ matrix.name }}
           path: dist-release/
           if-no-files-found: error
+
+      # A hosted runner is thrown away after the job. A self-hosted one is not, and must not keep
+      # the private key. Deleting the keychain also takes it off the search list.
+      - name: Remove the signing keychain
+        if: always() && matrix.name == 'macos'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/notewise-signing.keychain-db" 2> /dev/null || true
 
   publish:
     name: publish release
@@ -191,29 +337,40 @@ jobs:
 
           | Platform | File | Status |
           |---|---|---|
-          | macOS | `.dmg` | Unsigned — see below |
+          | macOS, Apple silicon | `.dmg` | Signed with the project's own certificate — see below |
           | Windows | `.msi` or `.exe` | Unsigned — SmartScreen will warn |
           | Linux | `.deb` or `.AppImage` | Ready to install |
 
-          ### macOS: clearing the quarantine
+          ### macOS: the first launch
 
-          These builds are not signed with an Apple Developer ID, so macOS will say the app
-          "is damaged and can't be opened". It is not damaged — that is the message macOS shows
-          for any unsigned application. To run it:
+          Notewise is signed, but with its own certificate rather than an Apple Developer ID, so
+          macOS cannot confirm who made it and stops the first launch. Once per download:
 
-          ```sh
-          xattr -dr com.apple.quarantine /Applications/Notewise.app
-          ```
+          1. Drag Notewise from the `.dmg` into Applications, and open it from there.
+          2. macOS says it could not verify that Notewise is free of malware. Choose **Done**.
+          3. Open **System Settings → Privacy & Security**, scroll down to **Security**, and choose
+             **Open Anyway** beside the line about Notewise — it stays there for about an hour
+             after the blocked attempt. Confirm with your login password.
 
-          Only do that for software you have a reason to trust. If you would rather not, the
-          engine builds from source with no signing involved at all — see the README.
+          Permissions you grant carry over to later releases, because every release is signed
+          with the same certificate. One thing does not: after an update, macOS may ask whether
+          Notewise can use what it saved in your keychain — your connector sign-ins. Choose
+          **Always Allow**. Without an Apple Developer ID, macOS ties those items to each version.
+
+          To check that this copy is the one released here, run
+          `codesign -d -r- /Applications/Notewise.app`. The requirement it prints should end in
+          `H"@CERTIFICATE_SHA1@"`.
 
           ### What is in this build
 
-          Local transcription, search, notes, tickets and the agent. **System audio capture is
-          not included**: it needs ScreenCaptureKit against a signed bundle, which is the same
-          missing Developer ID.
+          Local transcription, search, notes, tickets and the agent, and recording from the
+          microphone. On macOS, system audio — the other people on a call — needs the Screen &
+          System Audio Recording permission, switched on by hand in System Settings and applied
+          after a relaunch. It has not yet been run end to end in a release build.
           NOTES
+
+          # The tag build could not have got this far without the pin, so it is never empty here.
+          sed -i "s/@CERTIFICATE_SHA1@/$(tr 'A-F' 'a-f' <<< "$MACOS_CERTIFICATE_SHA1")/" notes.md
 
           gh release create "${GITHUB_REF_NAME}" \
             --title "Notewise ${GITHUB_REF_NAME}" \
