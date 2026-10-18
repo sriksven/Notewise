@@ -19,15 +19,21 @@ export default {
           faint: "var(--faint)",
         },
 
+        // Channels rather than `var(--accent)` where a screen uses an opacity modifier
+        // (`bg-accent/20`): Tailwind cannot apply one to a bare variable and silently emits no
+        // rule at all. `lib/theme.ts` publishes the channels beside the colours.
         accent: {
-          DEFAULT: "var(--accent)",
+          DEFAULT: "rgb(var(--accent-rgb) / <alpha-value>)",
+          // Text drawn in the accent — timestamps that seek, the selected chip. Written as
+          // `text-accent-soft` in several screens and never defined, so it rendered in body text.
+          soft: "rgb(var(--accent-rgb) / <alpha-value>)",
           hover: "var(--accent-hover)",
           on: "var(--accent-on)",
         },
 
         warn: {
           DEFAULT: "var(--warn-bg)",
-          text: "var(--warn-text)",
+          text: "rgb(var(--warn-text-rgb) / <alpha-value>)",
           line: "var(--warn-line)",
         },
         ok: {
@@ -43,7 +49,7 @@ export default {
 
         // Recording is red in every theme. If it is red, audio is being captured — that has to
         // be true regardless of which accent someone picked.
-        record: { DEFAULT: "var(--record)", hover: "var(--record-hover)" },
+        record: { DEFAULT: "rgb(var(--record-rgb) / <alpha-value>)", hover: "var(--record-hover)" },
       },
       boxShadow: {
         dock: "0 4px 24px rgba(0,0,0,0.14), 0 1px 3px rgba(0,0,0,0.10)",

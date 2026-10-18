@@ -127,6 +127,19 @@ export interface Theme {
 
 export const DEFAULT_THEME: Theme = { mode: "dark", accent: DEFAULT_ACCENT };
 
+/**
+ * A `#rrggbb` colour as the space-separated channels CSS's `rgb()` takes: `"63 63 70"`.
+ *
+ * Tailwind can only apply an opacity modifier (`bg-accent/20`) to a colour written as
+ * `rgb(var(--x) / <alpha-value>)`. Written as a plain `var(--accent)`, every such class compiled to
+ * nothing at all — the selected meeting in the library had no highlight and the recording badge no
+ * fill — so the colours those classes use are also published as channels.
+ */
+export function channels(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
 /** Whether `system` currently means dark. */
 export function prefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
@@ -165,14 +178,17 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty("--danger-bg", palette.dangerBg);
   root.style.setProperty("--danger-text", palette.dangerText);
   root.style.setProperty("--danger-line", palette.dangerLine);
+  root.style.setProperty("--warn-text-rgb", channels(palette.warnText));
   const dark = resolved === "dark";
   root.style.setProperty("--accent", dark ? accent.darkBase : accent.base);
+  root.style.setProperty("--accent-rgb", channels(dark ? accent.darkBase : accent.base));
   root.style.setProperty("--accent-hover", dark ? accent.darkHover : accent.hover);
   root.style.setProperty("--accent-on", dark ? accent.darkOn : accent.on);
 
   // Recording is always red, in every theme. It is the one signal that must not be confusable
   // with decoration — if it is red, audio is being captured — so it does not follow the accent.
   root.style.setProperty("--record", "#e2382e");
+  root.style.setProperty("--record-rgb", channels("#e2382e"));
   root.style.setProperty("--record-hover", "#c92f26");
 
   root.dataset.mode = resolved;

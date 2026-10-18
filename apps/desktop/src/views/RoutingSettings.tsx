@@ -124,7 +124,7 @@ export function RoutingSettings({ onChanged }: Props = {}) {
       </p>
 
       {error && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[12.5px] text-amber-200">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-warn-line bg-warn p-3 text-[12.5px] text-warn-text">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{error}</span>
         </div>
@@ -163,7 +163,7 @@ export function RoutingSettings({ onChanged }: Props = {}) {
                   {!active.includes(rule.name) && (
                     // Stored but not built. Almost always a missing API key, and a screen that
                     // showed it as working would be lying about what will happen.
-                    <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-200">
+                    <span className="ml-2 rounded bg-warn px-1.5 py-0.5 text-[10.5px] font-semibold text-warn-text">
                       not in force
                     </span>
                   )}

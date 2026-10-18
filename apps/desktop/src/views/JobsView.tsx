@@ -127,7 +127,7 @@ export function JobsView() {
         </p>
 
         {error && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[12.5px] text-amber-200">
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-warn-line bg-warn p-3 text-[12.5px] text-warn-text">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{error}</span>
           </div>
@@ -162,7 +162,7 @@ export function JobsView() {
           />
 
           {previewError && (
-            <p className="mt-2 text-[12px] text-amber-200">{previewError}</p>
+            <p className="mt-2 text-[12px] text-warn-text">{previewError}</p>
           )}
           {preview && (
             <div className="mt-2 text-[12px] text-ink-faint">
