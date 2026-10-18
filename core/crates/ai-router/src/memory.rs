@@ -291,8 +291,8 @@ pub const MAX_CANDIDATES: usize = 3;
 /// than by describing what is wanted and hoping.
 pub fn observer_prompt() -> String {
     format!(
-        "You read a person's meeting transcripts and note durable facts **about that person** which \
-would help you help them in future.
+        "You read what a person said in their meetings — only their own lines, labelled `You` — and \
+note durable facts **about that person** which would help you help them in future.
 
 Reply with EXACTLY ONE JSON object and nothing else:
 

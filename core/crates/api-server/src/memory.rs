@@ -360,7 +360,7 @@ pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport>
             let Ok(meeting) = meetings.get(meeting_id) else {
                 continue;
             };
-            let transcript = meetings.transcript_text(meeting_id).unwrap_or_default();
+            let transcript = own_words(&meetings.segments(meeting_id).unwrap_or_default());
             groups
                 .entry(meeting.project_id)
                 .or_default()
@@ -401,6 +401,26 @@ pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport>
     }
 
     Ok(report)
+}
+
+/// What the person themselves said in a meeting, and nothing anyone else said.
+///
+/// The observer used to read the whole transcript and be *told* to keep only facts about the
+/// person. Against `llama3.1:8b` it could not: on a call where the account manager said "I'm
+/// Marco, I run their account", four runs in four stored "I run Acme Logistics' account" as a
+/// fact about the user — first person, so the reflector kept it. A model that never sees another
+/// speaker's self-description cannot attribute it to the wrong one.
+///
+/// The person is the microphone's speaker, labelled by the recorder. A meeting with no line from
+/// them — an import, or a call where they never spoke — yields nothing, because there is then no
+/// way to know which voice was theirs, and guessing is the failure this module exists to avoid.
+fn own_words(segments: &[notewise_storage::TranscriptSegment]) -> String {
+    let me = notewise_recorder::Channel::Microphone.speaker_label();
+    segments
+        .iter()
+        .filter(|segment| segment.speaker.as_deref() == Some(me))
+        .map(|segment| format!("{me}: {}\n", segment.text.trim()))
+        .collect()
 }
 
 /// The transcripts, trimmed, as one block.
@@ -706,7 +726,17 @@ mod tests {
             &self,
             request: &ChatRequest,
         ) -> notewise_ai_router::Result<notewise_ai_router::ChatResponse> {
-            self.seen.lock().unwrap().push(request.context.join("\n"));
+            // The instructions and what was asked about them, so a test can assert on both.
+            let asked: Vec<&str> = request
+                .messages
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect();
+            self.seen.lock().unwrap().push(format!(
+                "{}\n{}",
+                request.context.join("\n"),
+                asked.join("\n")
+            ));
 
             let text = self
                 .replies
@@ -753,7 +783,8 @@ mod tests {
 
         repo.add_segment(notewise_storage::NewTranscriptSegment {
             meeting_id: meeting.id,
-            speaker: Some("Alex".into()),
+            // The microphone's label: the person whose facts these are.
+            speaker: Some("You".into()),
             // Long enough to clear the minimum, and shaped like a standup.
             text: "I own the billing service and I run the platform standup every Monday. \
                    We call the ingest pipeline the funnel because it narrows. \
@@ -1096,6 +1127,71 @@ mod tests {
         assert_eq!(report.proposed, 0);
         assert_eq!(report.kept, 0);
         assert!(memories(&state).await.is_empty());
+    }
+
+    /// Another speaker's self-description must never reach the observer. Told only to "keep facts
+    /// about the person", llama3.1:8b stored the account manager's "I run their account" as the
+    /// user's own role in four runs out of four.
+    #[tokio::test]
+    async fn what_other_speakers_say_about_themselves_is_never_read() {
+        let (state, seen) =
+            scripted(&[r#"{"memories":[{"text":"I own the billing service","global":true}]}"#]);
+        let meeting_id = seed_meeting(&state, "Vendor review", None).await;
+        {
+            let db = state.db().await;
+            notewise_storage::MeetingRepository::new(&db)
+                .add_segment(notewise_storage::NewTranscriptSegment {
+                    meeting_id,
+                    speaker: Some("Marco".into()),
+                    text: "I'm Marco, I run the Acme account and I report to the CFO.".into(),
+                    start_ms: 60_000,
+                    end_ms: 65_000,
+                    confidence: None,
+                })
+                .expect("a segment");
+        }
+
+        let report = extract(&state, true).await.expect("a run");
+        assert_eq!(report.kept, 1, "{report:?}");
+
+        let sent = seen.lock().unwrap().join("\n");
+        assert!(sent.contains("I own the billing service"), "{sent}");
+        assert!(
+            !sent.contains("I run the Acme account"),
+            "another speaker's words reached the observer: {sent}"
+        );
+    }
+
+    /// With no line from the person there is no way to know whose facts these are.
+    #[tokio::test]
+    async fn a_meeting_without_the_persons_voice_costs_no_model_call() {
+        let (state, seen) = scripted(&[]);
+        {
+            let db = state.db().await;
+            let repo = notewise_storage::MeetingRepository::new(&db);
+            let meeting = repo
+                .create(notewise_storage::NewMeeting {
+                    project_id: None,
+                    title: "Imported call".into(),
+                    source: notewise_storage::MeetingSource::Import,
+                    started_at: Utc::now(),
+                })
+                .expect("a meeting");
+            repo.add_segment(notewise_storage::NewTranscriptSegment {
+                meeting_id: meeting.id,
+                speaker: Some("Speaker 1".into()),
+                text: "I own the billing service and run the platform standup. ".repeat(20),
+                start_ms: 0,
+                end_ms: 60_000,
+                confidence: None,
+            })
+            .expect("a segment");
+            repo.end(meeting.id, Utc::now()).expect("ends");
+        }
+
+        let report = extract(&state, true).await.expect("a run");
+        assert_eq!(report.proposed, 0, "{report:?}");
+        assert!(seen.lock().unwrap().is_empty(), "no model call");
     }
 
     /// A short recording has nothing durable in it and must not cost a model call.
