@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, resolveMode } from "./theme";
+import { ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, channels, resolveMode } from "./theme";
+import tailwindConfig from "../../tailwind.config.js?raw";
+import themeSource from "./theme.ts?raw";
 
 const HEX = /^#[0-9a-f]{6}$/;
 
@@ -49,5 +51,26 @@ describe("resolveMode", () => {
   it("passes an explicit choice through", () => {
     expect(resolveMode("dark")).toBe("dark");
     expect(resolveMode("light")).toBe("light");
+  });
+});
+
+describe("channels", () => {
+  it("writes a hex colour as rgb() channels", () => {
+    expect(channels("#3f3f46")).toBe("63 63 70");
+    expect(channels("#e2382e")).toBe("226 56 46");
+    expect(channels("#ffffff")).toBe("255 255 255");
+  });
+
+  // The bug: colours given to Tailwind as `var(--accent)` cannot take an opacity modifier, so
+  // `bg-accent/[0.06]` (the selected meeting) and `bg-record/10` (the go-live button) compiled to
+  // no rule at all. The config now reads channel variables — and every one it reads has to be
+  // set by `applyTheme`, or those classes turn transparent again. (The fallbacks in `index.css`
+  // cannot be checked from here: vitest hands a stylesheet over as an empty string, `?raw` or not.)
+  it("are published for every channel variable the Tailwind config reads", () => {
+    const read = [...tailwindConfig.matchAll(/var\((--[a-z-]+-rgb)\)/g)].map((m) => m[1]);
+    expect(read.length).toBeGreaterThan(0);
+    for (const name of new Set(read)) {
+      expect(themeSource, `applyTheme sets ${name}`).toContain(`"${name}"`);
+    }
   });
 });

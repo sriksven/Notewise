@@ -140,8 +140,7 @@ async fn ask_about_screen(
             .to_string()
     };
 
-    let request =
-        ChatRequest::new(vec![ChatMessage::user(question)]).with_context(vec![instructions]);
+    let request = ChatRequest::new(vec![ChatMessage::user(question)]).with_system(instructions);
     let reply = state.ai().chat(&request).await?;
 
     Ok(Json(AskAnswer {
@@ -362,8 +361,8 @@ async fn act_on_selection(
         )));
     }
 
-    let request = ChatRequest::new(vec![ChatMessage::user(&original)])
-        .with_context(vec![body.action.prompt()]);
+    let request =
+        ChatRequest::new(vec![ChatMessage::user(&original)]).with_system(body.action.prompt());
     let reply = state.ai().chat(&request).await?;
     let result = reply.text.trim().to_string();
 
@@ -482,7 +481,9 @@ async fn complete(
         }));
     }
 
-    let request = ChatRequest::new(vec![ChatMessage::user(&text)]).with_context(vec![
+    // The instruction as the system prompt, not as "material" under the meetings default — see
+    // `ChatRequest::system` for what that framing did to every assistant action.
+    let request = ChatRequest::new(vec![ChatMessage::user(&text)]).with_system(
         "The user is part-way through writing something. Continue it from exactly where it stops.\n\n\
          Rules:\n\
          - Return only the continuation. Do not repeat what is already written.\n\
@@ -490,9 +491,8 @@ async fn complete(
          - At most one sentence.\n\
          - Match the language, tone and register of what is there.\n\
          - Invent no names, numbers, dates or facts.\n\
-         - If there is no sensible continuation, return nothing at all."
-            .to_string(),
-    ]);
+         - If there is no sensible continuation, return nothing at all.",
+    );
 
     let reply = state.ai().chat(&request).await?;
 

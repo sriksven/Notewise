@@ -98,6 +98,13 @@ export interface GroundedAnswer {
    * is by word and a rewording may find it.
    */
   grounded: boolean;
+  /**
+   * How many passages retrieval found before they were checked for relevance.
+   *
+   * Tells "found nothing" (0: try other words) from "found some, none answer it" — the material
+   * genuinely is not there. Absent from the per-note endpoint's older responses.
+   */
+  considered?: number;
 }
 
 /** A sink this build contains, whether or not it has been turned on. */
@@ -187,6 +194,16 @@ export interface Summary {
   created_at: string;
   decisions: Decision[];
   action_items: ActionItem[];
+}
+
+/** What a summary run reports: the stored row's id and text, and how much it extracted. */
+export interface SummarizeResult {
+  summary_id: string;
+  text: string;
+  model: string;
+  /** Counts, not the rows — read those from the meeting. */
+  decisions: number;
+  action_items: number;
 }
 
 export interface DeviceInfo {
@@ -323,9 +340,22 @@ export type AmbiguityKind =
 
 export interface ClarifyingQuestion {
   question: string;
+  /** The words that prompted it, as said — the engine drops a question whose quote is not. */
   about: string;
   kind: AmbiguityKind;
+  /** When the prompting statement was said, in meeting time. */
   at_ms: number;
+}
+
+/**
+ * What a client carries between question polls, opaque to it.
+ *
+ * Returned by every `questions` response and sent back unchanged with the next request for the
+ * same meeting. Start a new meeting with none.
+ */
+export interface QuestionSession {
+  asked: string[];
+  last_suggestion_ms: number | null;
 }
 
 export interface Ticket {
@@ -402,6 +432,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
     );
   }
+
+  // Nothing to read. Two routes answer `204 No Content` — removing an API key and disconnecting
+  // a connector — and `response.json()` throws on an empty body, so both used to report failure
+  // after succeeding, and skip the refresh that would have shown the change.
+  if (response.status === 204) return undefined as T;
 
   return response.json() as Promise<T>;
 }
@@ -863,6 +898,14 @@ export const api = {
 
   meetings: (limit = 50) => request<Meeting[]>(`/v1/meetings?limit=${limit}`),
 
+  /**
+   * One meeting by id, trashed or not — `deleted_at` says which.
+   *
+   * For a meeting the newest-fifty list does not hold: one opened from a person, a search hit or
+   * a citation, or an address that names a meeting since deleted.
+   */
+  meeting: (id: string) => request<Meeting>(`/v1/meetings/${id}`),
+
   createMeeting: (title: string, source = "combined") =>
     request<Meeting>("/v1/meetings", {
       method: "POST",
@@ -1030,23 +1073,19 @@ export const api = {
     }),
 
   summarize: (id: string) =>
-    request<{
-      summary_id: string;
-      text: string;
-      model: string;
-      decisions: number;
-      action_items: number;
-    }>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
+    request<SummarizeResult>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
 
-  /** Summarize using a template's prompt instead of the backend's default instruction. */
+  /**
+   * Summarize using a template's prompt instead of the backend's default instruction.
+   *
+   * Same route, same answer as {@link summarize}. It was typed as `{ summary, decisions[],
+   * action_items[] }`, which the engine has never sent — harmless only because no caller read it.
+   */
   summarizeWithTemplate: (id: string, templateId: string) =>
-    request<{
-      summary: Summary;
-      decisions: unknown[];
-      action_items: unknown[];
-    }>(`/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`, {
-      method: "POST",
-    }),
+    request<SummarizeResult>(
+      `/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`,
+      { method: "POST" },
+    ),
 
   related: (id: string, depth = 2) =>
     request<RelatedNode[]>(`/v1/meetings/${id}/related?depth=${depth}`),
@@ -1060,11 +1099,20 @@ export const api = {
   exportUrl: (id: string, variant: "full" | "brief" | "transcript" = "full") =>
     `/v1/meetings/${id}/export?variant=${variant}`,
 
-  questions: (id: string) =>
-    request<{ questions: ClarifyingQuestion[]; reason?: string }>(
-      `/v1/meetings/${id}/questions`,
-      { method: "POST", body: JSON.stringify({}) },
-    ),
+  /**
+   * Questions worth asking about a live meeting.
+   *
+   * The engine keeps no state per meeting, so its cooldown and its memory of what was already
+   * asked only work if the caller carries them: pass back the `session` the previous response
+   * returned. Without it every poll is a model call that may reword a question already shown.
+   */
+  questions: (id: string, session?: QuestionSession) =>
+    request<
+      { questions: ClarifyingQuestion[]; reason?: string; cooling_down?: boolean } & QuestionSession
+    >(`/v1/meetings/${id}/questions`, {
+      method: "POST",
+      body: JSON.stringify(session ?? {}),
+    }),
 
   chat: (id: string, messages: Array<{ role: string; content: string }>) =>
     request<{ text: string; model: string }>(`/v1/meetings/${id}/chat`, {
@@ -1393,7 +1441,13 @@ export const api = {
   stopRecording: () =>
     request<RecordingStopped>("/v1/recording", { method: "DELETE" }),
 
-  tickets: () => request<Ticket[]>("/v1/tickets"),
+  /**
+   * Every ticket, whatever its status.
+   *
+   * `?status=all` because the bare route answers open tickets only — the board has a Done column,
+   * and without it a ticket moved there vanished on the next load.
+   */
+  tickets: () => request<Ticket[]>("/v1/tickets?status=all"),
 
   createTicket: (input: {
     title: string;

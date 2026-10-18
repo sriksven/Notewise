@@ -18,7 +18,8 @@
 //! a failing sink.
 
 use notewise_storage::{
-    ConnectorAccountRepository, Database, ExternalItemRepository, NewExternalItem,
+    CalendarRepository, ConnectorAccountRepository, Database, DocumentRepository, EventStatus,
+    ExternalItemRepository, Id, NewAttendee, NewCalendarEvent, NewDocument, NewExternalItem,
 };
 
 use crate::error::{ConnectorError, Result};
@@ -121,14 +122,125 @@ impl Importer {
 /// whichever crate understands that kind of thing, and lands in its own table keyed to this row.
 /// `external_items` is the shared record that a thing exists elsewhere, for every connector.
 fn persist(db: &Database, connector_id: &str, item: &Inbound) -> Result<()> {
-    ExternalItemRepository::new(db).upsert(NewExternalItem {
+    let external = ExternalItemRepository::new(db).upsert(NewExternalItem {
         connector_id: connector_id.to_string(),
         external_id: item.external_id.clone(),
         url: item.url.clone(),
         title: item.title.clone(),
         remote_version: item.remote_version.clone(),
     })?;
+    land(db, connector_id, external.id, item)
+}
+
+/// Put what an inbound item *is* in the table that owns that kind of thing.
+///
+/// This step did not exist. Every source built its payload — a document's body, an event's times
+/// and attendees, already normalised across providers — and the importer stored the identity and
+/// dropped the rest, so `documents` and `calendar_events` stayed empty however many items a sync
+/// reported. A watched folder made nothing searchable, and the calendar reconciliation and
+/// join detection that read `calendar_events` had nothing to read. The sources and the
+/// repositories are both here, so the step that joins them is too.
+fn land(db: &Database, connector_id: &str, external_item_id: Id, item: &Inbound) -> Result<()> {
+    match connector_id {
+        crate::sources::Documents::ID => land_document(db, external_item_id, item),
+        crate::sources::GoogleBridge::ID | crate::sources::MicrosoftGraph::ID => {
+            land_event(db, connector_id, external_item_id, item)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn land_document(db: &Database, external_item_id: Id, item: &Inbound) -> Result<()> {
+    let payload = &item.payload;
+    let text = |field: &str| payload[field].as_str().map(str::to_string);
+
+    let (Some(path), Some(body)) = (text("path"), text("body")) else {
+        return Err(ConnectorError::Permanent(format!(
+            "{} arrived without a path and a body",
+            item.external_id
+        )));
+    };
+
+    DocumentRepository::new(db).upsert(NewDocument {
+        external_item_id,
+        title: text("title")
+            .or_else(|| item.title.clone())
+            .unwrap_or_else(|| path.clone()),
+        byte_size: payload["byte_size"]
+            .as_i64()
+            .unwrap_or_else(|| i64::try_from(body.len()).unwrap_or(i64::MAX)),
+        modified_at: time(payload, "modified_at")
+            .or(item.occurred_at)
+            .unwrap_or_else(chrono::Utc::now),
+        path,
+        body,
+    })?;
     Ok(())
+}
+
+fn land_event(
+    db: &Database,
+    connector_id: &str,
+    external_item_id: Id,
+    item: &Inbound,
+) -> Result<()> {
+    let payload = &item.payload;
+    let text = |field: &str| payload[field].as_str().map(str::to_string);
+
+    let (Some(starts_at), Some(ends_at)) = (time(payload, "starts_at"), time(payload, "ends_at"))
+    else {
+        return Err(ConnectorError::Permanent(format!(
+            "event {} arrived without a start and an end",
+            item.external_id
+        )));
+    };
+    // Both sources normalise to these three; anything else is a source this code has not met.
+    let status = text("status")
+        .as_deref()
+        .and_then(EventStatus::parse)
+        .unwrap_or(EventStatus::Confirmed);
+
+    let calendar = CalendarRepository::new(db);
+    let event = calendar.upsert(NewCalendarEvent {
+        external_item_id,
+        calendar_id: text("calendar_id").unwrap_or_else(|| "primary".to_string()),
+        provider_source: connector_id.to_string(),
+        title: item.title.clone(),
+        starts_at,
+        ends_at,
+        is_all_day: payload["is_all_day"].as_bool().unwrap_or(false),
+        location: text("location"),
+        join_url: text("join_url"),
+        organizer_email: text("organizer_email"),
+        recurrence_key: text("recurrence_key"),
+        status,
+    })?;
+
+    let attendees: Vec<NewAttendee> = payload["attendees"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|attendee| {
+            let email = attendee["email"].as_str()?.trim();
+            (!email.is_empty()).then(|| NewAttendee {
+                email: email.to_string(),
+                display_name: attendee["display_name"].as_str().map(str::to_string),
+                response_status: attendee["response_status"].as_str().map(str::to_string),
+                is_organizer: attendee["is_organizer"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect();
+    calendar.replace_attendees(event.id, &attendees)?;
+    Ok(())
+}
+
+/// An RFC 3339 timestamp from a payload field, as the sources write them.
+fn time(payload: &serde_json::Value, field: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    payload[field]
+        .as_str()
+        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+        .map(|t| t.with_timezone(&chrono::Utc))
 }
 
 #[cfg(test)]
@@ -234,6 +346,109 @@ mod tests {
         let mut registry = ConnectorRegistry::new();
         registry.register_source(Arc::new(source));
         Importer::new(registry)
+    }
+
+    /// The whole path a watched folder takes, with the real source: a file in the folder has to
+    /// end up findable. Before the landing step existed, the sync reported it upserted and the
+    /// `documents` table — the one search and retrieval read — stayed empty.
+    #[tokio::test]
+    async fn a_watched_folder_becomes_searchable_documents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("plan.md"),
+            "# Plan\n\nThe zebra migration ships Friday.\n",
+        )
+        .expect("write");
+
+        let db = db_with(crate::sources::Documents::ID);
+        let mut registry = ConnectorRegistry::new();
+        registry.register_source(Arc::new(crate::sources::Documents::new(dir.path())));
+        let report = Importer::new(registry).run(&db).await.expect("run");
+        assert_eq!(report.upserted, 1, "{report:?}");
+
+        let documents = DocumentRepository::new(&db).list().expect("list");
+        assert_eq!(documents.len(), 1);
+        assert!(documents[0].body.contains("zebra"));
+
+        let hits = notewise_storage::SearchRepository::new(&db)
+            .search("zebra", 10)
+            .expect("search");
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].entity_kind, "document");
+    }
+
+    /// Both calendar sources normalise events to one payload; it has to land as an event with its
+    /// attendees, which is what reconciliation and join detection read.
+    #[tokio::test]
+    async fn a_calendar_event_lands_with_its_attendees() {
+        let db = db_with(crate::sources::GoogleBridge::ID);
+        let mut event = item("evt-1", "Platform standup");
+        event.payload = serde_json::json!({
+            "calendar_id": "primary",
+            "starts_at": "2026-10-19T09:00:00+00:00",
+            "ends_at": "2026-10-19T09:30:00+00:00",
+            "is_all_day": false,
+            "location": null,
+            "join_url": "https://meet.google.com/abc-defg-hij",
+            "organizer_email": "dana@example.com",
+            "recurrence_key": "standup-series",
+            "status": "confirmed",
+            "attendees": [
+                {"email": "dana@example.com", "display_name": "Dana", "response_status": "accepted", "is_organizer": true},
+                {"email": "sam@example.com", "display_name": null, "response_status": null, "is_organizer": false},
+                {"email": "  ", "display_name": "nobody", "response_status": null, "is_organizer": false}
+            ],
+        });
+        let source = StubSource::new(
+            crate::sources::GoogleBridge::ID,
+            vec![batch(vec![event], None)],
+        );
+
+        let report = importer(source).run(&db).await.expect("run");
+        assert_eq!(report.upserted, 1, "{report:?}");
+
+        let external = ExternalItemRepository::new(&db)
+            .find(crate::sources::GoogleBridge::ID, "evt-1")
+            .expect("find")
+            .expect("identity stored");
+        let calendar = CalendarRepository::new(&db);
+        let landed = calendar
+            .by_external_item(external.id)
+            .expect("read")
+            .expect("the event must land, not just its identity");
+        assert_eq!(landed.title.as_deref(), Some("Platform standup"));
+        assert_eq!(
+            landed.join_url.as_deref(),
+            Some("https://meet.google.com/abc-defg-hij")
+        );
+        assert_eq!(landed.recurrence_key.as_deref(), Some("standup-series"));
+        assert_eq!(landed.provider_source, "google");
+
+        let attendees = calendar.attendees(landed.id).expect("attendees");
+        assert_eq!(attendees.len(), 2, "a blank address is not an attendee");
+        assert!(attendees
+            .iter()
+            .any(|a| a.email == "dana@example.com" && a.is_organizer));
+    }
+
+    /// One malformed event must not cost the batch — the existing rule, now that landing can fail.
+    #[tokio::test]
+    async fn an_event_without_times_is_skipped_not_fatal() {
+        let db = db_with(crate::sources::MicrosoftGraph::ID);
+        let mut broken = item("evt-broken", "No times");
+        broken.payload = serde_json::json!({ "status": "confirmed" });
+        let mut fine = item("evt-fine", "Has times");
+        fine.payload = serde_json::json!({
+            "starts_at": "2026-10-19T09:00:00Z",
+            "ends_at": "2026-10-19T10:00:00Z",
+        });
+        let source = StubSource::new(
+            crate::sources::MicrosoftGraph::ID,
+            vec![batch(vec![broken, fine], None)],
+        );
+
+        let report = importer(source).run(&db).await.expect("run");
+        assert_eq!((report.pulled, report.upserted), (2, 1));
     }
 
     #[tokio::test]

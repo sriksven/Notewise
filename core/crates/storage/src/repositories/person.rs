@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::Row;
+use rusqlite::{OptionalExtension, Row};
 
 use crate::db::Database;
 use crate::error::{Result, StorageError};
@@ -34,12 +34,34 @@ impl<'a> PersonRepository<'a> {
         Self { db }
     }
 
+    /// Add a person.
+    ///
+    /// A blank email is no email. Stored as `""` it was a real value to the unique index, so the
+    /// second person created without an address collided with the first.
+    ///
+    /// An address already on file is refused, compared without case. The unique index compares
+    /// bytes, so `Dana@example.com` slipped past it beside `dana@example.com` — and
+    /// [`Self::find_by_email`], which ignores case, then had two people to choose between.
     pub fn create(&self, new: NewPerson) -> Result<Person> {
+        let email = new
+            .email
+            .map(|address| address.trim().to_string())
+            .filter(|address| !address.is_empty());
+
+        if let Some(address) = &email {
+            if let Some(existing) = self.find_by_email(address)? {
+                return Err(StorageError::Refused(format!(
+                    "{} already has the email {address}",
+                    existing.display_name
+                )));
+            }
+        }
+
         let now = Utc::now();
         let person = Person {
             id: Id::new(),
             display_name: new.display_name,
-            email: new.email,
+            email,
             has_voice_print: false,
             created_at: now,
             updated_at: now,
@@ -90,7 +112,7 @@ impl<'a> PersonRepository<'a> {
                 rusqlite::params![display_name],
                 map_person,
             )
-            .ok();
+            .optional()?;
 
         match existing {
             Some(person) => Ok(person),
@@ -111,7 +133,7 @@ impl<'a> PersonRepository<'a> {
                 rusqlite::params![email],
                 map_person,
             )
-            .ok())
+            .optional()?)
     }
 
     pub fn list(&self) -> Result<Vec<Person>> {
@@ -135,14 +157,27 @@ impl<'a> PersonRepository<'a> {
         self.get(id)
     }
 
+    /// Remove a person. Their participation cascades; what they said stays, unattributed.
+    ///
+    /// `transcript_segments.speaker_id` references `people` with no `ON DELETE` action (v6), so a
+    /// person any segment pointed at could not be deleted at all — the statement failed its foreign
+    /// key. The free-text `speaker` label is untouched, so the transcript still reads the same; only
+    /// the link to an identity that no longer exists goes, which is what `ON DELETE SET NULL` would
+    /// have done. Both in one transaction, so a failed delete leaves the links where they were.
     pub fn delete(&self, id: Id) -> Result<()> {
-        let changed = self
-            .db
-            .conn()
-            .execute("DELETE FROM people WHERE id = ?1", rusqlite::params![id])?;
+        let conn = self.db.conn();
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "UPDATE transcript_segments SET speaker_id = NULL WHERE speaker_id = ?1",
+            rusqlite::params![id],
+        )?;
+        let changed = tx.execute("DELETE FROM people WHERE id = ?1", rusqlite::params![id])?;
         if changed == 0 {
             return Err(StorageError::not_found("Person", id));
         }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -321,6 +356,49 @@ mod tests {
             .unwrap()
     }
 
+    /// Two people without an address are two people, not a collision on `""`.
+    #[test]
+    fn a_blank_email_is_no_email() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        for name in ["First", "Second"] {
+            let made = repo
+                .create(NewPerson {
+                    display_name: name.into(),
+                    email: Some("  ".into()),
+                })
+                .expect("a blank email must not collide");
+            assert_eq!(made.email, None);
+        }
+    }
+
+    /// The index compares bytes and `find_by_email` does not, so a case variant has to be refused
+    /// here — otherwise one address belongs to two people and lookups pick one at random.
+    #[test]
+    fn an_email_already_on_file_is_refused_whatever_its_case() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        repo.create(NewPerson {
+            display_name: "Dana".into(),
+            email: Some("dana@example.com".into()),
+        })
+        .expect("first");
+
+        for address in ["dana@example.com", "DANA@example.com", " dana@example.com "] {
+            let err = repo
+                .create(NewPerson {
+                    display_name: "Imposter".into(),
+                    email: Some(address.into()),
+                })
+                .expect_err("one address, one person");
+            assert!(
+                matches!(err, StorageError::Refused(_)),
+                "{address}: {err:?}"
+            );
+        }
+        assert_eq!(repo.list().unwrap().len(), 1);
+    }
+
     #[test]
     fn a_new_person_has_no_voice_print() {
         let db = db();
@@ -465,6 +543,57 @@ mod tests {
             Some("host"),
             "a later sighting without a role must not erase a known one"
         );
+    }
+
+    /// `speaker_id` has no `ON DELETE` action, so a person a segment pointed at was undeletable —
+    /// the foreign key failed. What they said must survive them, unattributed.
+    #[test]
+    fn a_person_a_segment_points_at_can_still_be_deleted() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        let p = person(&db, "Priya");
+        let meeting = MeetingRepository::new(&db)
+            .create(NewMeeting {
+                project_id: None,
+                title: "Standup".into(),
+                source: MeetingSource::Import,
+                started_at: Utc::now(),
+            })
+            .unwrap();
+        let segment = MeetingRepository::new(&db)
+            .add_segment(crate::NewTranscriptSegment {
+                meeting_id: meeting.id,
+                speaker: Some("Priya".into()),
+                text: "ship it".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                confidence: None,
+            })
+            .unwrap();
+        // Only a merge writes this column today, which is how a workspace comes to hold one.
+        db.conn()
+            .execute(
+                "UPDATE transcript_segments SET speaker_id = ?2 WHERE id = ?1",
+                rusqlite::params![segment.id, p.id],
+            )
+            .unwrap();
+
+        repo.delete(p.id).expect("the person must be deletable");
+
+        let (speaker, speaker_id): (Option<String>, Option<Id>) = db
+            .conn()
+            .query_row(
+                "SELECT speaker, speaker_id FROM transcript_segments WHERE id = ?1",
+                rusqlite::params![segment.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            speaker.as_deref(),
+            Some("Priya"),
+            "the transcript reads the same"
+        );
+        assert_eq!(speaker_id, None, "only the link to the identity goes");
     }
 
     #[test]

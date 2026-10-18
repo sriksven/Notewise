@@ -19,9 +19,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{AiError, Result};
+use crate::prompts::{self, transcript_prompt};
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
-    TranscriptInput,
+    tidy_action_items, tidy_decisions, ChatRequest, ChatResponse, ExtractedActionItem,
+    ExtractedDecision, Role, SummaryOutput, TranscriptInput,
 };
 use crate::AiBackend;
 
@@ -249,16 +250,6 @@ fn action_items_schema() -> Value {
     })
 }
 
-fn transcript_prompt(input: &TranscriptInput) -> String {
-    let mut prompt = format!("Meeting title: {}\n", input.title);
-    if let Some(context) = &input.context {
-        prompt.push_str(&format!("Context: {context}\n"));
-    }
-    prompt.push_str("\nTranscript:\n");
-    prompt.push_str(&input.text);
-    prompt
-}
-
 #[async_trait]
 impl AiBackend for AnthropicBackend {
     fn model_id(&self) -> &str {
@@ -272,11 +263,8 @@ impl AiBackend for AnthropicBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .complete(
-                input.system_prompt(
-                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
-                 decided and what happens next. Omit small talk and scheduling chatter.",
-                ),
-                &transcript_prompt(input),
+                &input.system_prompt(prompts::SUMMARY),
+                &transcript_prompt(input, prompts::SUMMARY_REMINDER),
             )
             .await?;
 
@@ -293,29 +281,30 @@ impl AiBackend for AnthropicBackend {
                  settled, not a task to be done. Include the stated reasoning when the \
                  transcript makes it recoverable, and null when it does not. If nothing was \
                  decided, return an empty list rather than inventing one.",
-                &transcript_prompt(input),
+                &transcript_prompt(input, ""),
                 decisions_schema(),
             )
             .await?;
-        Ok(wrapper.decisions)
+        Ok(tidy_decisions(wrapper.decisions))
     }
 
     async fn extract_action_items(
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
+        // The schema fixes the shape, so only the rules are sent.
+        let system = format!(
+            "{} Return an empty list if there are none.",
+            prompts::ACTION_ITEMS
+        );
         let wrapper: ActionItemsWrapper = self
             .complete_structured(
-                "Extract the action items from this meeting — work someone committed to \
-                 doing. Record the owner exactly as named in the transcript, and any due date \
-                 exactly as stated (e.g. 'next Friday') without resolving it to a calendar \
-                 date. Use null where the transcript does not say. Return an empty list if \
-                 there are none.",
-                &transcript_prompt(input),
+                &system,
+                &transcript_prompt(input, prompts::ACTION_ITEMS_REMINDER),
                 action_items_schema(),
             )
             .await?;
-        Ok(wrapper.action_items)
+        Ok(tidy_action_items(wrapper.action_items))
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
@@ -325,14 +314,12 @@ impl AiBackend for AnthropicBackend {
             ));
         }
 
-        let mut system = String::from(
+        // The request's own instruction when it brings one; the meetings question-answerer
+        // otherwise. See `ChatRequest::system`.
+        let system = request.system_prompt(
             "Answer questions about the user's meetings using only the material provided. \
              If the material does not contain the answer, say so plainly rather than guessing.",
         );
-        if !request.context.is_empty() {
-            system.push_str("\n\nMaterial:\n");
-            system.push_str(&request.context.join("\n---\n"));
-        }
 
         let messages: Vec<Value> = request
             .messages
@@ -582,16 +569,6 @@ mod tests {
 
         assert!(response.stop_details.is_none());
         assert_eq!(response.model.as_deref(), Some("claude-opus-5"));
-    }
-
-    #[test]
-    fn transcript_prompt_includes_context_when_present() {
-        let with =
-            transcript_prompt(&TranscriptInput::new("Sync", "text").with_context("Project Apollo"));
-        let without = transcript_prompt(&TranscriptInput::new("Sync", "text"));
-
-        assert!(with.contains("Project Apollo"));
-        assert!(!without.contains("Context:"));
     }
 
     #[tokio::test]

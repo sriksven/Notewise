@@ -220,9 +220,10 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         schema_version,
         ai_local: state.ai().is_local(),
         // The policy-aware label, not `model_id()`. A user with routing configured is not using
-        // one model, and this field is read by a human. `model_id()` stays the default's model
-        // because it is what gets persisted and read back to build a backend.
-        ai_model: state.ai().model_label(),
+        // one model, and this field is read by a human. Resolved, because before anything had
+        // asked the daemon the label was our preference — `llama3.1` on a machine holding only
+        // `llama3.1:8b` — and the top bar named a model that was not installed.
+        ai_model: state.ai().resolved_model_label().await,
         // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
         // reports that it cannot record even in a build that otherwise could.
         can_record: recording::SUPPORTED && state.db_path().is_some(),
@@ -448,7 +449,7 @@ async fn switch_backend(
     let ai = state.ai();
     Ok(Json(serde_json::json!({
         "kind": kind.as_str(),
-        "model": ai.model_id(),
+        "model": ai.resolved_model_id().await,
         "is_local": ai.is_local(),
     })))
 }
@@ -510,7 +511,7 @@ async fn set_api_key(
     Path(kind): Path<String>,
     Json(body): Json<ApiKeyBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    use notewise_connectors::{CredentialStore, KeychainStore, Secret};
+    use notewise_connectors::{CredentialStore, Secret};
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
@@ -527,7 +528,7 @@ async fn set_api_key(
         return Err(ApiError::BadRequest("the key must not be empty".into()));
     }
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .set(
             &crate::state::key_entry(kind),
             crate::state::API_KEY_FIELD,
@@ -552,12 +553,12 @@ async fn set_api_key(
 
 /// Forget a saved key. Removing one that is not there succeeds.
 async fn delete_api_key(Path(kind): Path<String>) -> ApiResult<axum::http::StatusCode> {
-    use notewise_connectors::{CredentialStore, KeychainStore};
+    use notewise_connectors::CredentialStore;
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .delete(&crate::state::key_entry(kind), crate::state::API_KEY_FIELD)
         .map_err(|e| ApiError::Internal(format!("could not remove the key: {e}")))?;
 
@@ -1529,16 +1530,14 @@ async fn summarize_meeting(
 
     let mut input = TranscriptInput::new(title, transcript);
 
-    // Memories go in front of the template rather than replacing it: a template is an instruction
-    // about shape and a memory is context about the reader, and the two are not competing.
-    let instructions = match (memories.is_empty(), &template) {
-        (true, None) => None,
-        (true, Some(template)) => Some(template.prompt.clone()),
-        (false, None) => Some(memories.clone()),
-        (false, Some(template)) => Some(format!("{memories}\n{}", template.prompt)),
-    };
-    if let Some(instructions) = instructions {
-        input = input.with_instructions(instructions);
+    // A template is an instruction about shape and a memory is context about the reader, and the
+    // two are not competing — so they travel in separate fields. Passing memories *as* the
+    // instructions replaced the backend's summary instruction whenever no template was chosen.
+    if let Some(template) = &template {
+        input = input.with_instructions(template.prompt.clone());
+    }
+    if !memories.is_empty() {
+        input = input.with_background(memories);
     }
     // Only the summary honours the template. Decisions and action items are extractions with a
     // fixed output shape, and a prompt written to change prose would break the parse.
@@ -1568,7 +1567,9 @@ async fn summarize_meeting(
         repo.add_action_item(notewise_storage::NewActionItem {
             meeting_id,
             summary_id: Some(stored.id),
-            text: item.text.clone(),
+            // The deadline as it was said. `due_at` needs a date nobody stated, so the hint
+            // rides in the text rather than being dropped — see `text_with_due_hint`.
+            text: item.text_with_due_hint(),
             owner: item.owner.clone(),
             owner_person_id: None,
             due_at: None,
@@ -1597,13 +1598,27 @@ struct QuestionsBody {
     /// Meeting position to treat as "now", in milliseconds. Defaults to the last segment.
     #[serde(default)]
     now_ms: Option<i64>,
+    /// What this client has already been shown, exactly as the previous response returned it.
+    #[serde(default)]
+    asked: Vec<String>,
+    /// When this client's last suggestion was made, exactly as the previous response returned it.
+    #[serde(default)]
+    last_suggestion_ms: Option<i64>,
 }
 
 /// Suggest questions worth asking about a live meeting.
 ///
 /// Stateless per request: the caller owns the cooldown and dedupe state, because a desktop
-/// app and a browser tab watching the same meeting should not silence each other. The
-/// windowing and gating logic is reused from `ClarifierSession` so both agree on policy.
+/// app and a browser tab watching the same meeting should not silence each other. It owns it
+/// by carrying it — `asked` and `last_suggestion_ms` come back in every response and go out
+/// in the next request — and the policy itself is `ClarifierSession`'s, applied here.
+///
+/// The state used to be accepted nowhere, so every request built an empty session: no
+/// cooldown, and no memory of what had been asked. The desktop app, which polls every thirty
+/// seconds and expected the engine to gate, got a model call and a new rewording of the same
+/// question on every poll. A client that sends nothing still gets that behaviour; one that
+/// carries the state gets the ninety-second spacing and never sees a statement asked about
+/// twice.
 async fn clarifying_questions(
     State(state): State<Shared>,
     Path(id): Path<String>,
@@ -1632,22 +1647,39 @@ async fn clarifying_questions(
     }; // lock released before the model call
 
     let now_ms = body.now_ms.unwrap_or(latest_ms);
-    let session = ClarifierSession::new(ClarifierConfig::default());
+    let mut session = ClarifierSession::resume(
+        ClarifierConfig::default(),
+        body.asked,
+        body.last_suggestion_ms,
+    );
 
     // Checked before spending a model call, not after.
     if !session.should_suggest(&utterances, now_ms) {
-        return Ok(Json(serde_json::json!({
+        let mut declined = serde_json::json!({
             "questions": [],
-            "reason": "not enough recent transcript to ask about",
-        })));
+            "asked": session.asked(),
+            "last_suggestion_ms": session.last_suggestion_ms(),
+        });
+        // No `reason` for the cooldown: a client shows `reason` in place of its "listening"
+        // line, and swapping that sentence on every other poll is exactly the restlessness the
+        // cooldown exists to prevent. It is still reported, for anyone diagnosing a quiet panel.
+        if session.cooling_down(now_ms) {
+            declined["cooling_down"] = true.into();
+        } else {
+            declined["reason"] = "not enough recent transcript to ask about".into();
+        }
+        return Ok(Json(declined));
     }
 
-    let window = session.window_text(&utterances, now_ms);
-    let questions = suggest_questions(&*state.ai(), &window, now_ms).await?;
+    let window = session.window(&utterances, now_ms);
+    let suggested = suggest_questions(&*state.ai(), window).await?;
+    let questions = session.accept(suggested, now_ms);
 
     Ok(Json(serde_json::json!({
         "questions": questions,
         "window_ms": session.config().window_ms,
+        "asked": session.asked(),
+        "last_suggestion_ms": session.last_suggestion_ms(),
     })))
 }
 
@@ -1759,7 +1791,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 // Whether a key is available, from the keychain or the environment. The key
                 // itself is never sent — only the fact that there is one, which is what the
                 // UI needs to tell "add a key" apart from "ready to use".
-                "has_key": !kind.requires_api_key() || crate::state::api_key_for(*kind).is_some(),
+                "has_key": !kind.requires_api_key() || crate::state::has_api_key(*kind),
             })
         })
         .collect();
@@ -1771,7 +1803,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
             // it the only way to name what is running is to guess from `is_local`, which
             // matches several entries and picks the wrong one.
             "kind": state.ai().kind().as_str(),
-            "model": state.ai().model_id(),
+            "model": state.ai().resolved_model_id().await,
             "is_local": state.ai().is_local(),
         },
     })))
@@ -2009,15 +2041,18 @@ async fn request_permission(
 
 /// What a refusal means, when "you declined this" is not the whole story.
 ///
-/// Screen recording has a failure that looks identical to a decline and is not one: macOS will
-/// not add an app to the Screen & System Audio Recording list unless it carries a distributable
-/// signature. `CGRequestScreenCaptureAccess` then returns false immediately, no dialog appears,
-/// and nothing is written to TCC — so "grant it in System Settings" points at a list the app is
-/// missing from, with no way to put it there.
+/// A screen-recording request is answered `false` straight away even when it worked — the alert
+/// that sends the user to System Settings arrives on its own, and the grant applies only after a
+/// relaunch. So a "denied" here is as often "not switched on yet" as a refusal, and from inside
+/// the process the two look identical.
 ///
-/// Both outcomes are covered rather than guessed between, because the two are indistinguishable
-/// from inside the process. Telling the user what to look for lets them tell the difference in
-/// one glance, which is more use than a confident wrong diagnosis.
+/// Both outcomes are covered rather than guessed between. And if Notewise is missing from the list
+/// altogether, the pane's own + button adds it: any application can be added there by hand.
+///
+/// The case that reads as "it will never work" is a switch that is already on. macOS keeps the
+/// grant against the designated requirement of the build that was granted, and a build signed
+/// differently fails to match it — tccd denies without a dialog, and the switch still shows on.
+/// Removing the entry and adding the app again is what clears it.
 #[cfg(feature = "record")]
 fn denial_detail(kind: CaptureKindArg) -> Option<String> {
     if !matches!(kind, CaptureKindArg::SystemAudio) || !cfg!(target_os = "macos") {
@@ -2025,9 +2060,11 @@ fn denial_detail(kind: CaptureKindArg) -> Option<String> {
     }
 
     Some(
-        "Look under Privacy & Security → Screen & System Audio Recording. If Notewise is \
-         listed, switch it on and press Re-check. If it is not listed, macOS refused to \
-         register this build — that needs a signed release build, and no setting will add it."
+        "Look under Privacy & Security → Screen & System Audio Recording, and switch Notewise \
+         on — or add it with the + button if it is missing. If it is already on, the switch \
+         belongs to a differently signed build: remove Notewise with −, add it again with +, \
+         and switch it on. Then quit and reopen Notewise and press Re-check — macOS only \
+         applies this at launch."
             .into(),
     )
 }
@@ -2083,8 +2120,22 @@ impl CaptureKindArg {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread was about to ask the OS for a permission.
+    ///
+    /// Lets a test prove a request did not prompt on any machine — including one where the
+    /// permission is already granted, so the status alone could not show it.
+    static PROMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Report one capability. `prompt` opens a device and may raise an OS dialog.
 fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::PermissionReadiness {
+    #[cfg(test)]
+    if prompt {
+        PROMPTS.with(|count| count.set(count.get() + 1));
+    }
+
     #[cfg(feature = "record")]
     {
         use notewise_audio_capture::{CaptureKind, PermissionStatus};
@@ -2298,6 +2349,14 @@ async fn create_note(
     Json(body): Json<CreateNote>,
 ) -> ApiResult<Json<Note>> {
     let db = state.db().await;
+
+    // Checked before anything is written. The edge table has no foreign keys, so an unknown id
+    // was stored as a link to nothing — and that meeting id then listed the note as one of its
+    // own, while the caller was told the note had been filed against a meeting.
+    if let Some(meeting_id) = body.references_meeting {
+        MeetingRepository::new(&db).get(meeting_id)?;
+    }
+
     let note = NoteRepository::new(&db).create(NewNote {
         project_id: body.project_id,
         title: body.title,
@@ -2319,9 +2378,39 @@ async fn create_note(
     Ok(Json(note))
 }
 
-async fn list_tickets(State(state): State<Shared>) -> ApiResult<Json<Vec<Ticket>>> {
+#[derive(Debug, Default, Deserialize)]
+struct TicketListQuery {
+    /// `open` (the default: todo and in progress) or `all`.
+    ///
+    /// The default stays `open` so existing callers keep their meaning. A board with a Done column
+    /// asks for `all`; on `open` alone, a ticket moved to Done vanished on the next load.
+    #[serde(default)]
+    status: Option<String>,
+}
+
+async fn list_tickets(
+    State(state): State<Shared>,
+    Query(query): Query<TicketListQuery>,
+) -> ApiResult<Json<Vec<Ticket>>> {
+    // Refused rather than ignored: a typo answered with the open list looks exactly like a
+    // board whose done tickets were lost.
+    let all = match query.status.as_deref() {
+        None | Some("open") => false,
+        Some("all") => true,
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "unknown ticket filter '{other}'; expected open or all"
+            )))
+        }
+    };
+
     let db = state.db().await;
-    Ok(Json(TicketRepository::new(&db).list_open()?))
+    let repo = TicketRepository::new(&db);
+    Ok(Json(if all {
+        repo.list_all()?
+    } else {
+        repo.list_open()?
+    }))
 }
 
 // ---------------------------------------------------------------- search
@@ -2863,6 +2952,88 @@ mod tests {
         assert_eq!(summaries[0]["via"], "derived_from");
     }
 
+    /// Extracts one action item with a deadline, the way every real model does.
+    #[derive(Debug)]
+    struct WithDeadline;
+
+    #[async_trait::async_trait]
+    impl AiBackend for WithDeadline {
+        fn model_id(&self) -> &str {
+            "with-deadline"
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+        async fn summarize(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<notewise_ai_router::SummaryOutput> {
+            Ok(notewise_ai_router::SummaryOutput {
+                text: "We agreed to ship.".into(),
+                model: "with-deadline".into(),
+            })
+        }
+        async fn extract_decisions(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedDecision>> {
+            Ok(Vec::new())
+        }
+        async fn extract_action_items(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedActionItem>> {
+            Ok(vec![notewise_ai_router::ExtractedActionItem {
+                text: "Write the migration plan".into(),
+                owner: Some("Sam".into()),
+                due_hint: Some("by Friday".into()),
+            }])
+        }
+        async fn chat(
+            &self,
+            _: &ChatRequest,
+        ) -> notewise_ai_router::Result<notewise_ai_router::ChatResponse> {
+            Err(notewise_ai_router::AiError::InvalidRequest("unused".into()))
+        }
+    }
+
+    /// The deadline was extracted and then dropped on the way to storage, so every action item
+    /// came out of a summary with no date at all.
+    #[tokio::test]
+    async fn an_extracted_deadline_survives_into_the_stored_action_item() {
+        let app = router(Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::with_backend(Box::new(WithDeadline)),
+        )));
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "Sam: I'll write the plan by Friday.", "start_ms": 0, "end_ms": 3000}]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/summarize"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, summary) = call(&app, get(&format!("/v1/meetings/{id}/summary"))).await;
+        let item = &summary["summary"]["action_items"][0];
+        assert_eq!(
+            item["text"], "Write the migration plan (due by Friday)",
+            "{summary}"
+        );
+        assert_eq!(item["owner"], "Sam");
+    }
+
     #[tokio::test]
     async fn a_note_referencing_a_meeting_becomes_reachable_from_it() {
         let app = app();
@@ -3173,6 +3344,80 @@ mod tests {
         );
     }
 
+    /// The cooldown only exists if the client's state survives between requests.
+    ///
+    /// Every request used to build a fresh session, so the desktop app — polling every thirty
+    /// seconds and trusting the engine to gate — made a model call on every poll. The state now
+    /// comes back in each response and goes out with the next request, and while it is inside
+    /// the cooldown no model is asked.
+    #[tokio::test]
+    async fn the_cooldown_holds_when_the_client_carries_its_session() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{
+                    "text": "Someone needs to pull the usage report from the admin console and \
+                             send it to their account manager before the contract renews at \
+                             the end of November, or we lose the leverage we have on the seat \
+                             count this year.",
+                    "start_ms": 0, "end_ms": 20000, "speaker": "Marcus"
+                }]),
+            ),
+        )
+        .await;
+
+        let (_, first) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert!(first.get("reason").is_none(), "should have run: {first}");
+        assert_eq!(first["last_suggestion_ms"], 20000, "{first}");
+        assert!(first["asked"].is_array(), "{first}");
+
+        // Thirty seconds later, carrying the session back as the app does.
+        let (status, second) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({
+                    "now_ms": 50000,
+                    "asked": first["asked"],
+                    "last_suggestion_ms": first["last_suggestion_ms"],
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(second["cooling_down"], true, "{second}");
+        assert!(second["questions"].as_array().unwrap().is_empty());
+        // Quiet, not refused: a client shows `reason` in place of its "listening" line.
+        assert!(second.get("reason").is_none(), "{second}");
+        assert_eq!(second["last_suggestion_ms"], 20000, "the state round-trips");
+
+        // Past the cooldown, it runs again.
+        let (_, third) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({
+                    "now_ms": 115000,
+                    "asked": second["asked"],
+                    "last_suggestion_ms": second["last_suggestion_ms"],
+                }),
+            ),
+        )
+        .await;
+        assert!(third.get("cooling_down").is_none(), "{third}");
+        assert_eq!(third["last_suggestion_ms"], 115000, "{third}");
+    }
+
     #[tokio::test]
     async fn questions_for_an_unknown_meeting_are_404() {
         let (status, _) = call(
@@ -3443,6 +3688,24 @@ mod tests {
             Some("llama3.1:8b"),
             "the exact model tag must be written down, not just the provider"
         );
+        drop(db);
+
+        // Choosing the provider alone — the top bar's "Ollama" — names no model. What the router
+        // reports then is the backend's default *guess*, and stored it would come back on the next
+        // launch as a choice that is never substituted, failing every feature on a machine that
+        // does not hold that exact tag. So the stored model goes rather than being replaced by it.
+        state
+            .switch_backend(BackendKind::Ollama, None, None)
+            .await
+            .expect("switch");
+        let db = state.db().await;
+        assert_eq!(
+            SettingsRepository::new(&db)
+                .get(crate::state::BACKEND_MODEL_KEY)
+                .unwrap(),
+            None,
+            "a default guess must not be remembered as the user's model"
+        );
     }
 
     /// The mock backend answers every request with fixed text. Offering it in a menu means a
@@ -3525,6 +3788,95 @@ mod tests {
         let (status, json) = call(&app(), get("/v1/tickets")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    /// A reference to a project that does not exist is the request's fault. It reached the client
+    /// as a 500 `storage_error` carrying SQLite's "FOREIGN KEY constraint failed".
+    #[tokio::test]
+    async fn an_unknown_project_is_a_client_error_not_a_500() {
+        let app = app();
+        let unknown = Id::new();
+
+        for (uri, body) in [
+            (
+                "/v1/notes",
+                serde_json::json!({"title": "n", "project_id": unknown}),
+            ),
+            (
+                "/v1/meetings",
+                serde_json::json!({"title": "m", "project_id": unknown}),
+            ),
+            (
+                "/v1/tickets",
+                serde_json::json!({"title": "t", "project_id": unknown.to_string()}),
+            ),
+        ] {
+            let (status, json) = call(&app, post(uri, body)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}: {json}");
+            assert_eq!(json["code"], "invalid_reference", "{uri}: {json}");
+        }
+    }
+
+    /// A note filed against a meeting that does not exist was created anyway, with its link stored
+    /// pointing nowhere — and `GET /v1/meetings/<that id>/notes` then listed it.
+    #[tokio::test]
+    async fn a_note_referencing_an_unknown_meeting_is_a_404_and_not_created() {
+        let app = app();
+        let unknown = Id::new();
+
+        let (status, json) = call(
+            &app,
+            post(
+                "/v1/notes",
+                serde_json::json!({"title": "orphan", "references_meeting": unknown}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+
+        let (_, notes) = call(&app, get("/v1/notes")).await;
+        assert!(notes.as_array().unwrap().is_empty(), "{notes}");
+        let (_, linked) = call(&app, get(&format!("/v1/meetings/{unknown}/notes"))).await;
+        assert!(linked.as_array().unwrap().is_empty(), "{linked}");
+    }
+
+    /// A board with a Done column must get its done tickets back after a reload. The bare call
+    /// keeps meaning "open" for the clients that already rely on it.
+    #[tokio::test]
+    async fn a_done_ticket_is_listed_when_all_are_asked_for() {
+        let app = app();
+        let (status, created) = call(
+            &app,
+            post("/v1/tickets", serde_json::json!({"title": "Ship it"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let id = created["id"].as_str().unwrap().to_string();
+
+        let patch = Request::builder()
+            .method("PATCH")
+            .uri(format!("/v1/tickets/{id}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"status":"done"}"#))
+            .unwrap();
+        let (status, json) = call(&app, patch).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, open) = call(&app, get("/v1/tickets")).await;
+        assert!(open.as_array().unwrap().is_empty(), "{open}");
+
+        let (status, all) = call(&app, get("/v1/tickets?status=all")).await;
+        assert_eq!(status, StatusCode::OK, "{all}");
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0]["status"], "done");
+
+        let (status, _) = call(&app, get("/v1/tickets?status=finished")).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a typo must not silently answer with the open list"
+        );
     }
 
     // ------------------------------------------------------------------ recording
@@ -3800,6 +4152,26 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{approved}");
         assert_eq!(approved["status"], "approved");
+
+        // A second approval conflicts with the draft's state. It was a 422 `invalid_state`
+        // reading "invalid stored value in column 'email_drafts.status'" — a damaged database, to
+        // anyone reading it.
+        let (status, again) = json(
+            &app,
+            Request::post(format!("/v1/emails/{draft_id}/approve"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{again}");
+        assert_eq!(again["code"], "refused", "{again}");
+        assert!(
+            !again["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid stored value"),
+            "{again}"
+        );
 
         let (status, discarded) = json(
             &app,
@@ -4134,8 +4506,9 @@ mod tests {
         );
         assert_eq!(body["steps"]["model"]["required"], true);
 
-        // System audio has no working backend on any current build, so it must be excluded
-        // from the gate rather than left permanently blocking.
+        // A test binary is not an app bundle, and without the capture feature there is no backend
+        // at all — either way system audio cannot be granted here, so it must be excluded from the
+        // gate rather than left permanently blocking.
         assert_eq!(
             body["steps"]["permissions"]["system_audio"]["status"],
             "unavailable"
@@ -4148,10 +4521,26 @@ mod tests {
     }
 
     /// A GET must never raise a TCC dialog. The only defence in code is that the handler calls
-    /// the non-prompting probe, so pin the status that produces.
+    /// the non-prompting probe.
+    ///
+    /// This used to require the status to be `not_requested` or `unavailable`, which holds only
+    /// on a machine where nothing was ever decided. A test process launched from a terminal or an
+    /// editor inherits that app's microphone grant, honestly reports `granted`, and failed — while
+    /// a granted permission is exactly the case in which nothing can prompt. So it checks the
+    /// property itself, two ways: the handler never took the prompting path (on every machine),
+    /// and what it reported is what the non-prompting probe says (a prompt answered, or denied
+    /// headlessly as on CI, would have moved it).
     #[tokio::test]
     async fn setup_does_not_prompt_for_permissions() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // `#[tokio::test]` runs the handler on this thread, so its counter is this thread's.
+        let prompts_before = PROMPTS.with(std::cell::Cell::get);
+        let undisturbed = permission_readiness(CaptureKindArg::Microphone, false).status;
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "the probe this test compares against must itself be the non-prompting one"
+        );
 
         let (_, body) = json(
             &app_with_model_dir(dir.path()),
@@ -4159,12 +4548,17 @@ mod tests {
         )
         .await;
 
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "GET /v1/setup took the path that asks the OS for a permission"
+        );
         let status = body["steps"]["permissions"]["microphone"]["status"]
             .as_str()
             .unwrap();
-        assert!(
-            status == "not_requested" || status == "unavailable",
-            "a GET must not have asked the OS anything, got {status}"
+        assert_eq!(
+            status, undisturbed,
+            "a GET must report the permission as it found it, not as a prompt left it"
         );
     }
 

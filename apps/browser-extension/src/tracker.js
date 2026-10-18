@@ -48,6 +48,23 @@ export const INTERVAL_MS = 250;
 export const MIN_TURN_MS = 600;
 
 /**
+ * How far into the recording `now` is, for `SpeakerTracker`'s `startOffsetMs`.
+ *
+ * `startedAt` is the engine's timestamp for the recording's start. The page and the engine run on
+ * one machine and share its wall clock, so the difference is the offset this file's header says is
+ * unrecoverable afterwards. Zero when the timestamp is missing or unreadable — the old behaviour —
+ * and never negative: a clock adjusted backwards must not place a turn before the recording began.
+ *
+ * @param {string | null | undefined} startedAt an RFC 3339 timestamp
+ * @param {number} nowMs wall-clock milliseconds
+ */
+export function elapsedSince(startedAt, nowMs = Date.now()) {
+  const at = typeof startedAt === "string" ? Date.parse(startedAt) : Number.NaN;
+  if (!Number.isFinite(at)) return 0;
+  return Math.max(0, nowMs - at);
+}
+
+/**
  * Accumulates speaker turns from repeated observations of a meeting page.
  */
 export class SpeakerTracker {

@@ -8,11 +8,20 @@ set -euo pipefail
 MODEL="${1:-base.en}"
 BASE_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
-case "$(uname -s)" in
-  Darwin) DEFAULT_DIR="$HOME/Library/Application Support/notewise/models" ;;
-  Linux)  DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/notewise/models" ;;
-  *)      DEFAULT_DIR="$HOME/.notewise/models" ;;
-esac
+# The same order the engine resolves it in (`notewise_storage::data_dir`, then `models/`):
+# NOTEWISE_MODEL_DIR, then NOTEWISE_DATA_DIR, then the platform's data directory. A model
+# prefetched anywhere else is a model the engine downloads again — and CI, which this exists
+# for, is exactly where NOTEWISE_DATA_DIR tends to be set.
+if [ -n "${NOTEWISE_DATA_DIR:-}" ]; then
+  DEFAULT_DIR="$NOTEWISE_DATA_DIR/models"
+else
+  case "$(uname -s)" in
+    Darwin) DEFAULT_DIR="$HOME/Library/Application Support/notewise/models" ;;
+    Linux)  DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/notewise/models" ;;
+    # Git Bash, MSYS and Cygwin on Windows, where the engine uses %APPDATA%.
+    *)      DEFAULT_DIR="${APPDATA:-$HOME/AppData/Roaming}/notewise/models" ;;
+  esac
+fi
 DIR="${NOTEWISE_MODEL_DIR:-$DEFAULT_DIR}"
 
 mkdir -p "$DIR"

@@ -249,7 +249,7 @@ pub fn screen_context() -> Result<ScreenContext> {
     // guess about pixels. Reading the screen when the real text was already in hand would be a
     // slower, worse answer and a capture the user did not need to consent to.
     //
-    // A failure here is not a failure of `screen_context`: on any unsigned build the capture is
+    // A failure here is not a failure of `screen_context`: without the grant the capture is
     // impossible, and that must not turn a perfectly good window title into an error.
     if context.selection.is_none() && context.focused_text.is_none() {
         match recognise_text_on_screen() {
@@ -269,12 +269,12 @@ pub fn screen_context() -> Result<ScreenContext> {
 /// are reported separately rather than collapsed into "unavailable".
 pub fn recognise_text_on_screen() -> Result<String> {
     let bitmap = vision::capture_screen().map_err(|refusal| match refusal {
-        // No switch in System Settings helps a build with no signature, so it must not be told to
-        // go looking for one. This is the case every development build is in.
+        // No switch in System Settings is labelled with a loose binary's name, so it must not be
+        // told to go looking for one. This is the case every `cargo run` is in.
         ScreenCaptureRefusal::BuildCannotHoldGrant => OsInputError::Unsupported {
             what: "Reading text from the screen".to_string(),
-            reason: "this build has no Developer ID signature, and macOS will not grant screen \
-                     recording to one — the same wall system audio hits"
+            reason: "this is running as a loose binary rather than as an application, and macOS \
+                     grants screen recording to applications — run it from Notewise.app"
                 .to_string(),
         },
         ScreenCaptureRefusal::GrantMissing => OsInputError::PermissionRequired {
@@ -317,10 +317,10 @@ mod tests {
         }
     }
 
-    /// On an unsigned build the refusal is about the signature, not about a switch — because no
-    /// switch helps. Every development build is in this case, so this runs.
+    /// Outside an app bundle the refusal is about how it is running, not about a switch — because
+    /// no switch helps. Every test binary is in this case, so this runs.
     #[test]
-    fn an_unsigned_build_is_told_about_the_signature_and_not_sent_to_settings() {
+    fn a_loose_binary_is_told_why_and_not_sent_to_settings() {
         if notewise_macos_permissions::can_hold_screen_recording() {
             return;
         }
@@ -332,16 +332,16 @@ mod tests {
         );
 
         let rendered = error.to_string();
-        assert!(rendered.contains("Developer ID"), "{rendered}");
+        assert!(rendered.contains("loose binary"), "{rendered}");
         assert!(
             !rendered.contains("System Settings"),
             "there is no switch that fixes this, so it must not send the user looking for one"
         );
     }
 
-    /// A signed build without the grant gets the pane instead. Two failures, two fixes.
+    /// A bundled build without the grant gets the pane instead. Two failures, two fixes.
     #[test]
-    fn a_signed_build_without_the_grant_is_sent_to_the_pane() {
+    fn a_bundled_build_without_the_grant_is_sent_to_the_pane() {
         if !notewise_macos_permissions::can_hold_screen_recording()
             || notewise_macos_permissions::screen_recording_granted()
         {

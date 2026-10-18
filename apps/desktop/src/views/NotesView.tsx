@@ -3,7 +3,7 @@ import { FileText, MessageCircleQuestion, Plus, Trash2 } from "lucide-react";
 
 import { BlockEditor } from "../components/BlockEditor";
 import { NoteChat } from "../components/NoteChat";
-import { parse, serialize, type Block } from "../lib/blocks";
+import { canonical, parse, serialize, type Block } from "../lib/blocks";
 import { api, ApiError, type Note } from "../lib/api";
 import type { Route } from "../lib/router";
 
@@ -51,9 +51,28 @@ export function NotesView({ noteId, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
 
-  /** The last content committed to the engine, so an idle timer can skip a no-op save. */
-  const persisted = useRef<{ title: string; body: string }>({ title: "", body: "" });
+  /**
+   * The last content committed to the engine, so an idle timer can skip a no-op save.
+   *
+   * Carries the note it belongs to. A save for the note being left can land after the next one has
+   * opened, and without the id it overwrote the new note's baseline with the old note's text.
+   */
+  const persisted = useRef<{ id: string | null; title: string; body: string }>({
+    id: null,
+    title: "",
+    body: "",
+  });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * What is on screen right now, for code that runs after it has been replaced.
+   *
+   * Leaving a note by address — Back, a citation, ⌘N, ⌘K — never blurs the editor, so neither the
+   * blur save nor the debounce gets to write the last few keystrokes: the effect that opens the
+   * next note, or the unmount, runs first. Both read this to save what was being typed.
+   */
+  const latest = useRef({ selectedId, title, blocks });
+  latest.current = { selectedId, title, blocks };
 
   const load = useCallback(async () => {
     try {
@@ -67,11 +86,50 @@ export function NotesView({ noteId, onNavigate }: Props) {
     }
   }, []);
 
+  const flush = useCallback(async (id: string, nextTitle: string, nextBody: string) => {
+    const base = persisted.current;
+    // Compared with the stored body as this editor would write it, not as stored: a body written
+    // anywhere else serializes differently, and treating that as an edit saved every such note
+    // the moment it was opened.
+    if (base.id === id && nextTitle === base.title && nextBody === canonical(base.body)) {
+      return;
+    }
+
+    setSave("saving");
+    try {
+      const saved = await api.updateNote(id, nextTitle || "Untitled", nextBody);
+      if (persisted.current.id === id) {
+        persisted.current = { id, title: saved.title, body: saved.body };
+      }
+      setNotes((current) => current.map((n) => (n.id === id ? saved : n)));
+      setSave("saved");
+      setError(null);
+    } catch (e) {
+      setSave("failed");
+      setError(e instanceof ApiError ? e.message : "Could not save this note.");
+    }
+  }, []);
+
+  /** Write whatever is on screen for the open note, now, if anything changed. */
+  const flushLatest = useCallback(() => {
+    const { selectedId: id, title: currentTitle, blocks: currentBlocks } = latest.current;
+    if (!id) return;
+    if (timer.current) clearTimeout(timer.current);
+    void flush(id, currentTitle, serialize(currentBlocks));
+  }, [flush]);
+
+  // Leaving the screen altogether — ⌘K, or anything else that navigates without a click in here.
+  useEffect(() => flushLatest, [flushLatest]);
+
   // Open whatever the address bar names, once the list has arrived. This is how a citation, an
   // agent's finished note, and a link from a meeting all land on the right note — and how a
   // reload stays on it.
   useEffect(() => {
     let cancelled = false;
+    // The note being left, saved before anything replaces it on screen. `open` has already done
+    // this when the switch came from the list, in which case the ids match and this does nothing.
+    if (latest.current.selectedId && latest.current.selectedId !== noteId) flushLatest();
+
     void load().then(async (loaded) => {
       if (cancelled || !noteId) return;
 
@@ -88,34 +146,13 @@ export function NotesView({ noteId, onNavigate }: Props) {
       setSelectedId(wanted.id);
       setTitle(wanted.title);
       setBlocks(parse(wanted.body));
-      persisted.current = { title: wanted.title, body: wanted.body };
+      persisted.current = { id: wanted.id, title: wanted.title, body: wanted.body };
       setSave("idle");
     });
     return () => {
       cancelled = true;
     };
-  }, [load, noteId]);
-
-  const flush = useCallback(async (id: string, nextTitle: string, nextBody: string) => {
-    if (
-      nextTitle === persisted.current.title &&
-      nextBody === persisted.current.body
-    ) {
-      return;
-    }
-
-    setSave("saving");
-    try {
-      const saved = await api.updateNote(id, nextTitle || "Untitled", nextBody);
-      persisted.current = { title: saved.title, body: saved.body };
-      setNotes((current) => current.map((n) => (n.id === id ? saved : n)));
-      setSave("saved");
-      setError(null);
-    } catch (e) {
-      setSave("failed");
-      setError(e instanceof ApiError ? e.message : "Could not save this note.");
-    }
-  }, []);
+  }, [load, noteId, flushLatest]);
 
   // Debounced autosave. Cleared on every change, so only an idle pause triggers a write.
   useEffect(() => {
@@ -141,7 +178,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
     setSelectedId(note.id);
     setTitle(note.title);
     setBlocks(parse(note.body));
-    persisted.current = { title: note.title, body: note.body };
+    persisted.current = { id: note.id, title: note.title, body: note.body };
     setSave("idle");
     // Keep the address bar honest, so reload and Back both work on a note.
     onNavigate({ name: "notes", id: note.id });
@@ -171,8 +208,10 @@ export function NotesView({ noteId, onNavigate }: Props) {
       setNotes((current) => current.filter((n) => n.id !== note.id));
       if (selectedId === note.id) {
         // The pending autosave would be rejected by the engine now, but cancelling it keeps
-        // a spurious "Not saved" off the screen.
+        // a spurious "Not saved" off the screen. `latest` is cleared for the same reason: the
+        // address change below would otherwise save the note being left, which is this one.
         if (timer.current) clearTimeout(timer.current);
+        latest.current = { ...latest.current, selectedId: null };
         setSelectedId(null);
         setTitle("");
         setBlocks(parse(""));

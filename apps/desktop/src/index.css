@@ -20,6 +20,11 @@
     --accent-on: #ffffff;
     --record: #e2382e;
     --record-hover: #c92f26;
+    /* The same three colours as channels, for Tailwind's opacity modifiers (`bg-record/10`). A
+       colour given as `var(--x)` cannot take one, so every such class compiled to nothing. */
+    --accent-rgb: 63 63 70;
+    --record-rgb: 226 56 46;
+    --warn-text-rgb: 232 200 119;
     --warn-bg: #2a2312;
     --warn-text: #e8c877;
     --warn-line: #4a3c1c;
@@ -114,6 +119,20 @@
   .btn-accent {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2
            text-[13px] font-medium text-accent-on transition-colors hover:bg-accent-hover
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* The same primary action under the name some screens use. Both names were in use and only
+     this one was defined, so "Create job" rendered as bare text. */
+  .btn-primary {
+    @apply btn-accent;
+  }
+
+  /* A borderless action inside a card or a row. Used by a dozen controls and, until now, defined
+     nowhere — they rendered with no hover, no shape and no disabled state. */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-ink-muted
+           transition-colors hover:bg-overlay hover:text-ink
            disabled:cursor-not-allowed disabled:opacity-50;
   }
 

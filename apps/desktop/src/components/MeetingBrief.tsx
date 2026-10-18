@@ -21,7 +21,18 @@ interface Props {
  * title alone would silently merge every meeting called "Sync", and the cost of a wrong merge
  * is a brief full of someone else's work.
  */
-export function MeetingBrief({ meetingId, onOpenMeeting }: Props) {
+/**
+ * Keyed on the meeting, so nothing typed or loaded for one meeting survives into the next.
+ *
+ * The intelligence panel stays mounted while the library switches meetings under it. Without the
+ * key a half-typed link stayed open on the next meeting and Enter added it there, and the last
+ * meeting's brief stayed on screen until — or, if the request failed, instead of — this one's.
+ */
+export function MeetingBrief(props: Props) {
+  return <MeetingBriefForMeeting key={props.meetingId} {...props} />;
+}
+
+function MeetingBriefForMeeting({ meetingId, onOpenMeeting }: Props) {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState(false);

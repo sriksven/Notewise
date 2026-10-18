@@ -25,9 +25,19 @@
  */
 
 import { activeMeeting, platformFor } from "./platforms.js";
-import { SpeakerTracker, INTERVAL_MS } from "./tracker.js";
-import { activeRecording, postJoinSignal, postSpeakerEvents } from "./engine.js";
+import { SpeakerTracker, INTERVAL_MS, elapsedSince } from "./tracker.js";
+import { engineViaWorker } from "./relay.js";
 import { JoinAnnouncer, RETRY_MS } from "./join.js";
+
+/*
+ * The engine, reached through the service worker rather than fetched from here. This module runs
+ * on the meeting page, where a request to loopback is the page's request and Chrome refuses it —
+ * see `relay.js`. `chrome.runtime` is read on every call, not once: after the extension is reloaded
+ * it is gone from pages that still run the old script, and that must read as "nobody listening".
+ */
+const { activeRecording, postJoinSignal, postSpeakerEvents } = engineViaWorker((message) =>
+  chrome.runtime.sendMessage(message),
+);
 
 /*
  * Loaded by `content.js` via dynamic import rather than being the content script itself: a
@@ -81,8 +91,11 @@ function stop(reason) {
   console.info(`[notewise] stopped tracking speakers: ${reason}`);
 }
 
-function start(meetingId, origin) {
-  const tracker = new SpeakerTracker();
+function start(meetingId, origin, startedAt) {
+  // On the recording's clock, not this page's: tracking starts when a poll first sees the recording,
+  // or when the tab is opened or reloaded mid-meeting, and the engine measures turns from the
+  // recording's start. Without the offset, every turn lands early by however late tracking began.
+  const tracker = new SpeakerTracker(undefined, elapsedSince(startedAt));
 
   const timer = setInterval(() => {
     if (!session) return;
@@ -128,11 +141,11 @@ async function poll() {
   const meetingId = found?.meetingId ?? null;
 
   if (meetingId && !session) {
-    start(meetingId, found.origin);
+    start(meetingId, found.origin, found.startedAt);
   } else if (session && meetingId !== session.meetingId) {
     // Either recording stopped, or a different meeting started.
     stop(meetingId ? "the recording moved to another meeting" : "the recording stopped");
-    if (meetingId) start(meetingId, found.origin);
+    if (meetingId) start(meetingId, found.origin, found.startedAt);
   }
 }
 

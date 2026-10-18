@@ -255,11 +255,22 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
 
         match id {
             b"fmt " => {
+                // Sixteen bytes is the smallest fmt chunk there is. A shorter one used to read its
+                // missing fields as zero, and a file "at 0 Hz" or with no channels went on to be
+                // cut into one-sample frames and transcribed as nothing, with no error.
+                if size < 16 || body + 16 > bytes.len() {
+                    return Err(CaptureError::BadFormat("truncated fmt chunk".into()));
+                }
                 let audio_format = u16_at(bytes, body)
                     .ok_or_else(|| CaptureError::BadFormat("truncated fmt chunk".into()))?;
                 let channels = u16_at(bytes, body + 2).unwrap_or(0);
                 let sample_rate = u32_at(bytes, body + 4).unwrap_or(0);
                 let bits = u16_at(bytes, body + 14).unwrap_or(0);
+                if channels == 0 || sample_rate == 0 {
+                    return Err(CaptureError::BadFormat(format!(
+                        "the WAV header claims {channels} channel(s) at {sample_rate} Hz"
+                    )));
+                }
 
                 // 1 = integer PCM, 3 = IEEE float, 0xFFFE = extensible (the real format is in
                 // the extension's sub-format GUID, whose first two bytes carry the same code).
@@ -662,6 +673,45 @@ mod tests {
 
         let (samples, _) = decode_wav(&out).expect("extensible wav");
         assert!((samples[0] - 1.0).abs() < 1e-3);
+    }
+
+    /// A header claiming no channels or no sample rate is a broken file, and must be refused rather
+    /// than decoded into one-sample frames that transcribe as nothing.
+    #[test]
+    fn a_header_with_no_rate_or_no_channels_is_refused() {
+        let mut no_rate = wav(&[0.1; 16], 1, 16_000);
+        no_rate[24..28].copy_from_slice(&0u32.to_le_bytes());
+        let mut no_channels = wav(&[0.1; 16], 1, 16_000);
+        no_channels[22..24].copy_from_slice(&0u16.to_le_bytes());
+
+        for (label, bytes) in [("no rate", no_rate), ("no channels", no_channels)] {
+            let error = decode_wav(&bytes).expect_err(label);
+            assert!(
+                matches!(error, CaptureError::BadFormat(_)),
+                "{label}: {error}"
+            );
+        }
+    }
+
+    /// A fmt chunk cut short is truncated, not a format with zeroes in it.
+    #[test]
+    fn a_truncated_fmt_chunk_is_refused() {
+        let mut bytes = Vec::new();
+        bytes.extend(b"RIFF");
+        bytes.extend(36u32.to_le_bytes());
+        bytes.extend(b"WAVE");
+        bytes.extend(b"fmt ");
+        bytes.extend(10u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes()); // PCM
+        bytes.extend(1u16.to_le_bytes()); // mono
+        bytes.extend(16_000u32.to_le_bytes());
+        bytes.extend([0u8; 2]);
+        bytes.extend(b"data");
+        bytes.extend(4u32.to_le_bytes());
+        bytes.extend([0u8; 12]);
+
+        let error = decode_wav(&bytes).expect_err("truncated");
+        assert!(error.to_string().contains("truncated fmt"), "{error}");
     }
 
     /// An encoding that genuinely is not supported must say which, and what is.

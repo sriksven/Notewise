@@ -73,7 +73,7 @@ pub fn install(app: &AppHandle, engine: SocketAddr, hotkeys: &[(String, String)]
                     "dictation" => toggle(engine, &listening),
                     "overlay" => {
                         let handle = app.clone();
-                        let _ = app.run_on_main_thread(move || show_overlay(&handle, engine));
+                        let _ = app.run_on_main_thread(move || toggle_overlay(&handle, engine));
                     }
                     other => tracing::debug!(other, "a hotkey nothing is listening for"),
                 }
@@ -83,21 +83,37 @@ pub fn install(app: &AppHandle, engine: SocketAddr, hotkeys: &[(String, String)]
         .unwrap_or_else(|e| tracing::warn!(error = %e, "could not start the hotkey thread"));
 }
 
-/// Show the assistant panel, building it the first time.
+/// Open the assistant panel, or close it when it is the window in front.
 ///
-/// Built lazily rather than at launch: the window reads the focused application when it opens, and
-/// one created at startup and hidden would have to be told to re-read. Kept afterwards rather than
-/// destroyed, because rebuilding a webview on every press is a visible delay on the thing a user
-/// presses most.
+/// Built when it opens rather than at launch: the window reads the focused application when it
+/// opens, and one created at startup and hidden would have to be told to re-read.
+///
+/// # Why the hotkey closes it
+///
+/// Nothing else could. The panel has no title bar (`decorations(false)`) and floats above every
+/// other window, and the page inside it cannot close it: it is an external URL with no Tauri IPC, and
+/// on macOS the webview ignores `window.close()`. Pressing the key again only brought it forward, so
+/// once opened it stayed over everything until the user found Close Window in a menu or quit — and
+/// a comment here said Escape closed it, which nothing implemented.
+///
+/// Closed rather than hidden: a hidden panel would come back showing the selection it read the last
+/// time, and the page reads its context only when it loads.
 ///
 /// Must run on the main thread. Window creation on macOS is main-thread-only, and Tauri will panic
 /// rather than misbehave — which is the right trade but not one to discover at runtime.
-fn show_overlay(app: &AppHandle, engine: SocketAddr) {
+fn toggle_overlay(app: &AppHandle, engine: SocketAddr) {
     const LABEL: &str = "assistant";
 
     if let Some(window) = app.get_webview_window(LABEL) {
-        // Already there: bring it forward and give it the keyboard. A panel that appears behind the
-        // window the user was looking at is a panel they will think did not open.
+        // The user is in the panel and pressed its key: they are done with it.
+        if window.is_focused().unwrap_or(false) {
+            if let Err(e) = window.close() {
+                tracing::warn!(error = %e, "could not close the assistant panel");
+            }
+            return;
+        }
+        // Open but somewhere else has the keyboard: bring it forward. A panel that appears behind
+        // the window the user was looking at is a panel they will think did not open.
         let _ = window.show();
         let _ = window.set_focus();
         return;
@@ -119,7 +135,7 @@ fn show_overlay(app: &AppHandle, engine: SocketAddr) {
         // Above whatever the user is working in, because that is the point of it.
         .always_on_top(true)
         .resizable(true)
-        // No traffic lights: this is a panel, not a document window, and Escape closes it.
+        // No traffic lights: this is a panel, not a document window. Its hotkey closes it.
         .decorations(false)
         .center()
         .focused(true)

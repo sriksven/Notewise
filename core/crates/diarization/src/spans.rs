@@ -63,11 +63,12 @@ impl Span {
 /// Tuning for [`select_spans`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpanConfig {
-    /// Gaps up to this long do not break a run.
+    /// Gaps up to this long do not break a run — when merging is needed at all.
     ///
     /// Above a within-sentence breath, below a hand-off: the same reasoning as a turn
     /// threshold, but used only to decide what audio to embed together, never to decide who
-    /// was speaking.
+    /// was speaking. Two spans that are each long enough to embed are never merged, however
+    /// close: see [`select_spans`].
     pub merge_gap_ms: i64,
 
     /// A span shorter than this is not embedded.
@@ -94,6 +95,16 @@ impl Default for SpanConfig {
 /// Merge segment timings into spans worth embedding.
 ///
 /// Input need not be sorted. Output is in chronological order per channel.
+///
+/// # Merging is only for audio too short to embed
+///
+/// Close spans merge when at least one of them is shorter than
+/// [`SpanConfig::min_span_ms`] — a breath-split phrase put back together — or when they overlap.
+/// Two spans long enough to stand alone are kept apart however small the gap, because nothing
+/// here knows whether the same person said both. Transcription segments abut by construction —
+/// Whisper's tile a buffer, and buffers tile the recording — so merging every close pair joined
+/// the whole of a conversation into one run, which was then clipped to its middle ten seconds
+/// and embedded once: two speakers alternating every five seconds came back as one speaker.
 pub fn select_spans(segments: &[Span], config: &SpanConfig) -> Vec<Span> {
     let mut sorted: Vec<Span> = segments
         .iter()
@@ -107,7 +118,10 @@ pub fn select_spans(segments: &[Span], config: &SpanConfig) -> Vec<Span> {
         match runs.last_mut() {
             Some(run)
                 if run.channel == span.channel
-                    && span.start_ms - run.end_ms <= config.merge_gap_ms =>
+                    && span.start_ms - run.end_ms <= config.merge_gap_ms
+                    && (span.start_ms < run.end_ms
+                        || run.duration_ms() < config.min_span_ms
+                        || span.duration_ms() < config.min_span_ms) =>
             {
                 run.end_ms = run.end_ms.max(span.end_ms);
             }
@@ -201,6 +215,36 @@ mod tests {
 
         assert_eq!(spans.len(), 1);
         assert_eq!((spans[0].start_ms, spans[0].end_ms), (0, 3_100));
+    }
+
+    /// The defect: abutting segments, each long enough to embed, were merged into one run — and a
+    /// conversation of such segments became one clipped embedding and one speaker.
+    #[test]
+    fn spans_long_enough_to_embed_are_never_merged_however_close() {
+        let spans = select_spans(
+            &[span(0, 5_000), span(5_000, 10_000), span(10_000, 15_000)],
+            &SpanConfig::default(),
+        );
+
+        assert_eq!(
+            spans
+                .iter()
+                .map(|s| (s.start_ms, s.end_ms))
+                .collect::<Vec<_>>(),
+            vec![(0, 5_000), (5_000, 10_000), (10_000, 15_000)],
+            "three turns, three embeddings"
+        );
+    }
+
+    /// A fragment too short to embed still joins its neighbour, which is what merging is for.
+    #[test]
+    fn a_fragment_too_short_to_embed_joins_its_neighbour() {
+        let spans = select_spans(
+            &[span(0, 3_000), span(3_200, 3_700)],
+            &SpanConfig::default(),
+        );
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].start_ms, spans[0].end_ms), (0, 3_700));
     }
 
     #[test]

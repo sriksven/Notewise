@@ -240,11 +240,30 @@ fn find_boundary(chars: &[char], floor: usize, ceiling: usize) -> Option<usize> 
     sentence
 }
 
+/// The text embedded for an entity: its title, then its content.
+///
+/// One definition, because retrieval checks a stored chunk against it — a chunk that no longer
+/// occurs in what this produces today was cut from an older version of the entity.
+pub(crate) fn indexed_body(kind: &str, title: &str, text: &str) -> String {
+    match kind {
+        "meeting" => format!("Meeting: {title}\n\n{text}"),
+        _ => format!("{title}\n\n{text}"),
+    }
+}
+
 /// Everything that needs embedding, skipping what is already current.
 ///
-/// Staleness is `entity.updated_at > newest stored chunk`. A meeting has no `updated_at`, so
-/// its end time stands in — a meeting that has ended does not change again, and one still
-/// running is re-indexed on the next pass, which is what should happen.
+/// Staleness is `entity.updated_at > newest stored chunk`.
+///
+/// For a meeting that clock is the later of `updated_at` and its end. It used to be the end
+/// alone, on the stated grounds that a meeting has no `updated_at` and does not change once it
+/// is over — neither is true. Its title is renamed after the fact (and the title is in every
+/// chunk), and its `updated_at` moves when it is. A meeting still running keeps the time it
+/// started, so it is embedded once mid-recording and again when it ends.
+///
+/// Edits *inside* a transcript — a corrected line, a renamed speaker — do not move
+/// `updated_at` today, so they are not seen here. Retrieval refuses a chunk that no longer
+/// matches its meeting, which keeps answers right in the meantime; see `retrieval::assemble`.
 pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<Vec<Pending>> {
     let embeddings = EmbeddingRepository::new(db);
     let indexed = embeddings.indexed_entities(model)?;
@@ -264,7 +283,9 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
     // Its existing vectors are dropped when it is trashed — see the delete handler.
     let meetings = MeetingRepository::new(db);
     for meeting in meetings.list_recent(u32::MAX)? {
-        let updated = meeting.ended_at.unwrap_or(meeting.started_at);
+        let updated = meeting
+            .updated_at
+            .max(meeting.ended_at.unwrap_or(meeting.started_at));
         if is_current("meeting", meeting.id, updated) {
             continue;
         }
@@ -272,7 +293,7 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
         // Speaker labels are kept in the chunk text. "Dana: we agreed to ship Friday" and
         // "we agreed to ship Friday" retrieve differently for a question about what Dana said.
         let transcript = meetings.transcript_text(meeting.id)?;
-        let body = format!("Meeting: {}\n\n{transcript}", meeting.title);
+        let body = indexed_body("meeting", &meeting.title, &transcript);
         let chunks = chunk_text(&body);
         if !chunks.is_empty() {
             pending.push(Pending {
@@ -290,7 +311,7 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
         if is_current("note", note.id, note.updated_at) {
             continue;
         }
-        let chunks = chunk_text(&format!("{}\n\n{}", note.title, note.body));
+        let chunks = chunk_text(&indexed_body("note", &note.title, &note.body));
         if !chunks.is_empty() {
             pending.push(Pending {
                 entity_kind: "note",
@@ -306,10 +327,10 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
         // so they are re-embedded whenever the pass runs and they are short enough for that
         // to be cheap.
         let now = Utc::now();
-        let body = format!(
-            "{}\n\n{}",
-            ticket.title,
-            ticket.description.unwrap_or_default()
+        let body = indexed_body(
+            "ticket",
+            &ticket.title,
+            &ticket.description.unwrap_or_default(),
         );
         let chunks = chunk_text(&body);
         if !chunks.is_empty() && !is_current("ticket", ticket.id, now - chrono::Duration::days(1)) {
@@ -854,6 +875,52 @@ mod tests {
 
         let pending = collect_pending(&db, "m").unwrap();
         assert!(!pending.iter().any(|p| p.entity_id == note.id));
+    }
+
+    /// The title is in every chunk, and a meeting is renamed after it ends. Its staleness used
+    /// to be read from its end time alone, so a renamed meeting was never re-embedded.
+    #[test]
+    fn a_renamed_meeting_becomes_pending_again() {
+        let db = db();
+        let id = seed_meeting(&db, "Sync", "we settled on three tiers");
+        let repo = MeetingRepository::new(&db);
+        repo.end(id, Utc::now()).expect("end");
+
+        let pending = collect_pending(&db, "m").unwrap();
+        let entry = pending.iter().find(|p| p.entity_id == id).expect("pending");
+        EmbeddingRepository::new(&db)
+            .replace_for_entity(
+                "meeting",
+                id,
+                "m",
+                vec![NewEmbedding {
+                    entity_kind: "meeting".into(),
+                    entity_id: id,
+                    chunk_index: 0,
+                    text: entry.chunks[0].text.clone(),
+                    vector: vec![1.0, 0.0],
+                    model: "m".into(),
+                    source_updated_at: entry.updated_at,
+                }],
+            )
+            .unwrap();
+        assert!(
+            !collect_pending(&db, "m")
+                .unwrap()
+                .iter()
+                .any(|p| p.entity_id == id),
+            "current once embedded"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        repo.set_title(id, "Pricing review").expect("rename");
+
+        let pending = collect_pending(&db, "m").unwrap();
+        let again = pending
+            .iter()
+            .find(|p| p.entity_id == id)
+            .expect("a renamed meeting must be re-embedded");
+        assert!(again.chunks[0].text.contains("Pricing review"));
     }
 
     #[test]

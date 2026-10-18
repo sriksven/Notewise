@@ -16,6 +16,10 @@
     "http://127.0.0.1:47829/*",
     "http://127.0.0.1:47830/*"
   ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -37,7 +41,7 @@
         "src/session.js",
         "src/platforms.js",
         "src/tracker.js",
-        "src/engine.js",
+        "src/relay.js",
         "src/join.js"
       ],
       "matches": [
@@ -50,8 +54,9 @@
   ],
   "_comments": {
     "permissions": "Empty on purpose. This extension reads the participant roster of a page the user is already on and posts to loopback. It needs no tabCapture, no storage, no scripting, and no activeTab \u2014 see README.md.",
-    "host_permissions": "Loopback only, and ten ports. The engine takes the first free one in that window because a `notewise serve` may already hold the first; a Manifest V3 list is static and cannot name a port chosen at runtime. Verified as Notewise via /health before anything is sent, so a name is never posted to unrelated software that happens to be listening.",
+    "host_permissions": "Loopback only, and ten ports. The engine takes the first free one in that window because a `notewise serve` may already hold the first; a Manifest V3 list is static and cannot name a port chosen at runtime. Verified as Notewise via /health before anything is sent, so a name is never posted to unrelated software that happens to be listening. They apply to the service worker only: a content script's request is the meeting page's, and Chrome refuses a public page's request to loopback whatever the manifest says.",
+    "background": "The one place the engine is called from. Content scripts ask it by message (src/relay.js), because their own fetches are attributed to the meeting page and blocked.",
     "all_frames": "The roster is in the top frame. Injecting into subframes would duplicate every observation.",
-    "web_accessible_resources": "A Manifest V3 content script is not a module, so content.js reaches these by dynamic import. Scoped to the four meeting origins rather than <all_urls> so no other site can load them."
+    "web_accessible_resources": "A Manifest V3 content script is not a module, so content.js reaches these by dynamic import. Scoped to the four meeting origins rather than <all_urls> so no other site can load them. engine.js is not among them: only the worker loads it."
   }
 }

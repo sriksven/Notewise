@@ -177,82 +177,41 @@ pub fn request_screen_recording() -> bool {
     false
 }
 
-#[cfg(target_os = "macos")]
-mod signature {
-    use std::ffi::c_void;
-
-    type OSStatus = i32;
-
-    #[link(name = "Security", kind = "framework")]
-    extern "C" {
-        /// A handle on the running process's own code signature.
-        fn SecCodeCopySelf(flags: u32, out: *mut *const c_void) -> OSStatus;
-
-        /// Signing details as a dictionary. `kSecCSSigningInformation` is required for the
-        /// team identifier to be included.
-        fn SecCodeCopySigningInformation(
-            code: *const c_void,
-            flags: u32,
-            information: *mut *const c_void,
-        ) -> OSStatus;
-
-        static kSecCodeInfoTeamIdentifier: *const c_void;
-    }
-
-    #[link(name = "CoreFoundation", kind = "framework")]
-    extern "C" {
-        fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
-        fn CFRelease(cf: *const c_void);
-    }
-
-    /// `kSecCSSigningInformation`. Without it the dictionary omits the team identifier.
-    const SIGNING_INFORMATION: u32 = 2;
-
-    /// Whether this build carries a team identifier — the mark of a Developer ID or App Store
-    /// signature, as opposed to ad-hoc or unsigned.
-    ///
-    /// Conservative on failure: an error reading our own signature answers `true`, so a build
-    /// this cannot inspect is never told it lacks a capability it may well have.
-    pub fn has_team_identifier() -> bool {
-        // SAFETY: `SecCodeCopySelf` writes one owned reference on success, which is released
-        // below. The dictionary lookup borrows — `CFDictionaryGetValue` returns an unowned
-        // pointer — so only the two copies obtained here are released, and neither is used
-        // afterwards. All pointers are checked before use.
-        unsafe {
-            let mut code: *const c_void = std::ptr::null();
-            if SecCodeCopySelf(0, &mut code) != 0 || code.is_null() {
-                return true;
-            }
-
-            let mut info: *const c_void = std::ptr::null();
-            let status = SecCodeCopySigningInformation(code, SIGNING_INFORMATION, &mut info);
-            CFRelease(code);
-
-            if status != 0 || info.is_null() {
-                return true;
-            }
-
-            let team = CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier);
-            CFRelease(info);
-
-            !team.is_null()
-        }
-    }
-}
-
-/// Whether macOS will let this build hold a screen-recording grant at all.
+/// Whether this process can hold a screen-recording grant of its own.
 ///
-/// It will not for an ad-hoc or unsigned build. The permission is attached to a verifiable app
-/// identity, and without one `CGRequestScreenCaptureAccess` returns false immediately, raises no
-/// dialog, and writes nothing to TCC — so the app never appears in the Privacy pane, and there
-/// is no setting anywhere that adds it.
+/// Only from inside an application bundle. macOS records the grant against a bundle's identity,
+/// and a loose executable — `cargo run`, `cargo test`, the binary straight out of `target/` — has
+/// none: its request is attributed to whatever launched it, usually the terminal, so nothing it is
+/// granted is its own and no switch in System Settings is labelled with its name.
 ///
-/// This exists so the product can say that, instead of asking forever for something the build
-/// cannot obtain. The microphone is a lower bar and is unaffected: an ad-hoc build holds that
-/// grant perfectly well, which is why one of the two permissions works and the other never does.
+/// This exists so the product can say that, instead of asking forever for something the process
+/// cannot obtain.
+///
+/// # What this used to require, and why it no longer does
+///
+/// A Developer ID team identifier, on the evidence of a bundle whose request came back `false` in
+/// 25ms with no dialog. But that bundle was signed only by the linker, which signs the executable
+/// and not the bundle around it, so the team identifier was not the only thing wrong with it.
+/// Measured again on macOS 26.6 with one bundle signed three ways — linker-only, ad-hoc, and a
+/// self-signed certificate, none of them with a team identifier — tccd attributed every request to
+/// the bundle id, raised the alert for each, and wrote each into TCC. Notewise.app signed with a
+/// self-signed certificate was then entered under `identifier "dev.notewise.app" and certificate
+/// leaf = H"…"`, and could be switched on in System Settings. An immediate `false` is simply what
+/// `CGRequestScreenCaptureAccess` returns to any app not yet granted; the alert that sends the user
+/// to System Settings arrives separately.
+///
+/// What the signature does decide is whether a grant *lasts*. macOS keeps it against the
+/// designated requirement, and for an ad-hoc build that is the hash of one particular build, so
+/// the next update is a stranger. Releases are signed with a certificate so that it is not; see
+/// `.github/workflows/release.yml`.
+///
+/// Fails open: an executable path that cannot be read answers `true`, so a real release build is
+/// never told it lacks something it may well have.
 #[cfg(target_os = "macos")]
 pub fn can_hold_screen_recording() -> bool {
-    signature::has_team_identifier()
+    std::env::current_exe()
+        .map(|path| path.to_string_lossy().contains(".app/Contents/MacOS/"))
+        .unwrap_or(true)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -312,8 +271,8 @@ impl Capability {
 
     /// What to tell someone who has to grant this by hand.
     ///
-    /// Both of the new capabilities need a restart after being granted, and a feature that silently
-    /// stays broken until the next launch reads as a feature that does not work.
+    /// Everything but the microphone needs a restart after being granted, and a feature that
+    /// silently stays broken until the next launch reads as a feature that does not work.
     pub fn how_to_grant(&self) -> String {
         let base = format!(
             "Open System Settings → Privacy & Security → {} and turn on Notewise.",
@@ -321,13 +280,13 @@ impl Capability {
         );
 
         match self {
-            // Both of these are read once per process by the frameworks that enforce them, so a
-            // grant given while the app is running does not take effect until it restarts.
-            Capability::Accessibility | Capability::InputMonitoring => {
+            // Read once per process by the frameworks that enforce them, so a grant given while
+            // the app is running does not take effect until it restarts. For screen recording
+            // macOS offers "Quit & Reopen" itself; saying so here covers declining that offer.
+            Capability::Accessibility
+            | Capability::InputMonitoring
+            | Capability::ScreenRecording => {
                 format!("{base} Then quit and reopen Notewise — macOS only applies this at launch.")
-            }
-            Capability::ScreenRecording => {
-                format!("{base} This needs a signed build; a development build cannot hold it.")
             }
             Capability::Microphone => base,
         }
@@ -552,15 +511,15 @@ pub fn status(capability: Capability) -> Authorization {
 mod tests {
     use super::*;
 
-    /// A test binary is ad-hoc signed, so this is the case the product hits on every
-    /// development build: no team identifier, therefore no screen recording, therefore the
-    /// capability must be reported unavailable rather than demanded forever.
+    /// A test binary is a loose executable, which is the case the product hits under `cargo run`
+    /// too: no bundle, therefore no grant of its own, therefore the capability must be reported
+    /// unavailable rather than demanded forever.
     #[test]
     #[cfg(target_os = "macos")]
-    fn an_ad_hoc_build_cannot_hold_screen_recording() {
+    fn a_loose_binary_cannot_hold_screen_recording() {
         assert!(
             !can_hold_screen_recording(),
-            "cargo's test binary is not Developer ID signed, so this must be false"
+            "cargo's test binary is not inside an app bundle, so this must be false"
         );
     }
 
@@ -605,11 +564,11 @@ mod tests {
         }
     }
 
-    /// A build with no team identifier cannot hold screen recording, so asking is pointless — and
-    /// `Denied` would invite exactly that. This is the case every development build is in.
+    /// A process outside an app bundle cannot hold screen recording, so asking is pointless — and
+    /// `Denied` would invite exactly that. This is the case every test binary is in.
     #[test]
     #[cfg(target_os = "macos")]
-    fn an_unsignable_build_reports_screen_recording_as_unknown_rather_than_denied() {
+    fn a_loose_binary_reports_screen_recording_as_unknown_rather_than_denied() {
         assert_eq!(status(Capability::ScreenRecording), Authorization::Unknown);
     }
 
@@ -625,11 +584,15 @@ mod tests {
         );
     }
 
-    /// The two new grants only take effect at launch, and a feature that silently stays broken
-    /// until the next one reads as a feature that does not work.
+    /// These grants only take effect at launch, and a feature that silently stays broken until the
+    /// next one reads as a feature that does not work.
     #[test]
     fn the_grants_that_need_a_restart_say_so() {
-        for capability in [Capability::Accessibility, Capability::InputMonitoring] {
+        for capability in [
+            Capability::Accessibility,
+            Capability::InputMonitoring,
+            Capability::ScreenRecording,
+        ] {
             let how = capability.how_to_grant();
             assert!(how.contains("reopen"), "{capability:?}: {how}");
             assert!(how.contains(capability.label()), "{capability:?}: {how}");

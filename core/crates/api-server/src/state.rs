@@ -284,6 +284,8 @@ impl AppState {
         if let Some(key) = api_key_for(kind) {
             config = config.with_api_key(key);
         }
+        // Kept to be persisted below: only a model somebody named is a choice worth remembering.
+        let chosen = model.clone();
         if let Some(model) = model {
             config = config.with_model(model);
         }
@@ -300,15 +302,19 @@ impl AppState {
         let router =
             Arc::new(AiRouter::from_config(config)?.with_stored_routes(&rules, api_key_for));
 
-        // The default backend's model, which is what a config round-trip needs. Deliberately not
-        // a description of the policy: this value is persisted below and read back to construct a
-        // backend, so it has to name a real model.
-        let model_id = router.model_id().to_string();
         *self.ai.write().expect("ai router lock poisoned") = router;
 
         // Remember it. Without this the choice lasts until the process exits, and the engine
         // comes back on its inferred default — which is how a user who picked `llama3.1:8b`
         // gets "model 'llama3.1' not found" on the next launch, having already fixed it once.
+        //
+        // The model is remembered only when one was named. With none, the router's `model_id()`
+        // is the backend's *default guess* — `llama3.1` for Ollama, before the daemon has been
+        // asked what it holds — and persisting that made the next launch pass it to `with_model`,
+        // which treats a model as the user's choice and never substitutes it. On a machine with
+        // only, say, `mistral` pulled, every feature then failed until a model was picked by
+        // hand. Choosing a provider without a model now clears the stored one, so the next launch
+        // resolves a model the same way this one did. (Reported by the llm agent.)
         //
         // Best effort: the switch itself has succeeded and the user is using the new backend.
         // Failing the request because the preference could not be written would undo a change
@@ -316,10 +322,13 @@ impl AppState {
         {
             let db = self.db().await;
             let settings = SettingsRepository::new(&db);
-            if let Err(e) = settings
+            let saved = settings
                 .set(BACKEND_KIND_KEY, kind.as_str())
-                .and_then(|()| settings.set(BACKEND_MODEL_KEY, &model_id))
-            {
+                .and_then(|()| match chosen.as_deref().map(str::trim) {
+                    Some(model) if !model.is_empty() => settings.set(BACKEND_MODEL_KEY, model),
+                    _ => settings.delete(BACKEND_MODEL_KEY),
+                });
+            if let Err(e) = saved {
                 tracing::warn!(error = %e, "could not persist the backend choice");
             }
         }
@@ -402,12 +411,116 @@ pub(crate) fn key_entry(kind: BackendKind) -> String {
 fn keychain_key(kind: BackendKind) -> Option<String> {
     use notewise_connectors::CredentialStore;
 
-    notewise_connectors::KeychainStore::new()
+    Keychain::new()
         .get(&key_entry(kind), API_KEY_FIELD)
         .ok()
         .flatten()
         .map(|s| s.expose().to_string())
         .filter(|k| !k.trim().is_empty())
+}
+
+/// Whether a backend has a key, for a listing that only needs to say so.
+///
+/// The environment first, then [`Keychain::has`], which asks the keychain at most once per entry
+/// per process. `GET /v1/backends` is fetched by every screen that shows the model, and reading
+/// each provider's key there on every call raised a keychain prompt per provider per load in a
+/// build the stored items were not created by.
+pub(crate) fn has_api_key(kind: BackendKind) -> bool {
+    env_key(kind).is_some() || Keychain::new().has(&key_entry(kind), API_KEY_FIELD)
+}
+
+/// The credential store every handler in this crate uses.
+///
+/// The OS keychain, behind a memory of which entries exist. In this crate's own tests it is an
+/// in-process store instead: a test binary is unsigned, so reading an item the signed app saved
+/// raises a keychain prompt on a developer's machine, and a write would change their real
+/// keychain. Nothing here may be constructed as `KeychainStore` directly for that reason.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Keychain;
+
+/// Which entries are known to hold a credential: `(entry, field) -> present`.
+type Presence = std::sync::Mutex<std::collections::HashMap<(String, String), bool>>;
+
+impl Keychain {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+
+    fn store() -> &'static dyn notewise_connectors::CredentialStore {
+        #[cfg(not(test))]
+        {
+            static STORE: notewise_connectors::KeychainStore = notewise_connectors::KeychainStore;
+            &STORE
+        }
+        #[cfg(test)]
+        {
+            static STORE: std::sync::OnceLock<notewise_connectors::MemoryStore> =
+                std::sync::OnceLock::new();
+            STORE.get_or_init(notewise_connectors::MemoryStore::new)
+        }
+    }
+
+    fn presence() -> &'static Presence {
+        static PRESENCE: std::sync::OnceLock<Presence> = std::sync::OnceLock::new();
+        PRESENCE.get_or_init(Presence::default)
+    }
+
+    fn remember(entry: &str, field: &str, present: bool) {
+        // A poisoned lock only costs the memory: the next question goes to the store again.
+        if let Ok(mut known) = Self::presence().lock() {
+            known.insert((entry.to_string(), field.to_string()), present);
+        }
+    }
+
+    /// Whether an entry holds a non-blank credential, asking the store only the first time.
+    ///
+    /// Kept current by this type's own `set` and `delete`, which are the only writers Notewise
+    /// has. A value changed outside the app is noticed on the next launch.
+    pub(crate) fn has(&self, entry: &str, field: &str) -> bool {
+        let known = Self::presence()
+            .lock()
+            .ok()
+            .and_then(|known| known.get(&(entry.to_string(), field.to_string())).copied());
+        if let Some(present) = known {
+            return present;
+        }
+
+        use notewise_connectors::CredentialStore;
+        // `get` records what it found; a store that fails is reported as holding nothing, and is
+        // asked again next time.
+        matches!(self.get(entry, field), Ok(Some(_)))
+    }
+}
+
+impl notewise_connectors::CredentialStore for Keychain {
+    fn get(
+        &self,
+        entry: &str,
+        field: &str,
+    ) -> notewise_connectors::Result<Option<notewise_connectors::Secret>> {
+        let found = Self::store()
+            .get(entry, field)?
+            .filter(|secret| !secret.expose().trim().is_empty());
+        Self::remember(entry, field, found.is_some());
+        Ok(found)
+    }
+
+    fn set(
+        &self,
+        entry: &str,
+        field: &str,
+        value: &notewise_connectors::Secret,
+    ) -> notewise_connectors::Result<()> {
+        Self::store().set(entry, field, value)?;
+        Self::remember(entry, field, !value.expose().trim().is_empty());
+        Ok(())
+    }
+
+    fn delete(&self, entry: &str, field: &str) -> notewise_connectors::Result<()> {
+        Self::store().delete(entry, field)?;
+        Self::remember(entry, field, false);
+        Ok(())
+    }
 }
 
 /// The field name under which a provider key is stored.
@@ -510,5 +623,33 @@ mod tests {
 
         // Model calls must not be serialized behind database access.
         assert_eq!(state.ai().model_id(), "mock");
+    }
+
+    /// Presence is asked of the store once, then answered from memory — and kept right by the
+    /// writes that go through this type.
+    #[test]
+    fn the_keychain_is_asked_about_an_entry_once() {
+        use notewise_connectors::{CredentialStore, Secret};
+
+        // A name no other test uses: the store is shared by every test in this binary.
+        let entry = "test:presence-is-cached";
+        let keychain = Keychain::new();
+
+        assert!(!keychain.has(entry, "api_key"));
+
+        // Written behind the cache's back, as another program might. Still absent: the answer
+        // came from memory, which is the point — the store was not asked again.
+        Keychain::store()
+            .set(entry, "api_key", &Secret::new("sk-behind-its-back"))
+            .expect("set");
+        assert!(!keychain.has(entry, "api_key"), "the store was asked twice");
+
+        // Writes through the type keep the memory current.
+        keychain
+            .set(entry, "api_key", &Secret::new("sk-test"))
+            .expect("set");
+        assert!(keychain.has(entry, "api_key"));
+        keychain.delete(entry, "api_key").expect("delete");
+        assert!(!keychain.has(entry, "api_key"));
     }
 }

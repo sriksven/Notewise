@@ -569,6 +569,39 @@ impl<'a> ToolExecutionRepository<'a> {
         self.transition(id, ExecutionStatus::Proposed, ExecutionStatus::Rejected)
     }
 
+    /// Take a confirmed call for sending. Exactly one caller ever succeeds.
+    ///
+    /// Confirming and sending used to be two steps with nothing between them: a call stayed
+    /// `confirmed` for as long as the external server took to answer, and "send a confirmed call"
+    /// is also what the recovery route does — so a second request in that window (the task list's
+    /// "it never went out" button, another window) sent the same call twice. Two filed tickets
+    /// from one approval.
+    ///
+    /// The claim is `executed_at`, set here under a guard on its own absence, so it needs no new
+    /// status and no migration. A row left claimed but unfinished is one whose send was under way
+    /// when the engine stopped: whether it took effect is unknown, and it is refused here rather
+    /// than sent again.
+    pub fn claim(&self, id: Id) -> Result<ToolExecution> {
+        let changed = self.db.conn().execute(
+            "UPDATE tool_executions SET executed_at = ?3
+              WHERE id = ?1 AND status = ?2 AND executed_at IS NULL",
+            rusqlite::params![id, ExecutionStatus::Confirmed.as_str(), Utc::now()],
+        )?;
+
+        if changed == 0 {
+            let current = self.get(id)?;
+            if current.status == ExecutionStatus::Confirmed {
+                return Err(StorageError::Refused(
+                    "this call is already being sent, or was being sent when the engine stopped \
+                     — a call is never sent twice"
+                        .into(),
+                ));
+            }
+            return Err(self.why_not(id, ExecutionStatus::Confirmed));
+        }
+        self.get(id)
+    }
+
     /// Record how a confirmed call ended.
     ///
     /// Requires `confirmed`. There is deliberately no path from `proposed` to `succeeded`: if this
@@ -995,6 +1028,40 @@ mod tests {
         repo.confirm(execution.id).expect("confirms");
         let err = repo.confirm(execution.id).expect_err("must refuse");
         assert!(err.to_string().contains("confirmed"), "{err}");
+    }
+
+    /// One approval, one send. The second taker — the recovery button, another window — is refused
+    /// while the first is still waiting on the server, and after it finished.
+    #[test]
+    fn a_confirmed_call_is_claimed_for_sending_once() {
+        let db = db();
+        let server = server(&db, "linear");
+        let repo = ToolExecutionRepository::new(&db);
+        let execution = proposal(&db, server.id);
+
+        assert!(
+            repo.claim(execution.id).is_err(),
+            "a proposal is not confirmed and cannot be sent"
+        );
+
+        repo.confirm(execution.id).expect("confirms");
+        let claimed = repo.claim(execution.id).expect("the first taker sends it");
+        assert_eq!(claimed.status, ExecutionStatus::Confirmed);
+        assert!(claimed.executed_at.is_some());
+
+        let err = repo
+            .claim(execution.id)
+            .expect_err("a second taker must not send it again");
+        assert!(matches!(err, StorageError::Refused(_)), "{err:?}");
+
+        repo.finish(
+            execution.id,
+            Outcome::Succeeded {
+                result: "{}".into(),
+            },
+        )
+        .expect("the first taker records the outcome");
+        assert!(repo.claim(execution.id).is_err(), "nor after it finished");
     }
 
     /// No automatic retry, and no manual one either: a failed call may have taken effect.

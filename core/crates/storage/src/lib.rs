@@ -42,7 +42,7 @@ pub use audio::{
     DEFAULT_RETENTION_DAYS, RETENTION_KEY,
 };
 pub use db::Database;
-pub use error::{Result, StorageError};
+pub use error::{ConstraintKind, Result, StorageError};
 pub use export::{draft_to_eml, meeting_to_markdown, ExportOptions};
 pub use id::Id;
 pub use location::{

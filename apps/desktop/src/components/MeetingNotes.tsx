@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, Plus } from "lucide-react";
 
 import { BlockEditor } from "./BlockEditor";
-import { parse, serialize, type Block } from "../lib/blocks";
+import { canonical, parse, serialize, type Block } from "../lib/blocks";
 import { api, ApiError, type Note } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import type { Route } from "../lib/router";
@@ -42,7 +42,13 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const persisted = useRef("");
+  /**
+   * What the engine holds for the open note, and which note that is.
+   *
+   * The id matters because a save for the note being left can land after another meeting's note
+   * has opened; without it that late save replaced the new note's baseline with the old text.
+   */
+  const persisted = useRef<{ id: string | null; body: string }>({ id: null, body: "" });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Guards against two rapid keystrokes both deciding to create the first note. */
   const creating = useRef(false);
@@ -66,7 +72,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
       const first = loaded[0] ?? null;
       setSelectedId(first?.id ?? null);
       setBlocks(parse(first?.body ?? ""));
-      persisted.current = first?.body ?? "";
+      persisted.current = { id: first?.id ?? null, body: first?.body ?? "" };
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not load notes for this meeting.");
@@ -75,18 +81,17 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     }
   }, [meetingId]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const flush = useCallback(
     async (id: string, title: string, next: string) => {
-      if (next === persisted.current) return;
+      // Against the stored body as this editor would write it: anything written elsewhere
+      // serializes differently, and that difference alone used to save the note on opening.
+      const base = persisted.current;
+      if (base.id === id && next === canonical(base.body)) return;
 
       setSave("saving");
       try {
         const saved = await api.updateNote(id, title, next);
-        persisted.current = saved.body;
+        if (persisted.current.id === id) persisted.current = { id, body: saved.body };
         setNotes((current) => current.map((n) => (n.id === id ? saved : n)));
         setSave("saved");
         setError(null);
@@ -115,7 +120,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
         });
         setNotes((current) => [note, ...current]);
         setSelectedId(note.id);
-        persisted.current = note.body;
+        persisted.current = { id: note.id, body: note.body };
         setSave("saved");
         setError(null);
       } catch (e) {
@@ -126,6 +131,29 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     },
     [meetingId, meetingTitle],
   );
+
+  /**
+   * What is on screen, for the moment it stops being on screen.
+   *
+   * Moving to another meeting by address — Back, a link from search or the join prompt — or
+   * leaving the tab without a click in the editor never blurs it, so the debounce was cancelled
+   * with the last few keystrokes still unsaved.
+   */
+  const latest = useRef({ selectedId, title: selected?.title ?? "Meeting notes", blocks });
+  latest.current = { selectedId, title: selected?.title ?? "Meeting notes", blocks };
+
+  const flushLatest = useCallback(() => {
+    const { selectedId: id, title, blocks: current } = latest.current;
+    if (!id) return;
+    if (timer.current) clearTimeout(timer.current);
+    void flush(id, title, serialize(current));
+  }, [flush]);
+
+  useEffect(() => {
+    // Runs before `load` replaces the editor with the next meeting's note, and on unmount.
+    void load();
+    return flushLatest;
+  }, [load, flushLatest]);
 
   // Debounced autosave, or a create when there is nothing to save into yet.
   useEffect(() => {
@@ -158,7 +186,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
       setNotes((current) => [note, ...current]);
       setSelectedId(note.id);
       setBlocks(parse(""));
-      persisted.current = "";
+      persisted.current = { id: note.id, body: "" };
       setSave("idle");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not create a note.");
@@ -172,7 +200,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     }
     setSelectedId(note.id);
     setBlocks(parse(note.body));
-    persisted.current = note.body;
+    persisted.current = { id: note.id, body: note.body };
     setSave("idle");
   };
 

@@ -25,7 +25,18 @@ interface Props {
  * of their voice is kept. Someone looking at who was in a meeting is exactly who should be able to
  * see that.
  */
-export function Participants({ meetingId, onNavigate }: Props) {
+/**
+ * Keyed on the meeting, so nothing typed or loaded for one meeting survives into the next.
+ *
+ * The intelligence panel stays mounted while the library switches meetings under it. Without the
+ * key a half-typed name stayed open on the next meeting and Enter added it there, and the last
+ * meeting's people stayed on screen until — or, if the request failed, instead of — this one's.
+ */
+export function Participants(props: Props) {
+  return <ParticipantsForMeeting key={props.meetingId} {...props} />;
+}
+
+function ParticipantsForMeeting({ meetingId, onNavigate }: Props) {
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);

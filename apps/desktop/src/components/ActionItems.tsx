@@ -30,7 +30,18 @@ function isDone(item: ActionItem): boolean {
  * round trip before the checkbox moves — makes ticking off five items feel broken on a
  * machine that is also transcribing audio.
  */
-export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
+/**
+ * Keyed on the meeting, so nothing typed or loaded for one meeting survives into the next.
+ *
+ * The intelligence panel stays mounted while the library switches meetings under it. Without the
+ * key a half-typed item stayed open on the next meeting and Enter added it there, and the last
+ * meeting's items stayed on screen until — or, if the request failed, instead of — this one's.
+ */
+export function ActionItems(props: Props) {
+  return <ActionItemsForMeeting key={props.meetingId} {...props} />;
+}
+
+function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
   const [items, setItems] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -194,8 +205,10 @@ export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
                     disabled={promoting === item.id}
                     title="Track this as a ticket. The action item stays — it is the record that this meeting produced the work."
                     aria-label={`Make a ticket from: ${item.text}`}
+                    // Shown on keyboard focus as well as hover, like the delete beside it — a control
+                    // Tab can land on and nobody can see is a trap.
                     className="mt-[1px] shrink-0 text-ink-faint opacity-0 transition
-                               hover:text-ink group-hover:opacity-100
+                               hover:text-ink group-hover:opacity-100 focus-visible:opacity-100
                                disabled:opacity-50"
                   >
                     <TicketCheck size={13} aria-hidden />

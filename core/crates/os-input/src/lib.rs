@@ -144,8 +144,8 @@ pub fn selection_is_replaceable() -> Result<bool> {
 
 /// Read text off the screen as pixels.
 ///
-/// Needs the Screen Recording grant, which macOS will not give a build without a Developer ID
-/// signature — so on a development build this refuses with that reason rather than a permission
+/// Needs the Screen & System Audio Recording grant, which macOS gives to an app bundle and not to
+/// a loose binary — so under `cargo run` this refuses with that reason rather than a permission
 /// prompt that would do nothing.
 pub fn recognise_text_on_screen() -> Result<String> {
     #[cfg(all(target_os = "macos", feature = "os-input"))]

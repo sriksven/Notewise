@@ -328,6 +328,10 @@ pub struct Route {
 pub struct Router {
     backend: Box<dyn AiBackend>,
     kind: BackendKind,
+    /// The model and endpoint the default backend was configured with, exactly as given — `None`
+    /// where the backend's own default applies. See [`Router::configured_model`].
+    model: Option<String>,
+    endpoint: Option<String>,
     redaction: RedactionPolicy,
     /// Ordered. First match wins. Empty means every request goes to `backend`, which is exactly
     /// the behaviour before routing existed.
@@ -351,15 +355,37 @@ impl Router {
     pub fn from_config(config: RouterConfig) -> Result<Self> {
         let kind = config.backend;
         let redaction = config.redaction;
+        let model = config.model.clone();
+        let endpoint = config.endpoint.clone();
         let backend = build_backend(config)?;
 
         Ok(Self {
             backend,
             kind,
+            model,
+            endpoint,
             redaction,
             routes: Vec::new(),
             health: Arc::new(tokio::sync::RwLock::new(None)),
         })
+    }
+
+    /// The model this router was *asked* for, or `None` when it runs the backend's default.
+    ///
+    /// Not [`Self::model_id`], which is the default backend's current answer — for a local daemon
+    /// that is our own preference until the daemon has been asked. Rebuilding a router from
+    /// `model_id()` turned that preference into a choice the user never made, and a chosen model
+    /// is never substituted when it is missing.
+    pub fn configured_model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// The endpoint this router was configured with, or `None` for the backend's default.
+    ///
+    /// Needed to rebuild it faithfully: dropped, a custom OpenAI-compatible backend cannot be
+    /// built at all, and an Ollama on another machine silently becomes localhost.
+    pub fn configured_endpoint(&self) -> Option<&str> {
+        self.endpoint.as_deref()
     }
 }
 
@@ -427,6 +453,8 @@ impl Router {
         Self {
             backend,
             kind: BackendKind::Mock,
+            model: None,
+            endpoint: None,
             redaction: RedactionPolicy::Secrets,
             routes: Vec::new(),
             health: Arc::new(tokio::sync::RwLock::new(None)),
@@ -471,7 +499,20 @@ impl Router {
     /// configured routing. With routes, saying only the default's name would be a claim that a
     /// summary came from a model it may not have come from.
     pub fn model_label(&self) -> String {
-        let default = self.backend.model_id();
+        self.label_with_routes(self.backend.model_id())
+    }
+
+    /// [`Self::model_label`], naming the model that will actually answer.
+    ///
+    /// The synchronous label is the default backend's *current* answer, and for a local daemon
+    /// that is our preference until something has asked the daemon — so a fresh launch reported
+    /// `llama3.1` on a machine that holds only `llama3.1:8b`, and the model picker highlighted
+    /// nothing. This asks, once; after that the answer is cached by the backend.
+    pub async fn resolved_model_label(&self) -> String {
+        self.label_with_routes(&self.backend.resolved_model_id().await)
+    }
+
+    fn label_with_routes(&self, default: &str) -> String {
         match self.routes.len() {
             0 => default.to_string(),
             1 => format!("{default} + 1 route"),
@@ -668,13 +709,20 @@ impl Router {
         }
 
         let (text, report) = crate::redact::redact(&input.text, policy);
-        let (context, context_report) = match input.context.as_deref() {
-            Some(c) => {
-                let (masked, r) = crate::redact::redact(c, policy);
-                (Some(masked.into_owned()), r)
-            }
-            None => (None, RedactionReport::default()),
+        let mut context_report = RedactionReport::default();
+        let mut mask = |field: Option<&str>| {
+            field.map(|value| {
+                let (masked, r) = crate::redact::redact(value, policy);
+                context_report.merge(&r);
+                masked.into_owned()
+            })
         };
+        // Every field that reaches the provider. The title is typed by a person and pasted from
+        // calendars ("Call with priya@acme.com"); the background is the user's own memories, which
+        // can say anything they typed. Both used to go out unmasked beside a masked transcript.
+        let title = mask(Some(&input.title)).unwrap_or_default();
+        let context = mask(input.context.as_deref());
+        let background = mask(input.background.as_deref());
 
         if !report.is_empty() || !context_report.is_empty() {
             tracing::info!(
@@ -686,13 +734,14 @@ impl Router {
         }
 
         TranscriptInput {
-            title: input.title.clone(),
+            title,
             text: text.into_owned(),
             context,
             // Carried through unmasked, deliberately. This is the user's own template prompt, not
             // meeting material — redacting it would mangle an instruction they wrote, and there is
             // no transcript content in it to protect.
             instructions: input.instructions.clone(),
+            background,
         }
     }
 
@@ -727,6 +776,15 @@ impl Router {
             })
             .collect();
 
+        // The instruction too. Unlike a summary template it is often built from user content —
+        // the agent's task, the text on screen, the person's memories — so it is masked like the
+        // material it replaced.
+        let system = request.system.as_deref().map(|s| {
+            let (masked, r) = crate::redact::redact(s, policy);
+            report.merge(&r);
+            masked.into_owned()
+        });
+
         if !report.is_empty() {
             tracing::info!(
                 backend = self.kind.label(),
@@ -735,7 +793,11 @@ impl Router {
             );
         }
 
-        ChatRequest { context, messages }
+        ChatRequest {
+            context,
+            messages,
+            system,
+        }
     }
 }
 
@@ -751,6 +813,21 @@ impl AiBackend for Router {
     /// local, even if every other call stays put.
     fn is_local(&self) -> bool {
         self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
+    }
+
+    // Forwarded explicitly. Without these a router used as a `dyn AiBackend` — nested in another
+    // router, as routing allows — fell back to the trait defaults: a probe that always passes, and
+    // a model that is never resolved.
+    async fn probe(&self) -> Result<()> {
+        self.backend.probe().await
+    }
+
+    async fn resolved_model_id(&self) -> String {
+        self.backend.resolved_model_id().await
+    }
+
+    async fn installed_models(&self) -> Result<Vec<String>> {
+        self.backend.installed_models().await
     }
 
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
@@ -907,7 +984,12 @@ mod tests {
         }
 
         async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
-            self.seen.lock().expect("spy lock").push(input.text.clone());
+            // Everything a backend would send: the title and the composed system prompt go over
+            // the wire as surely as the transcript does.
+            let mut seen = self.seen.lock().expect("spy lock");
+            seen.push(input.title.clone());
+            seen.push(input.system_prompt("instruction").into_owned());
+            seen.push(input.text.clone());
             Ok(SummaryOutput {
                 text: String::new(),
                 model: "spy".into(),
@@ -932,6 +1014,7 @@ mod tests {
 
         async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
             let mut seen = self.seen.lock().expect("spy lock");
+            seen.extend(request.system.iter().cloned());
             seen.extend(request.context.iter().cloned());
             seen.extend(request.messages.iter().map(|m| m.content.clone()));
             Ok(ChatResponse {
@@ -965,6 +1048,24 @@ mod tests {
             transmitted.contains("Sam read out"),
             "surrounding transcript must survive: {transmitted}"
         );
+    }
+
+    /// The title and the reader's memories travel beside the transcript and were not masked.
+    #[tokio::test]
+    async fn the_title_and_the_readers_background_are_masked_too() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()))
+            .with_redaction(RedactionPolicy::SecretsAndContacts);
+        let input = TranscriptInput::new("Call with priya@acme.example", "We agreed to ship.")
+            .with_background(format!("- my deploy key is {SECRET}"));
+
+        router.summarize(&input).await.expect("summarizes");
+
+        let transmitted = spy.transmitted();
+        assert!(!transmitted.contains("priya@acme.example"), "{transmitted}");
+        assert!(!transmitted.contains(SECRET), "{transmitted}");
+        assert!(transmitted.contains("[redacted:email]"), "{transmitted}");
+        assert!(transmitted.contains("[redacted:api_key]"), "{transmitted}");
     }
 
     /// A local backend must get the real text. Masking there would degrade the summary for
@@ -1004,6 +1105,25 @@ mod tests {
             2,
             "both the message and the context should be masked: {transmitted}"
         );
+    }
+
+    /// A request's own instruction is often built from user content — the text on screen, the
+    /// agent's task — so it is masked like the material it replaced, and it reaches the backend.
+    #[tokio::test]
+    async fn a_requests_own_instruction_is_carried_and_masked() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()));
+
+        let request = ChatRequest::new(vec![ChatMessage::user("what is this?")])
+            .with_system(format!("WHAT IS ON SCREEN:\nthe deploy key is {SECRET}"));
+        router.chat(&request).await.expect("chats");
+
+        let transmitted = spy.transmitted();
+        assert!(
+            transmitted.contains("WHAT IS ON SCREEN"),
+            "dropped: {transmitted}"
+        );
+        assert!(!transmitted.contains(SECRET), "{transmitted}");
     }
 
     /// Turning redaction off is possible but must be deliberate.
@@ -1636,6 +1756,95 @@ mod tests {
             .summarize(&TranscriptInput::new("Sync", "text"))
             .await
             .is_ok());
+    }
+
+    /// Nested, a router answered the trait defaults: always healthy, never resolved.
+    #[tokio::test]
+    async fn a_nested_router_reports_its_backends_health_not_the_default() {
+        let inner = Router::from_config(
+            RouterConfig::ollama().with_endpoint("http://127.0.0.1:1/api/chat"),
+        )
+        .expect("ollama router");
+        let outer = Router::with_backend(Box::new(inner));
+
+        assert!(
+            outer.probe().await.is_err(),
+            "nothing listens on port 1, so the nested daemon is not healthy"
+        );
+    }
+
+    /// A backend whose answer to "which model" changes once it has asked — a local daemon.
+    #[derive(Debug)]
+    struct Resolves;
+
+    #[async_trait]
+    impl AiBackend for Resolves {
+        fn model_id(&self) -> &str {
+            "llama3.1"
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+        async fn resolved_model_id(&self) -> String {
+            "llama3.1:8b".into()
+        }
+        async fn summarize(&self, _: &TranscriptInput) -> Result<SummaryOutput> {
+            Err(AiError::InvalidRequest("unused".into()))
+        }
+        async fn extract_decisions(&self, _: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
+            Err(AiError::InvalidRequest("unused".into()))
+        }
+        async fn extract_action_items(
+            &self,
+            _: &TranscriptInput,
+        ) -> Result<Vec<ExtractedActionItem>> {
+            Err(AiError::InvalidRequest("unused".into()))
+        }
+        async fn chat(&self, _: &ChatRequest) -> Result<ChatResponse> {
+            Err(AiError::InvalidRequest("unused".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn the_resolved_label_names_the_model_that_will_answer() {
+        let router = Router::with_backend(Box::new(Resolves));
+        assert_eq!(router.model_label(), "llama3.1");
+        assert_eq!(router.resolved_model_label().await, "llama3.1:8b");
+
+        let routed = Router::with_backend(Box::new(Resolves)).with_route(
+            RouteSpec {
+                name: "a".into(),
+                when: vec![],
+            },
+            named("claude"),
+            BackendKind::Anthropic,
+            RedactionPolicy::Secrets,
+        );
+        assert_eq!(routed.resolved_model_label().await, "llama3.1:8b + 1 route");
+    }
+
+    /// Rebuilding a router must not turn our preference into the user's choice, or drop the URL
+    /// it was pointed at.
+    #[test]
+    fn a_router_remembers_what_it_was_asked_for_not_what_it_resolved() {
+        let defaulted = Router::from_config(RouterConfig::ollama()).expect("ollama");
+        assert_eq!(defaulted.configured_model(), None);
+        assert_eq!(defaulted.configured_endpoint(), None);
+        assert_eq!(
+            defaulted.model_id(),
+            "llama3.1",
+            "the preference, which must not be persisted as a choice"
+        );
+
+        let custom = Router::from_config(
+            RouterConfig::openai_compatible("http://localhost:8080/v1").with_model("qwen2.5"),
+        )
+        .expect("custom endpoint");
+        assert_eq!(custom.configured_model(), Some("qwen2.5"));
+        assert_eq!(
+            custom.configured_endpoint(),
+            Some("http://localhost:8080/v1")
+        );
     }
 
     #[tokio::test]

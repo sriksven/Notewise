@@ -224,31 +224,76 @@ mod imp {
 
     use chrono::Utc;
     use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
-    use notewise_recorder::{Channel, ChannelInput, ChannelPipeline, Pipeline, PipelineConfig};
+    use notewise_recorder::{
+        Channel, ChannelInput, ChannelPipeline, Pipeline, PipelineConfig, RecordingStats,
+    };
 
     /// Open the system audio tap, where the platform has one.
     ///
     /// Returns a boxed source so the caller does not need a different type per platform. Only
     /// macOS has an implementation today; elsewhere this is an error the caller treats as
     /// "microphone only", which is exactly right.
+    ///
+    /// `origin` is the microphone's time zero. The tap opens after it, and counting its time from
+    /// its own opening would put everything the far end said early by the difference.
     fn open_system_audio(
         config: &CaptureConfig,
+        origin: std::time::Instant,
     ) -> std::result::Result<Box<dyn notewise_audio_capture::AudioSource>, String> {
         #[cfg(target_os = "macos")]
         {
             notewise_audio_capture::SystemAudioSource::open(config)
-                .map(|s| Box::new(s) as Box<dyn notewise_audio_capture::AudioSource>)
+                .map(|s| {
+                    Box::new(s.with_clock_origin(origin))
+                        as Box<dyn notewise_audio_capture::AudioSource>
+                })
                 .map_err(|e| e.to_string())
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = config;
+            let _ = (config, origin);
             Err("system audio capture is not implemented on this platform".into())
         }
     }
     use notewise_storage::{Database, MeetingRepository, MeetingSource, NewMeeting};
     use notewise_transcription::{ModelRegistry, ModelStore, WhisperEngine};
     use tokio::sync::oneshot;
+
+    /// Start keeping a recording's audio, if the user asked for that.
+    ///
+    /// Read when the recording happens rather than passed in with the request, so the answer is the
+    /// one current at the time. A file that cannot be opened costs the recording its audio file and
+    /// nothing else. One implementation for imports and live recordings: the setting says "keep the
+    /// recording", and a live meeting is the recording people mean.
+    fn retain_if_asked(db: &Database, meeting_id: Id, pipeline: &mut Pipeline) {
+        if !notewise_storage::retention_policy(db).keeps_anything() {
+            return;
+        }
+        let Some(dir) = audio_dir(db) else {
+            return;
+        };
+        let path = notewise_storage::audio_path_for(&dir, meeting_id);
+        if let Err(e) = pipeline.retaining_audio(&path) {
+            tracing::warn!(
+                error = %e,
+                "could not open a file for retained audio; transcribing without it"
+            );
+        }
+    }
+
+    /// Point a meeting at the audio its run kept, if it kept any.
+    ///
+    /// Called before the meeting is ended, so a meeting is never briefly finished-with-no-audio.
+    fn attach_retained(db: &Database, meeting_id: Id, stats: &RecordingStats) {
+        let Some((path, bytes)) = stats.retained_audio.as_ref() else {
+            return;
+        };
+        if let Some(path) = path.to_str() {
+            if let Err(e) = notewise_storage::set_audio(db, meeting_id, path, *bytes as i64) {
+                tracing::warn!(error = %e, "could not record the retained audio path");
+            }
+        }
+    }
 
     /// How long to wait for the pipeline to flush and diarize after a stop signal.
     ///
@@ -316,6 +361,14 @@ mod imp {
             MicrophoneSource::open(&capture).map_err(|e| RecordingError::Failed(e.to_string()))?;
         let device = source.device_name().to_string();
 
+        // Time zero for everything this recording stamps. The microphone delivers from here on
+        // and its samples are counted from now, so a transcript segment at 5000 ms was said five
+        // seconds after this. The meeting starts here too, rather than after the model has
+        // loaded: speaker events from the browser extension are timed from the meeting's start,
+        // and a start a second late would put every named turn a second off its words.
+        let capture_origin = std::time::Instant::now();
+        let started_at = Utc::now();
+
         // The far end of the call, if this machine will give it to us.
         //
         // Deliberately not fatal. System audio needs a Screen Recording grant that many users
@@ -323,7 +376,7 @@ mod imp {
         // yesterday — refusing to record at all because the *better* mode is unavailable would
         // be a regression dressed up as a feature.
         let system_source = if request.capture_system_audio {
-            match open_system_audio(&capture) {
+            match open_system_audio(&capture, capture_origin) {
                 Ok(source) => Some(source),
                 Err(e) => {
                     tracing::info!(
@@ -355,7 +408,7 @@ mod imp {
                     .clone()
                     .unwrap_or_else(|| format!("Meeting {}", Utc::now().format("%Y-%m-%d %H:%M"))),
                 source: MeetingSource::Microphone,
-                started_at: Utc::now(),
+                started_at,
             })
             .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
@@ -386,6 +439,14 @@ mod imp {
                     // no diarizer runs and none is needed. The second engine shares the first
                     // one's loaded weights rather than loading the model twice.
                     Some(system) => {
+                        // Not kept yet: the pipeline would have to mix the two channels into the
+                        // one file a meeting can point at. Said, rather than silently skipped.
+                        if notewise_storage::retention_policy(&db).keeps_anything() {
+                            tracing::info!(
+                                "audio retention is on, but a two-channel recording's audio is not \
+                                 kept yet"
+                            );
+                        }
                         let mic_engine = engine.sibling();
                         let inputs = vec![
                             ChannelInput::new(
@@ -410,9 +471,14 @@ mod imp {
                                 diarize,
                                 ..Default::default()
                             });
+                        retain_if_asked(&db, meeting_id, &mut pipeline);
                         runtime.block_on(pipeline.run(&db, meeting_id, &mut source, should_stop))
                     }
                 };
+
+                if let Ok(stats) = &result {
+                    attach_retained(&db, meeting_id, stats);
+                }
 
                 // End the meeting from this thread. It owns the connection that has been
                 // writing, and it is the only place that knows the recording is truly over.
@@ -536,35 +602,13 @@ mod imp {
                         None => Pipeline::new(Box::new(engine)),
                     };
 
-                    // Keep the audio only if the user asked for it. Read here rather than passed in
-                    // so the answer is the one current when the recording happens, not when the
-                    // request was made.
-                    if notewise_storage::retention_policy(&db).keeps_anything() {
-                        if let Some(dir) = audio_dir(&db) {
-                            let path = notewise_storage::audio_path_for(&dir, meeting.id);
-                            if let Err(e) = pipeline.retaining_audio(&path) {
-                                tracing::warn!(
-                                    error = %e,
-                                    "could not open a file for retained audio; transcribing without it"
-                                );
-                            }
-                        }
-                    }
+                    retain_if_asked(&db, meeting.id, &mut pipeline);
 
                     let stats = runtime
                         .block_on(pipeline.run(&db, meeting.id, &mut source, || false))
                         .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
-                    // Before `end`, so a meeting is never briefly finished-with-no-audio.
-                    if let Some((path, bytes)) = stats.retained_audio.as_ref() {
-                        if let Some(path) = path.to_str() {
-                            if let Err(e) =
-                                notewise_storage::set_audio(&db, meeting.id, path, *bytes as i64)
-                            {
-                                tracing::warn!(error = %e, "could not record the retained audio path");
-                            }
-                        }
-                    }
+                    attach_retained(&db, meeting.id, &stats);
 
                     MeetingRepository::new(&db)
                         .end(meeting.id, Utc::now())

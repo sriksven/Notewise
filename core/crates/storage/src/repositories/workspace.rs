@@ -326,6 +326,15 @@ mod tests {
                 description: None,
             })
             .expect_err("foreign key should reject this");
-        assert!(matches!(err, StorageError::Sqlite(_)));
+        assert!(
+            matches!(
+                err,
+                StorageError::Constraint {
+                    kind: crate::ConstraintKind::ForeignKey,
+                    ..
+                }
+            ),
+            "an unknown parent is the caller's error, not a database fault: {err:?}"
+        );
     }
 }

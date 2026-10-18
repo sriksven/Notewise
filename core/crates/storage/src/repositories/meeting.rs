@@ -394,6 +394,13 @@ impl<'a> MeetingRepository<'a> {
         if changed == 0 {
             return Err(StorageError::not_found("TranscriptSegment", segment_id));
         }
+        // As for `rename_speaker`: the label is part of the embedded text.
+        self.db.conn().execute(
+            "DELETE FROM embeddings
+              WHERE entity_kind = 'meeting'
+                AND entity_id = (SELECT meeting_id FROM transcript_segments WHERE id = ?1)",
+            rusqlite::params![segment_id],
+        )?;
         Ok(())
     }
 
@@ -428,12 +435,32 @@ impl<'a> MeetingRepository<'a> {
             return Err(StorageError::not_found("TranscriptSegment", segment_id));
         }
 
+        // The semantic index embeds a meeting's whole transcript under the *meeting* — see
+        // `indexing::collect_pending` — so that is the vector that still holds the old line. This
+        // used to delete only vectors keyed by the segment, which nothing writes: the meeting kept
+        // its stale vector, `collect_pending` judged it current (a meeting's staleness is its end
+        // time, which an edit does not move), and answers kept quoting the mis-transcription.
         tx.execute(
-            "DELETE FROM embeddings WHERE entity_kind = 'transcript_segment' AND entity_id = ?1",
+            "DELETE FROM embeddings
+              WHERE (entity_kind = 'transcript_segment' AND entity_id = ?1)
+                 OR (entity_kind = 'meeting'
+                     AND entity_id = (SELECT meeting_id FROM transcript_segments WHERE id = ?1))",
             rusqlite::params![segment_id],
         )?;
 
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Drop a meeting's vectors so the next indexing pass embeds it again.
+    ///
+    /// For the edits that change the text a meeting is embedded as — its title, and the speaker
+    /// labels the chunks carry — without moving the end time `collect_pending` judges staleness by.
+    fn forget_vectors(&self, meeting_id: Id) -> Result<()> {
+        self.db.conn().execute(
+            "DELETE FROM embeddings WHERE entity_kind = 'meeting' AND entity_id = ?1",
+            rusqlite::params![meeting_id],
+        )?;
         Ok(())
     }
 
@@ -449,6 +476,8 @@ impl<'a> MeetingRepository<'a> {
         if changed == 0 {
             return Err(StorageError::not_found("Meeting", id));
         }
+        // The title opens the text the meeting is embedded as ("Meeting: <title>").
+        self.forget_vectors(id)?;
         self.get(id)
     }
 
@@ -512,11 +541,18 @@ impl<'a> MeetingRepository<'a> {
 
         // `IS` rather than `=` so that `from = None` matches SQL NULL. With `=` it would match
         // nothing and silently report zero changes.
-        Ok(self.db.conn().execute(
+        let changed = self.db.conn().execute(
             "UPDATE transcript_segments SET speaker = ?3
              WHERE meeting_id = ?1 AND speaker IS ?2",
             rusqlite::params![meeting_id, from, to],
-        )?)
+        )?;
+
+        // The chunks carry speaker labels, so "what did Dana commit to" needs the vector rebuilt
+        // with her name in it. The full-text index follows by trigger; this one does not.
+        if changed > 0 {
+            self.forget_vectors(meeting_id)?;
+        }
+        Ok(changed)
     }
 }
 
@@ -715,6 +751,90 @@ mod tests {
             repo.segments(m.id).expect("segments")[0].text,
             "we agreed to ship on Friday"
         );
+    }
+
+    /// The vector the indexer actually writes is the *meeting's* — one per meeting, its whole
+    /// transcript chunked under `entity_kind = 'meeting'`. The test above plants a segment-keyed
+    /// vector nothing produces, which is how this went unnoticed: correcting a line, renaming a
+    /// speaker or the meeting left the real vector in place, and since the indexer judges a
+    /// meeting stale by its end time, it was never rebuilt.
+    #[test]
+    fn edits_to_what_a_meeting_is_embedded_as_drop_its_vector() {
+        let db = db();
+        let repo = MeetingRepository::new(&db);
+        let embeddings = crate::EmbeddingRepository::new(&db);
+        let model = "nomic-embed-text:latest";
+
+        let m = meeting(&db);
+        let other = meeting(&db);
+        let segment = repo
+            .add_segment(NewTranscriptSegment {
+                meeting_id: m.id,
+                speaker: Some("Speaker 1".into()),
+                text: "we agreed to ship on Fryday".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                confidence: None,
+            })
+            .expect("segment");
+
+        let embed = |meeting_id: Id| {
+            embeddings
+                .replace_for_entity(
+                    "meeting",
+                    meeting_id,
+                    model,
+                    vec![crate::NewEmbedding {
+                        entity_kind: "meeting".into(),
+                        entity_id: meeting_id,
+                        chunk_index: 0,
+                        text: "Meeting: Weekly sync\n\nSpeaker 1: we agreed to ship on Fryday"
+                            .into(),
+                        vector: vec![0.1, 0.2],
+                        model: model.into(),
+                        source_updated_at: ts(1_700_000_000),
+                    }],
+                )
+                .expect("embed");
+        };
+        let vectors_of = |meeting_id: Id| {
+            embeddings
+                .indexed_entities(model)
+                .expect("indexed")
+                .iter()
+                .filter(|e| e.entity_kind == "meeting" && e.entity_id == meeting_id)
+                .count()
+        };
+
+        embed(m.id);
+        embed(other.id);
+        repo.set_segment_text(segment.id, "we agreed to ship on Friday")
+            .expect("correct");
+        assert_eq!(
+            vectors_of(m.id),
+            0,
+            "a corrected line must not keep answering"
+        );
+        assert_eq!(
+            vectors_of(other.id),
+            1,
+            "another meeting's vector is untouched"
+        );
+
+        embed(m.id);
+        repo.rename_speaker(m.id, Some("Speaker 1"), "Dana")
+            .expect("rename");
+        assert_eq!(vectors_of(m.id), 0, "the chunks carry the speaker's name");
+
+        embed(m.id);
+        repo.set_segment_speaker(segment.id, "Priya")
+            .expect("relabel");
+        assert_eq!(vectors_of(m.id), 0);
+
+        embed(m.id);
+        repo.set_title(m.id, "Platform standup").expect("retitle");
+        assert_eq!(vectors_of(m.id), 0, "the title opens the embedded text");
+        assert_eq!(vectors_of(other.id), 1);
     }
 
     #[test]

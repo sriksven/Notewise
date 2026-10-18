@@ -109,8 +109,8 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
  */
 const LIMITATIONS: Array<{ title: string; body: string }> = [
   {
-    title: "System audio is not captured",
-    body: "The microphone hears you and the room, not the other people on a call. macOS only grants screen-audio permission to a signed, bundled app, and this one is not signed yet.",
+    title: "System audio is not verified yet",
+    body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch — and has not yet been run end to end in a release build. macOS only.",
   },
   {
     title: "macOS only, in practice",

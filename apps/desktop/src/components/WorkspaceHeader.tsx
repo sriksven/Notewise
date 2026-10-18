@@ -263,8 +263,17 @@ function EditableTitle({
     return (
       <h1
         className="cursor-text truncate text-[17px] font-semibold tracking-tight text-ink"
-        title="Double-click to rename"
+        title="Double-click, or focus and press Enter, to rename"
         onDoubleClick={() => setEditing(true)}
+        // Reachable from the keyboard as well. A double-click was the only way in, so renaming a
+        // meeting — the one fix for a title guessed before it happened — needed a mouse.
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "F2") {
+            event.preventDefault();
+            setEditing(true);
+          }
+        }}
       >
         {title}
       </h1>

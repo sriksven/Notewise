@@ -121,7 +121,15 @@ export function LibraryView({
                 <Mic size={14} aria-hidden />
                 Record
               </button>
-              <button type="button" onClick={onImport} className="btn-quiet">
+              {/* Disabled with Record, for the same reason: importing transcribes, and a build that
+                  cannot record cannot transcribe either. */}
+              <button
+                type="button"
+                onClick={onImport}
+                disabled={!canRecord}
+                title={canRecord ? undefined : "Needs a build that can transcribe"}
+                className="btn-quiet"
+              >
                 <Upload size={14} aria-hidden />
                 Import audio
               </button>

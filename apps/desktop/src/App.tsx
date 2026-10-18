@@ -34,6 +34,7 @@ import {
   api,
   ApiError,
   type ClarifyingQuestion,
+  type QuestionSession,
   type Health,
   type Meeting,
   type Segment,
@@ -72,7 +73,7 @@ function meetingsStillOpen(meetings: Meeting[]): string | null {
 export default function App() {
   // The address is the state. Which meeting is open and which tab is showing live in the
   // URL, so Back works, a window reload lands where it was, and a meeting can be linked to.
-  const { route, navigate } = useRoute();
+  const { route, navigate, replace } = useRoute();
   const [panelOpen, setPanelOpen] = useState(true);
   const theme = useTheme();
 
@@ -85,6 +86,14 @@ export default function App() {
   /** The distinct voices in the open meeting, so they can be named. */
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
+  /**
+   * What the engine needs back with the next question poll for the same meeting.
+   *
+   * The endpoint is stateless, so its cooldown and its "already asked about this" memory live
+   * here. Not sending it back makes every poll a first look, which is how the panel used to fill
+   * with near-duplicates. A ref rather than state: it changes on every poll and draws nothing.
+   */
+  const questionSession = useRef<QuestionSession | undefined>(undefined);
   /**
    * Why the engine had nothing to suggest, in its own words.
    *
@@ -131,7 +140,15 @@ export default function App() {
   const isRecording = recordingId !== null;
   /** The meeting the record button acts on — capturing, or merely still open. */
   const activeMeetingId = recordingId ?? openMeetingId;
-  const selectedMeeting = meetings.find((m) => m.id === selectedId) ?? null;
+  /**
+   * The open meeting when the newest-fifty list does not hold it — fetched by id.
+   *
+   * Without it, a meeting opened from a person, a search hit or a citation that was older than the
+   * list showed "No meeting selected" over its own transcript, with no title, rename or delete.
+   */
+  const [unlisted, setUnlisted] = useState<Meeting | null>(null);
+  const listed = meetings.find((m) => m.id === selectedId) ?? null;
+  const selectedMeeting = listed ?? (unlisted?.id === selectedId ? unlisted : null);
   const summaryState = useSummary(selectedId);
 
   const report = useCallback((e: unknown) => {
@@ -189,6 +206,44 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
+  // Resolve a meeting the list does not hold, and leave an address that names one that is gone.
+  //
+  // `replace`, not `navigate`, which is what the router keeps it for: pressing Back after deleting
+  // a meeting landed on its page — "No meeting selected" over the trashed meeting's transcript,
+  // with live controls that edited it — and a link to a meeting that never existed showed the same
+  // controls under a "not found" banner.
+  const listedId = listed?.id ?? null;
+  useEffect(() => {
+    if (!selectedId || listedId) return;
+
+    let cancelled = false;
+    api
+      .meeting(selectedId)
+      .then((meeting) => {
+        if (cancelled) return;
+        if (meeting.deleted_at) {
+          setNotice(`“${meeting.title}” is in the trash. Restore it to open it.`);
+          replace({ name: "trash" });
+          return;
+        }
+        setUnlisted(meeting);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // 404 for an id that names nothing, 400 for one that is not an id at all.
+        if (e instanceof ApiError && (e.status === 404 || e.status === 400)) {
+          setError(null);
+          setNotice("That meeting no longer exists.");
+          replace({ name: "library" });
+        } else {
+          report(e);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, listedId, replace, report]);
+
   // Drain the notification queue for as long as the app is open. The engine has queued desktop
   // notifications since the comms layer landed and nothing has ever shown one — it cannot, having
   // no way to raise an OS notification. See `lib/notifications`.
@@ -229,17 +284,21 @@ export default function App() {
         setSegments(next);
         setSpeakers(roster.speakers);
       } catch (e) {
-        if (!cancelled) report(e);
+        // A meeting that is not there is handled by the effect that resolves it, which moves
+        // the window off the page; a banner saying so as well would outlive the page it was for.
+        const missing = e instanceof ApiError && (e.status === 404 || e.status === 400);
+        if (!cancelled && !missing) report(e);
       }
     };
 
     void load();
-    if (transcriptId !== recordingId) return;
-
-    const id = setInterval(load, 1000);
+    // Polled only while this meeting records — but cancelled either way. Returning nothing for a
+    // meeting that is not recording left its request free to land after the next meeting's, and
+    // put one meeting's transcript under another's title.
+    const id = transcriptId === recordingId ? setInterval(load, 1000) : null;
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (id !== null) clearInterval(id);
     };
   }, [transcriptId, recordingId, report]);
 
@@ -269,17 +328,25 @@ export default function App() {
 
   // Ask for clarifying questions while recording.
   //
-  // Polled rather than pushed, and the engine gates on its own cooldown, so an over-eager
-  // interval here cannot become an over-eager panel. Failures are swallowed: a suggestion
-  // that did not arrive is not worth an error banner during someone's meeting.
+  // Polled rather than pushed, and the engine gates on its own cooldown — given back the session
+  // it returned last time — so an over-eager interval here cannot become an over-eager panel.
+  // Failures are swallowed: a suggestion that did not arrive is not worth an error banner during
+  // someone's meeting.
   useEffect(() => {
     if (!recordingId) return;
 
+    // A new meeting starts with no history; the last one's would suppress its first questions.
+    questionSession.current = undefined;
     let cancelled = false;
     const ask = async () => {
       try {
-        const result = await api.questions(recordingId);
+        const result = await api.questions(recordingId, questionSession.current);
         if (cancelled) return;
+        // Defaults keep an engine from before the session existed working as it did.
+        questionSession.current = {
+          asked: result.asked ?? [],
+          last_suggestion_ms: result.last_suggestion_ms ?? null,
+        };
         setQuestionsReason(result.reason ?? null);
         if (result.questions.length === 0) return;
 
@@ -637,6 +704,9 @@ export default function App() {
             {inWorkspace && (
               <>
                 <WorkspaceHeader
+                  // Keyed on the meeting: a "Move to trash?" confirm opened on one meeting stayed
+                  // armed after switching to another, one press from deleting the wrong meeting.
+                  key={selectedId ?? "none"}
                   meeting={selectedMeeting}
                   onRename={renameMeeting}
                   segments={segments}
@@ -700,7 +770,13 @@ export default function App() {
                 there is no offer, which is almost always. */}
             <JoinPrompt
               canRecord={health?.can_record ?? false}
-              onStarted={(id) => navigate({ name: "meeting", id, tab: "transcript" })}
+              device={preferredDevice}
+              language={language}
+              onStarted={(id) => {
+                navigate({ name: "meeting", id, tab: "transcript" });
+                setQuestions([]);
+                void refresh();
+              }}
             />
 
             {route.name === "home" && (
@@ -758,7 +834,7 @@ export default function App() {
               <PeopleView personId={route.id} onNavigate={navigate} />
             )}
             {route.name === "ask" && <AskView onNavigate={navigate} />}
-            {route.name === "trash" && <TrashView />}
+            {route.name === "trash" && <TrashView onMeetingRestored={() => void refresh()} />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
             {route.name === "jobs" && <JobsView />}
             {route.name === "connectors" && <ConnectorsView />}
@@ -771,6 +847,7 @@ export default function App() {
                 onModeChange={theme.setMode}
                 onAccentChange={theme.setAccent}
                 onNavigate={navigate}
+                onEngineChange={() => void refresh()}
               />
             )}
             {route.name === "about" && <AboutView health={health} />}

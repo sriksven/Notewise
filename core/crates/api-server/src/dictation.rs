@@ -721,7 +721,7 @@ fn spawn_capture(
     mode: Mode,
     model_dir: std::path::PathBuf,
 ) -> std::result::Result<Live, String> {
-    use notewise_audio_capture::{AudioSource, CaptureConfig, MicrophoneSource};
+    use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
     use notewise_transcription::{ModelRegistry, ModelStore, TranscriptionEngine, WhisperEngine};
 
     // The smallest installed model, or the catalogue's default when none is installed — the
@@ -774,19 +774,21 @@ fn spawn_capture(
             let result = runtime.block_on(async move {
                 let mut segments = Vec::new();
                 let deadline = started_at + chrono::Duration::seconds(MAX_SESSION_SECS);
+                // The key comes up straight after the last word, which is still in the
+                // microphone's buffers at that moment. The reader stops the device and keeps
+                // reading until that word is in, rather than leaving with it unread.
+                let mut reader = notewise_recorder::CaptureReader::new();
 
                 loop {
-                    if poll.load(Ordering::Relaxed) {
-                        break;
-                    }
                     // A hotkey pressed by accident must not hold the microphone until the app
                     // quits.
-                    if Utc::now() >= deadline {
+                    let expired = Utc::now() >= deadline;
+                    if expired && !reader.is_stopping() {
                         tracing::info!("dictation stopped itself at the session limit");
-                        break;
                     }
+                    let stop = poll.load(Ordering::Relaxed) || expired;
 
-                    match source.next_frame() {
+                    match reader.next_frame(&mut source, stop) {
                         Ok(Some(frame)) => {
                             let ready = engine.feed(&frame.to_transcription_format()).await;
                             match ready {
@@ -794,7 +796,8 @@ fn spawn_capture(
                                 Err(e) => return Err(e.to_string()),
                             }
                         }
-                        // A microphone never exhausts, so this means the device went away.
+                        // The stopped microphone has handed over its tail. Before a stop this
+                        // means the device went away, since a microphone never exhausts.
                         Ok(None) => break,
                         Err(e) => return Err(e.to_string()),
                     }

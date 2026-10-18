@@ -20,6 +20,16 @@ pub struct TranscriptInput {
     /// *instruction* about the output, and a backend has to treat them differently — one goes in the
     /// user message, the other in the system prompt.
     pub instructions: Option<String>,
+    /// Standing facts about the reader — their memories — to shape the output by.
+    ///
+    /// Separate from `instructions` because the two are not alternatives. Memories used to be
+    /// passed *as* the instructions, which replaced the summary instruction outright: with three
+    /// memories stored, `llama3.1:8b` got no instruction at all, opened with "Here is the
+    /// summary:", and listed the memories as things said in the meeting. Separate from `context`
+    /// because this is not material about the meeting either. It is the user's own data, so unlike
+    /// a template it is masked before it leaves the machine.
+    #[serde(default)]
+    pub background: Option<String>,
 }
 
 impl TranscriptInput {
@@ -29,14 +39,28 @@ impl TranscriptInput {
         self
     }
 
-    /// The instruction to send: a template's prompt when one was chosen, else the backend's own.
+    /// Tell the backend who the output is for. See [`Self::background`].
+    pub fn with_background(mut self, background: impl Into<String>) -> Self {
+        self.background = Some(background.into());
+        self
+    }
+
+    /// The instruction to send — a template's prompt when one was chosen, else the backend's own —
+    /// followed by the reader's background when there is any.
     ///
-    /// A method rather than each backend checking the field, so a backend that forgets is a backend
+    /// A method rather than each backend checking the fields, so a backend that forgets is a backend
     /// that never compiled — and so every backend's default stays written where that backend is.
-    pub fn system_prompt<'a>(&'a self, default: &'a str) -> &'a str {
-        match self.instructions.as_deref() {
+    pub fn system_prompt<'a>(&'a self, default: &'a str) -> std::borrow::Cow<'a, str> {
+        let instruction = match self.instructions.as_deref() {
             Some(custom) if !custom.trim().is_empty() => custom,
             _ => default,
+        };
+        match self.background.as_deref().map(str::trim) {
+            Some(background) if !background.is_empty() => std::borrow::Cow::Owned(format!(
+                "{instruction}\n\n{background}\nThat describes who will read this, not what was \
+                 said: never report it as part of the meeting."
+            )),
+            _ => std::borrow::Cow::Borrowed(instruction),
         }
     }
 
@@ -46,6 +70,7 @@ impl TranscriptInput {
             text: text.into(),
             context: None,
             instructions: None,
+            background: None,
         }
     }
 
@@ -81,6 +106,70 @@ pub struct ExtractedActionItem {
     /// Due date as literally stated, e.g. "next Friday". Left unparsed on purpose:
     /// resolving it needs the meeting's timezone, which belongs to the caller.
     pub due_hint: Option<String>,
+}
+
+impl ExtractedActionItem {
+    /// The task with its deadline still attached, for a store that has no field for a hint.
+    ///
+    /// The stored action item has `due_at`, a timestamp, and turning "by Friday" into one needs
+    /// the meeting's date, its timezone and a rule for *which* Friday — so the hint was simply
+    /// not stored, and every deadline a model extracted was lost between this crate and the
+    /// database. Kept in the text it survives as it was said, and nothing is guessed. Not
+    /// repeated when the text already carries it ("Book the room for the week of March 10th").
+    pub fn text_with_due_hint(&self) -> String {
+        match self.due_hint.as_deref().map(str::trim) {
+            Some(hint)
+                if !hint.is_empty() && !self.text.to_lowercase().contains(&hint.to_lowercase()) =>
+            {
+                format!("{} (due {hint})", self.text)
+            }
+            _ => self.text.clone(),
+        }
+    }
+}
+
+/// A field a model filled with a word for "nobody", which is not a name.
+///
+/// Models asked for `null` write `""`, `"none"`, `"N/A"` or `"unassigned"` about as often. Stored
+/// as an owner, "unassigned" is an assignment to a person called Unassigned.
+fn absent(value: &Option<String>) -> bool {
+    value.as_deref().map(str::trim).is_none_or(|v| {
+        matches!(
+            v.to_ascii_lowercase().as_str(),
+            "" | "null" | "none" | "n/a" | "na" | "unknown" | "unassigned" | "nobody" | "tbd"
+        )
+    })
+}
+
+/// Normalise what a model extracted: trim, drop empty items, and turn "none"-words into `None`.
+///
+/// Every backend runs its parsed reply through this, so what reaches storage does not depend on
+/// which provider wrote it.
+pub(crate) fn tidy_action_items(items: Vec<ExtractedActionItem>) -> Vec<ExtractedActionItem> {
+    items
+        .into_iter()
+        .filter(|item| !item.text.trim().is_empty())
+        .map(|item| ExtractedActionItem {
+            text: item.text.trim().to_string(),
+            owner: (!absent(&item.owner))
+                .then(|| item.owner.unwrap_or_default().trim().to_string()),
+            due_hint: (!absent(&item.due_hint))
+                .then(|| item.due_hint.unwrap_or_default().trim().to_string()),
+        })
+        .collect()
+}
+
+/// [`tidy_action_items`] for decisions.
+pub(crate) fn tidy_decisions(items: Vec<ExtractedDecision>) -> Vec<ExtractedDecision> {
+    items
+        .into_iter()
+        .filter(|item| !item.text.trim().is_empty())
+        .map(|item| ExtractedDecision {
+            text: item.text.trim().to_string(),
+            reasoning: (!absent(&item.reasoning))
+                .then(|| item.reasoning.unwrap_or_default().trim().to_string()),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +208,17 @@ pub struct ChatRequest {
     pub context: Vec<String>,
     /// Conversation so far. Must be non-empty and end with a user message.
     pub messages: Vec<ChatMessage>,
+    /// The instruction for this request, in place of the backend's own.
+    ///
+    /// `None` keeps the default, which is a meetings question-answerer: "answer questions about
+    /// the user's meetings using only the material provided, and say so when it is not there".
+    /// That is right for Ask and wrong for everything else built on `chat`. Features used to pass
+    /// their instructions as `context`, where they arrived as *material* under that default — and
+    /// asked to fix the grammar of a sentence, `llama3.1:8b` answered "I don't have any
+    /// information about your meetings" in half of the runs, an answer the assistant would then
+    /// have typed over the user's selection.
+    #[serde(default)]
+    pub system: Option<String>,
 }
 
 impl ChatRequest {
@@ -126,12 +226,36 @@ impl ChatRequest {
         Self {
             context: Vec::new(),
             messages,
+            system: None,
         }
     }
 
     pub fn with_context(mut self, context: Vec<String>) -> Self {
         self.context = context;
         self
+    }
+
+    /// Replace the backend's default instruction. See [`Self::system`].
+    pub fn with_system(mut self, system: impl Into<String>) -> Self {
+        self.system = Some(system.into());
+        self
+    }
+
+    /// The system prompt to send: this request's instruction, or the backend's `default`, with
+    /// the material appended.
+    ///
+    /// One composition shared by every backend, so a backend cannot honour `system` and forget the
+    /// material, or the other way round.
+    pub fn system_prompt(&self, default: &str) -> String {
+        let mut system = match self.system.as_deref() {
+            Some(custom) if !custom.trim().is_empty() => custom.to_string(),
+            _ => default.to_string(),
+        };
+        if !self.context.is_empty() {
+            system.push_str("\n\nMaterial:\n");
+            system.push_str(&self.context.join("\n---\n"));
+        }
+        system
     }
 
     /// Whether this request is well-formed. Backends check this before spending a
@@ -151,6 +275,28 @@ pub struct ChatResponse {
 mod tests {
     use super::*;
 
+    /// Memories used to be passed as the instructions and replaced the summary instruction.
+    #[test]
+    fn a_background_is_added_to_the_instruction_rather_than_replacing_it() {
+        let plain = TranscriptInput::new("Sync", "text");
+        assert_eq!(plain.system_prompt("Summarize."), "Summarize.");
+
+        let known = plain.clone().with_background("- I prefer short bullets");
+        let prompt = known.system_prompt("Summarize.");
+        assert!(prompt.starts_with("Summarize."), "{prompt}");
+        assert!(prompt.contains("- I prefer short bullets"), "{prompt}");
+        assert!(
+            prompt.contains("never report it as part of the meeting"),
+            "{prompt}"
+        );
+
+        let templated = known.with_instructions("Write minutes.");
+        let prompt = templated.system_prompt("Summarize.");
+        assert!(prompt.starts_with("Write minutes."), "{prompt}");
+        assert!(prompt.contains("- I prefer short bullets"), "{prompt}");
+        assert!(!prompt.contains("Summarize."), "{prompt}");
+    }
+
     #[test]
     fn transcript_builder_sets_context() {
         let input = TranscriptInput::new("Standup", "text").with_context("Project X");
@@ -166,6 +312,72 @@ mod tests {
             ChatMessage::assistant("hello"),
         ])
         .is_valid());
+    }
+
+    fn item(text: &str, owner: Option<&str>, due: Option<&str>) -> ExtractedActionItem {
+        ExtractedActionItem {
+            text: text.into(),
+            owner: owner.map(Into::into),
+            due_hint: due.map(Into::into),
+        }
+    }
+
+    /// The deadline a model extracted has to survive into storage, which has no field for it.
+    #[test]
+    fn a_due_hint_is_kept_in_the_text_as_it_was_said() {
+        assert_eq!(
+            item("Write the migration plan", Some("Sam"), Some("by Friday")).text_with_due_hint(),
+            "Write the migration plan (due by Friday)"
+        );
+        assert_eq!(
+            item(
+                "Book the room for the week of March 10th",
+                None,
+                Some("week of March 10th")
+            )
+            .text_with_due_hint(),
+            "Book the room for the week of March 10th",
+            "a deadline already in the text is not repeated"
+        );
+        assert_eq!(
+            item("Look at the flaky test", None, None).text_with_due_hint(),
+            "Look at the flaky test"
+        );
+    }
+
+    /// "unassigned" stored as an owner is an assignment to somebody called Unassigned.
+    #[test]
+    fn words_for_nobody_become_none_and_empty_items_are_dropped() {
+        let tidied = tidy_action_items(vec![
+            item("  Look at the flaky test ", Some("unassigned"), Some("")),
+            item("Write the plan", Some(" Sam "), Some("N/A")),
+            item("   ", Some("Sam"), None),
+        ]);
+        assert_eq!(
+            tidied,
+            vec![
+                item("Look at the flaky test", None, None),
+                item("Write the plan", Some("Sam"), None),
+            ]
+        );
+
+        let decisions = tidy_decisions(vec![
+            ExtractedDecision {
+                text: "Ship Friday".into(),
+                reasoning: Some("none".into()),
+            },
+            ExtractedDecision {
+                text: "".into(),
+                reasoning: None,
+            },
+        ]);
+        assert_eq!(
+            decisions,
+            vec![ExtractedDecision {
+                text: "Ship Friday".into(),
+                reasoning: None
+            }]
+        );
     }
 
     #[test]

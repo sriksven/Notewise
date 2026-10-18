@@ -13,15 +13,16 @@ The first tagged build.
 ### Meetings
 
 - Record from a microphone, or import an audio file with a file picker.
-- Transcription runs on this machine, via Whisper or NVIDIA Parakeet. Models are downloaded from
-  inside the app, with resumable progress.
-- Speakers can be separated by voice for recordings where nothing knows who was talking, and named
-  once so the name sticks. In a call, the browser extension reads who is speaking from the meeting
-  platform, which is exact — and sends no audio to do it.
+- Transcription runs on this machine, via Whisper. Models are downloaded from inside the app, with
+  resumable progress. NVIDIA Parakeet is available from the command line, not yet from the app.
+- Speakers can be separated by voice for recordings where nothing knows who was talking, and named;
+  the name holds for that meeting, and recognising a voice in a later meeting is not built yet. In a
+  call, the browser extension reads who is speaking from the meeting platform, which is exact — and
+  sends no audio to do it.
 - Transcripts are editable. A word the transcriber got wrong can be corrected in place, and a
   meeting can be renamed.
 - Audio can be kept after transcription — off by default — which is what makes click-to-play on a
-  transcript line possible.
+  transcript line possible. A recording that also captures system audio does not keep it yet.
 
 ### What a meeting means
 
@@ -61,12 +62,14 @@ The first tagged build.
 
 ### Known limits of this build
 
-- **Nothing is signed.** macOS will say the app "is damaged"; it is not, that is the message for any
-  unsigned app. Windows will show a SmartScreen warning. The release notes say how to clear the
-  macOS quarantine. Linux `.deb` and `.AppImage` need no signing and are the only fully
-  first-class artifacts.
-- **macOS system audio capture is not included.** It needs ScreenCaptureKit against a signed
-  bundle, which is the same missing Apple Developer ID. Microphone capture works.
+- **Signed on macOS, but not by Apple.** The app carries the project's own certificate rather than
+  an Apple Developer ID, so the first launch of each download needs **Open Anyway** in System
+  Settings → Privacy & Security — the release notes walk through it. Permissions you grant carry
+  over to later releases, because every release is signed with the same certificate. Windows is
+  unsigned and will show a SmartScreen warning. Linux `.deb` and `.AppImage` need no signing.
+- **macOS system audio has not yet been run end to end in a release build.** It needs the Screen &
+  System Audio Recording permission, switched on by hand in System Settings, and a relaunch.
+  Microphone capture works.
 - **Transcription needs a model download** on first use. The default build stays small on purpose.
 - **The desktop assistant needs permissions macOS cannot grant on your behalf** — Accessibility,
   and Input Monitoring for typing pauses. Without them the app says which pane to open rather than

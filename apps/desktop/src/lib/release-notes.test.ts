@@ -39,9 +39,9 @@ function newestInChangelog(text: string): string {
  * Just the `releases` array from `HelpView`, as text.
  *
  * Scoped rather than searching the whole file, because the file also contains the help topics — one
- * of which is titled "Why system audio does not work yet". The first version of the last assertion
- * below passed against that, and went on passing after the limitation was deleted from the release
- * notes: an assertion satisfied by text it was not looking at.
+ * of which is about system audio. The first version of the last assertion below passed against
+ * that, and went on passing after the limitation was deleted from the release notes: an assertion
+ * satisfied by text it was not looking at.
  */
 function appReleases(text: string): string {
   const start = text.indexOf("const releases:");
@@ -77,8 +77,9 @@ describe("release notes", () => {
   });
 
   it("state what the build cannot do, not only what it can", () => {
-    // The unsigned build cannot capture macOS system audio, and a release note that omits that
-    // sends people to look for a setting that is not there. Both versions say so.
+    // macOS system audio works only after the user switches a permission on by hand, and a
+    // release note that omits that leaves them with half a transcript and no idea why. Both
+    // versions say so.
     for (const [name, text] of [
       ["CHANGELOG.md", changelog],
       // The release notes only, not the whole file — see `appReleases`.
