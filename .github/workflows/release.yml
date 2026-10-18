@@ -145,6 +145,13 @@ jobs:
           security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
 
           found=$(security find-identity -p codesigning "$keychain" | awk '$2 ~ /^[0-9A-F]{40}$/ { print $2; exit }')
+          # Before the comparison, not folded into it: while the pin is still the empty placeholder,
+          # a .p12 holding no code-signing identity — a certificate without the Code Signing usage,
+          # or one exported without its key — leaves `found` empty too, and "" equals "".
+          if [ -z "$found" ]; then
+            echo "::error::MACOS_CERTIFICATE imported, but it holds no code-signing identity. Export the certificate together with its private key — see scripts/macos-signing-identity.sh."
+            exit 1
+          fi
           if [ "$found" != "$MACOS_CERTIFICATE_SHA1" ]; then
             echo "::error::MACOS_CERTIFICATE holds certificate ${found:-<none>}, but releases are pinned to '${MACOS_CERTIFICATE_SHA1}'. If this is the first signed build, set MACOS_CERTIFICATE_SHA1 in release.yml to ${found}."
             exit 1

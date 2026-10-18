@@ -5,6 +5,9 @@
  * the CLI and the desktop frontend use. Nothing here reaches the network: `127.0.0.1` is refused by
  * `Server::bind` if it is ever pointed anywhere else.
  *
+ * Runs in the service worker (`background.js`), never on the meeting page. A request made from a
+ * content script is the page's request, which Chrome refuses to send to loopback — see `relay.js`.
+ *
  * # Finding it
  *
  * The engine does not sit on one known port. The desktop shell picks the first free port in a
@@ -23,6 +26,9 @@ export const PORT_COUNT = 10;
 export const PORTS = Array.from({ length: PORT_COUNT }, (_, i) => FIRST_PORT + i);
 
 const origin = (port) => `http://127.0.0.1:${port}`;
+
+/** Every origin an engine can be on. The worker posts speaker events to one of these or nowhere. */
+export const ORIGINS = PORTS.map(origin);
 
 /** How long a single probe may take. A port with nothing on it refuses immediately; one with
  *  unrelated software on it may not answer at all, and must not hold up the others. */
@@ -91,17 +97,51 @@ export async function findEngine(fetchImpl = fetch) {
 }
 
 /**
+ * When the recording began, as the engine wrote it down: the zero of the clock speaker events are
+ * measured on. `null` when it cannot be read, which costs precision rather than the session.
+ */
+async function recordingStartedAt(engineOrigin, meetingId, fetchImpl) {
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        fetchImpl(`${engineOrigin}/v1/meetings/${encodeURIComponent(meetingId)}`, {
+          method: "GET",
+          headers: { accept: "application/json" },
+          signal,
+        }),
+      PROBE_TIMEOUT_MS,
+    );
+    if (!response.ok) return null;
+
+    const meeting = await response.json();
+    return typeof meeting?.started_at === "string" ? meeting.started_at : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Is the desktop app running, and is it recording?
  *
- * Returns `{ meetingId, origin }`, or null. Speaker events are only useful against a meeting that
- * exists, so this is what decides whether to start tracking at all. The origin comes back with it
- * so a caller does not have to search again for every batch.
+ * Returns `{ meetingId, origin, startedAt }`, or null. Speaker events are only useful against a
+ * meeting that exists, so this is what decides whether to start tracking at all. The origin comes
+ * back with it so a caller does not have to search again for every batch.
+ *
+ * `startedAt` is the recording's start, which the page needs because the engine measures turns
+ * from it and the page cannot know it: tracking starts when a poll first sees the recording — up to
+ * a poll interval late — or whenever the meeting tab is opened or reloaded, which can be an hour
+ * in. Without it every turn lands that much early, on whoever was speaking then.
  */
 export async function activeRecording(fetchImpl = fetch) {
   const engine = await findEngine(fetchImpl);
   if (!engine || !engine.recordingMeetingId) return null;
 
-  return { meetingId: engine.recordingMeetingId, origin: origin(engine.port) };
+  const at = origin(engine.port);
+  return {
+    meetingId: engine.recordingMeetingId,
+    origin: at,
+    startedAt: await recordingStartedAt(at, engine.recordingMeetingId, fetchImpl),
+  };
 }
 
 /**

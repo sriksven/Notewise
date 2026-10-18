@@ -88,12 +88,12 @@ const STEPS: Record<Os, Step[]> = {
     ),
     {
       title: "Run the engine with recording enabled",
-      body: "The record and whisper features pull the platform audio SDK and a cmake build of whisper.cpp, so this first build is slow.",
-      command: "cargo run -p notewise-cli --features record,whisper -- serve",
+      body: "The record and whisper-metal features pull the platform audio SDK and a cmake build of whisper.cpp with Metal — the GPU-accelerated transcription — so this first build is slow.",
+      command: "cargo run -p notewise-cli --features record,whisper-metal -- serve",
     },
     {
-      title: "Start the desktop app",
-      body: "In a second terminal. It opens on http://localhost:1420 against the engine you just started.",
+      title: "Open the app's interface",
+      body: "In a second terminal. The desktop app's interface, in your browser at http://localhost:1420, against the engine you just started.",
       command: "cd apps/desktop\nnpm install\nnpm run dev",
     },
   ],
@@ -103,7 +103,7 @@ const STEPS: Record<Os, Step[]> = {
     ),
     {
       title: "Run the engine",
-      body: "Microphone capture is untested on Windows. Without the record feature you get a full engine for importing audio, searching, asking questions and running the agent.",
+      body: "Microphone capture is untested on Windows. This default build searches, answers questions and runs the agent over what is in the workspace; it cannot transcribe. Importing audio needs the record and whisper features: cargo run -p notewise-cli --features record,whisper -- serve.",
       command: "cargo run -p notewise-cli -- serve",
     },
     {
@@ -118,7 +118,7 @@ const STEPS: Record<Os, Step[]> = {
     ),
     {
       title: "Run the engine",
-      body: "Microphone capture through ALSA is untested. Without the record feature you get a full engine for importing audio, searching, asking questions and running the agent.",
+      body: "Microphone capture through ALSA is untested. This default build searches, answers questions and runs the agent over what is in the workspace; it cannot transcribe. Importing audio needs the record and whisper features, and record needs the ALSA headers: sudo apt install -y libasound2-dev, then cargo run -p notewise-cli --features record,whisper -- serve.",
       command: "cargo run -p notewise-cli -- serve",
     },
     {
@@ -128,8 +128,8 @@ const STEPS: Record<Os, Step[]> = {
     },
     {
       title: "Or drive it from the command line",
-      body: "The CLI links the engine directly — no server, no app.",
-      command: "cargo run -p notewise-cli -- import ./meeting.wav\ncargo run -p notewise-cli -- export <meeting-id>",
+      body: "The CLI links the engine directly — no server, no app. Its import command transcribes a 32-bit float WAV, and exists only in a build with the whisper feature.",
+      command: "cargo run -p notewise-cli --features whisper -- import ./meeting.wav\ncargo run -p notewise-cli -- export <meeting-id>",
     },
   ],
 };
