@@ -209,7 +209,8 @@ that would literally appear in a transcript. Returns kinds, ids and snippets.
   {{\"action\": \"recent_meetings\"}}
       List the most recent meetings, for when the task is about \"lately\" or \"this week\".
   {{\"action\": \"write_note\", \"title\": \"<title>\", \"body\": \"<markdown>\"}}
-      Save your write-up as a new note. Do this once, near the end.
+      Save your write-up as a new note. Do this once, near the end. The note is about the \
+work: nothing about anyone's health, family or private life goes in it.
   {{\"action\": \"finish\", \"message\": \"<what you did, one paragraph>\"}}
       Stop. Use this when the task is done, or when the workspace does not contain what \
 the task needs.
@@ -219,6 +220,8 @@ Rules:
 - If the workspace does not contain the answer, finish and say so. Do not write it from \
 general knowledge.
 - Cite meetings and notes by their titles in the note you write.
+- Transcripts contain things people said in passing about their health, family or private \
+life. Never write those down, even when they explain a delay.
 - You have at most {MAX_STEPS} steps. Write the note before you run out."
     )
 }
@@ -276,19 +279,67 @@ pub fn parse_action(raw: &str) -> Action {
 /// things like `I'll use the {search} tool` and *then* emit the real JSON. So every brace is a
 /// candidate, and a candidate is only accepted if it parses and actually contains the key
 /// being looked for. `{search}` fails both tests and the scan moves on.
+///
+/// A third: models put real line breaks inside string values. A `write_note` body is markdown,
+/// and `llama3.1:8b` writes it with literal newlines between the bullets — which JSON forbids, so
+/// the strict parse rejected the one action the whole run exists to reach. Observed on the last
+/// step of a real run, which then ended "Ran out of steps" with the write-up discarded. So a
+/// candidate that fails strictly is tried once more with its control characters escaped.
 fn object_with(raw: &str, key: &str) -> Option<serde_json::Value> {
     for (start, _) in raw.match_indices('{') {
         let Some(span) = balanced_span(raw, start) else {
             // Nothing from here closes, so nothing later can either.
             break;
         };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(span) {
+        let parsed = serde_json::from_str::<serde_json::Value>(span)
+            .or_else(|_| serde_json::from_str(&escape_controls_in_strings(span)));
+        if let Ok(value) = parsed {
             if value.get(key).is_some() {
                 return Some(value);
             }
         }
     }
     None
+}
+
+/// `span` with raw newlines, carriage returns and tabs *inside string literals* escaped.
+///
+/// Only inside strings: between tokens they are ordinary whitespace and must stay as they are.
+fn escape_controls_in_strings(span: &str) -> String {
+    let mut out = String::with_capacity(span.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in span.chars() {
+        if in_string {
+            match ch {
+                _ if escaped => {
+                    escaped = false;
+                    out.push(ch);
+                }
+                '\\' => {
+                    escaped = true;
+                    out.push(ch);
+                }
+                '"' => {
+                    in_string = false;
+                    out.push(ch);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        } else {
+            if ch == '"' {
+                in_string = true;
+            }
+            out.push(ch);
+        }
+    }
+
+    out
 }
 
 /// The balanced `{...}` beginning at `start`, or `None` if it never closes.
@@ -453,12 +504,15 @@ async fn drive(
         // ignored, which costs one cheap read against a call that is already talking to a model.
         let memories = crate::memory::for_prompt(state, None, task).await;
 
-        let mut context = vec![system_prompt(task)];
+        // The protocol is the system prompt, not "material" under the meetings question-answerer
+        // the backend would otherwise put first — see `ChatRequest::system`.
+        let mut system = system_prompt(task);
         if !memories.is_empty() {
-            context.push(memories);
+            system.push_str("\n\n");
+            system.push_str(&memories);
         }
 
-        let request = ChatRequest::new(messages).with_context(context);
+        let request = ChatRequest::new(messages).with_system(system);
         let response = state
             .ai()
             .chat(&request)
@@ -854,6 +908,30 @@ mod tests {
         );
     }
 
+    /// The shape llama3.1:8b produced on the last step of a real run: a markdown body with real
+    /// line breaks inside the string. Strict JSON rejects it, and the run ended with no note.
+    #[test]
+    fn a_note_body_with_real_line_breaks_still_parses() {
+        let raw = "{\n  \"action\": \"write_note\",\n  \"title\": \"Deadlines\",\n  \"body\": \
+                   \"- Friday: migration plan (Sam)\n- next Wednesday:\tFAQ (Dana)\"\n}";
+        assert_eq!(
+            parse_action(raw),
+            Action::WriteNote {
+                title: "Deadlines".into(),
+                body: "- Friday: migration plan (Sam)\n- next Wednesday:\tFAQ (Dana)".into()
+            }
+        );
+    }
+
+    /// Whitespace between tokens is not inside a string and must be left alone.
+    #[test]
+    fn escaping_touches_only_the_insides_of_strings() {
+        assert_eq!(
+            escape_controls_in_strings("{\n\"a\": \"x\ny\",\t\"b\": \"q\\\"\n\"}"),
+            "{\n\"a\": \"x\\ny\",\t\"b\": \"q\\\"\\n\"}"
+        );
+    }
+
     #[test]
     fn an_escaped_quote_does_not_end_the_string() {
         let raw = r#"{"action": "finish", "message": "she said \"done\""}"#;
@@ -959,6 +1037,18 @@ mod tests {
     fn the_prompt_states_the_step_budget_it_actually_enforces() {
         // These drifting apart would have the model pacing itself against a wrong number.
         assert!(system_prompt("t").contains(&MAX_STEPS.to_string()));
+    }
+
+    /// Without this a real run wrote "Sam's response to emails due to his mom's surgery" into a
+    /// note about deadlines. The agent reads raw transcripts, so the prompt is the only guard.
+    #[test]
+    fn the_prompt_keeps_personal_matters_out_of_the_note() {
+        let prompt = system_prompt("t");
+        assert!(
+            prompt.contains("health, family or private life"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Never write those down"), "{prompt}");
     }
 
     // ------------------------------------------------------------ the loop, end to end

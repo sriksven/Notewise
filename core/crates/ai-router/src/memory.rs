@@ -74,9 +74,31 @@ pub const MAX_LEN: usize = 200;
 /// Below this it cannot carry a fact — "yes", "ok", "the team".
 pub const MIN_LEN: usize = 8;
 
-/// Pronouns and phrasings that make a sentence about the user.
+/// Pronouns that make a sentence about the user.
+///
+/// Matched as whole words — see [`words`]. These used to be substrings, and a substring test
+/// for "mine" is true of "undermine", "me " of "time ", "our " of "your" and "behaviour", "us "
+/// of "status": so "Dana tends to undermine the team" read as first person and was kept,
+/// which is the one thing this module exists to prevent.
 const FIRST_PERSON: &[&str] = &[
-    "i ", "i'm", "i am", "i'd", "i've", "i'll", "my ", "me ", "mine", "we ", "our ", "us ",
+    "i",
+    "i'm",
+    "i'd",
+    "i've",
+    "i'll",
+    "me",
+    "my",
+    "mine",
+    "myself",
+    "we",
+    "we're",
+    "we'd",
+    "we've",
+    "we'll",
+    "our",
+    "ours",
+    "ourselves",
+    "us",
 ];
 
 /// Words that make a sentence a characterisation of somebody else.
@@ -84,15 +106,50 @@ const FIRST_PERSON: &[&str] = &[
 /// Deliberately blunt. A false positive costs one memory that could have been rephrased; a false
 /// negative puts a judgement about a real person into every future prompt.
 const THIRD_PERSON: &[&str] = &[
-    " he ", " she ", " they ", " him ", " her ", " them ", " his ", " hers ", " their ",
+    "he",
+    "she",
+    "they",
+    "him",
+    "her",
+    "them",
+    "his",
+    "hers",
+    "their",
+    "theirs",
+    "himself",
+    "herself",
+    "themselves",
+    "he's",
+    "she's",
+    "they're",
+    "he'd",
+    "she'd",
+    "they'd",
+    "he'll",
+    "she'll",
+    "they'll",
+    "they've",
 ];
+
+/// The words of a sentence, lowercased, with apostrophes kept so "i'm" stays one word.
+///
+/// A typographic apostrophe is folded into the plain one: models write "I’m" as often as "I'm",
+/// and a first-person check that missed it would refuse a fact about the user for its typography.
+fn words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .replace('\u{2019}', "'")
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .map(|word| word.trim_matches('\''))
+        .filter(|word| !word.is_empty())
+        .map(str::to_string)
+        .collect()
+}
 
 /// Decide what to do with one candidate, given what is already remembered.
 ///
 /// `existing` is every memory currently applicable, as plain text.
 pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
     let text = candidate.text.trim();
-    let lower = format!(" {} ", text.to_lowercase());
 
     if text.len() < MIN_LEN {
         return Verdict::Unusable {
@@ -114,8 +171,9 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
 
     // Checked before duplication: a third-party claim that happens to duplicate an existing one
     // should still be reported as the thing that makes it unacceptable.
-    let is_first_person = FIRST_PERSON.iter().any(|p| lower.contains(p));
-    let names_someone_else = THIRD_PERSON.iter().any(|p| lower.contains(p));
+    let words = words(text);
+    let is_first_person = words.iter().any(|w| FIRST_PERSON.contains(&w.as_str()));
+    let names_someone_else = words.iter().any(|w| THIRD_PERSON.contains(&w.as_str()));
 
     if !is_first_person {
         // Either way this is not stored, and that is the property that matters. The two verdicts
@@ -233,8 +291,8 @@ pub const MAX_CANDIDATES: usize = 3;
 /// than by describing what is wanted and hoping.
 pub fn observer_prompt() -> String {
     format!(
-        "You read a person's meeting transcripts and note durable facts **about that person** which \
-would help you help them in future.
+        "You read what a person said in their meetings — only their own lines, labelled `You` — and \
+note durable facts **about that person** which would help you help them in future.
 
 Reply with EXACTLY ONE JSON object and nothing else:
 
@@ -400,6 +458,43 @@ mod tests {
             &[],
         );
         assert_eq!(v, Verdict::Keep { global: false });
+    }
+
+    /// The pronoun check used substrings, so these all read as first person — "mine" is in
+    /// "undermine", "our" in "behaviour", "me" in "time", "us" in "status", "my" in "economy" —
+    /// and were kept as facts about the user.
+    #[test]
+    fn a_pronoun_inside_another_word_does_not_make_a_sentence_about_the_user() {
+        for text in [
+            "Dana tends to undermine the team in reviews",
+            "Sam's behaviour in planning is erratic",
+            "Priya takes some time to answer anything",
+            "Jordan's status on the project is at risk",
+            "Riley keeps the economy tier tickets",
+        ] {
+            let v = reflect(&candidate(text), &[]);
+            assert!(
+                !v.kept(),
+                "{text:?} was kept as a fact about the user: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_person_words_are_recognised_however_they_are_written() {
+        for text in [
+            "I'm the on-call lead for payments",
+            "I\u{2019}m the on-call lead for payments",
+            "My team calls the ingest pipeline the funnel",
+            "We own the billing service",
+            "Ask me before changing the billing schema",
+        ] {
+            assert_eq!(
+                reflect(&candidate(text), &[]),
+                Verdict::Keep { global: false },
+                "{text:?}"
+            );
+        }
     }
 
     #[test]

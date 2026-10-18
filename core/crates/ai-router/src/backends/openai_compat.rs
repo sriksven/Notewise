@@ -14,9 +14,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{AiError, Result};
+use crate::prompts::{self, transcript_prompt};
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
-    TranscriptInput,
+    tidy_action_items, tidy_decisions, ChatRequest, ChatResponse, ExtractedActionItem,
+    ExtractedDecision, Role, SummaryOutput, TranscriptInput,
 };
 use crate::AiBackend;
 
@@ -83,13 +84,7 @@ impl Preset {
             Preset::LmStudio | Preset::Unsloth | Preset::OllamaCompat => true,
             Preset::Groq | Preset::OpenRouter => false,
             // A custom endpoint is local only if it points at this machine.
-            Preset::Custom { base_url, .. } => {
-                let url = base_url.to_ascii_lowercase();
-                url.contains("://localhost")
-                    || url.contains("://127.0.0.1")
-                    || url.contains("://[::1]")
-                    || url.contains("://0.0.0.0")
-            }
+            Preset::Custom { base_url, .. } => points_at_this_machine(base_url),
         }
     }
 
@@ -107,6 +102,38 @@ impl Preset {
             "ollama-compat" => Preset::OllamaCompat,
             _ => return None,
         })
+    }
+}
+
+/// Whether a URL's *host* is this machine.
+///
+/// This answer switches redaction off and shows the "stays on this machine" badge, so it is
+/// decided on the parsed host rather than on what the text contains. A substring test for
+/// `://localhost` called `http://localhost.example.com` and `http://localhost@example.com` local —
+/// the second connects to example.com with "localhost" as a user name — and sent unmasked
+/// transcripts to both. A URL that will not parse is not local: unsure has to mean remote.
+fn points_at_this_machine(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+
+    if host == "localhost" || host.ends_with(".localhost") {
+        // RFC 6761: `localhost` and every name under it resolve to loopback.
+        return true;
+    }
+
+    // IPv6 hosts come back bracketed.
+    match host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(ip) => ip.is_loopback() || ip.is_unspecified(),
+        Err(_) => false,
     }
 }
 
@@ -258,16 +285,6 @@ impl OpenAiCompatBackend {
     }
 }
 
-fn transcript_prompt(input: &TranscriptInput) -> String {
-    let mut prompt = format!("Meeting title: {}\n", input.title);
-    if let Some(context) = &input.context {
-        prompt.push_str(&format!("Context: {context}\n"));
-    }
-    prompt.push_str("\nTranscript:\n");
-    prompt.push_str(&input.text);
-    prompt
-}
-
 #[async_trait]
 impl AiBackend for OpenAiCompatBackend {
     fn model_id(&self) -> &str {
@@ -281,11 +298,11 @@ impl AiBackend for OpenAiCompatBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                input.system_prompt(
-                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
-                 decided and what happens next. Omit small talk.",
-                ),
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                &input.system_prompt(prompts::SUMMARY),
+                vec![json!({
+                    "role": "user",
+                    "content": transcript_prompt(input, prompts::SUMMARY_REMINDER),
+                })],
                 false,
             ))
             .await?;
@@ -302,30 +319,35 @@ impl AiBackend for OpenAiCompatBackend {
                 "Extract the decisions reached in this meeting — things settled, not tasks. \
                  Reply with JSON only: {\"decisions\": [{\"text\": \"...\", \
                  \"reasoning\": \"...\" or null}]}. Return an empty list if nothing was decided.",
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                vec![json!({ "role": "user", "content": transcript_prompt(input, "") })],
                 true,
             ))
             .await?;
 
-        Ok(Self::parse_json::<DecisionsWrapper>(&raw)?.decisions)
+        Ok(tidy_decisions(
+            Self::parse_json::<DecisionsWrapper>(&raw)?.decisions,
+        ))
     }
 
     async fn extract_action_items(
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
+        let system = format!("{} Reply with JSON of the form {{\"action_items\": [{{\"text\": \"...\", \"owner\": \"...\" or null, \"due_hint\": \"...\" or null}}]}}. Return an empty list if there are none.", prompts::ACTION_ITEMS);
         let raw = self
             .send(self.body(
-                "Extract the action items — work someone committed to doing. Reply with JSON \
-                 only: {\"action_items\": [{\"text\": \"...\", \"owner\": \"...\" or null, \
-                 \"due_hint\": \"...\" or null}]}. Keep due dates exactly as stated. Return an \
-                 empty list if there are none.",
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                &system,
+                vec![json!({
+                    "role": "user",
+                    "content": transcript_prompt(input, prompts::ACTION_ITEMS_REMINDER),
+                })],
                 true,
             ))
             .await?;
 
-        Ok(Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items)
+        Ok(tidy_action_items(
+            Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items,
+        ))
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
@@ -335,14 +357,12 @@ impl AiBackend for OpenAiCompatBackend {
             ));
         }
 
-        let mut system = String::from(
+        // The request's own instruction when it brings one; the meetings question-answerer
+        // otherwise. See `ChatRequest::system`.
+        let system = request.system_prompt(
             "Answer questions about the user's meetings using only the material provided. \
              If the material does not contain the answer, say so plainly.",
         );
-        if !request.context.is_empty() {
-            system.push_str("\n\nMaterial:\n");
-            system.push_str(&request.context.join("\n---\n"));
-        }
 
         let messages: Vec<Value> = request
             .messages
@@ -447,6 +467,42 @@ mod tests {
             };
             assert!(preset.is_local(), "{url} should be local");
             assert!(!preset.requires_api_key());
+        }
+    }
+
+    /// "Local" turns redaction off, so these must not pass for this machine. Each did, because
+    /// the check looked for `://localhost` anywhere in the text.
+    #[test]
+    fn a_remote_host_that_merely_mentions_localhost_is_not_local() {
+        for url in [
+            "http://localhost.attacker.example/v1",
+            "http://localhost@attacker.example/v1",
+            "https://127.0.0.1.attacker.example/v1",
+            "not a url at all",
+        ] {
+            let preset = Preset::Custom {
+                name: "vendor".into(),
+                base_url: url.into(),
+            };
+            assert!(!preset.is_local(), "{url} was treated as this machine");
+            assert!(preset.requires_api_key(), "{url}");
+        }
+    }
+
+    #[test]
+    fn every_loopback_form_is_local() {
+        for url in [
+            "http://127.0.0.2:8080/v1",
+            "http://localhost./v1",
+            "http://llm.localhost:9000/v1",
+            "http://0.0.0.0:1234/v1",
+            "http://[::1]:8000/v1",
+        ] {
+            let preset = Preset::Custom {
+                name: "self-hosted".into(),
+                base_url: url.into(),
+            };
+            assert!(preset.is_local(), "{url} should be local");
         }
     }
 

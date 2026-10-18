@@ -2,18 +2,19 @@
 //!
 //! Kept separate from [`OpenAiCompatBackend`](super::OpenAiCompatBackend) because Gemini does
 //! not speak the chat-completions shape: system text goes in `systemInstruction` rather than
-//! a message, the assistant role is `model` rather than `assistant`, and the key travels as a
-//! query parameter. Squeezing it into the compatible backend would mean branching on provider
-//! inside every method, which is worse than one small extra file.
+//! a message, the assistant role is `model` rather than `assistant`, and the key travels in
+//! Gemini's own `x-goog-api-key` header. Squeezing it into the compatible backend would mean
+//! branching on provider inside every method, which is worse than one small extra file.
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{AiError, Result};
+use crate::prompts::{self, transcript_prompt};
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
-    TranscriptInput,
+    tidy_action_items, tidy_decisions, ChatRequest, ChatResponse, ExtractedActionItem,
+    ExtractedDecision, Role, SummaryOutput, TranscriptInput,
 };
 use crate::AiBackend;
 
@@ -81,8 +82,11 @@ impl GeminiBackend {
         let response = self
             .http
             .post(self.endpoint())
-            // Gemini authenticates by query parameter rather than a header.
-            .query(&[("key", &self.api_key)])
+            // A header, never the `?key=` query parameter Gemini also accepts. A URL is not a
+            // secret: reqwest writes it into every error it produces ("error sending request for
+            // url (…?key=AIza…)"), and those errors are shown to the user and logged at error
+            // level — so a dropped connection used to put the key in both.
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .await
@@ -187,16 +191,6 @@ impl GeminiBackend {
     }
 }
 
-fn transcript_prompt(input: &TranscriptInput) -> String {
-    let mut prompt = format!("Meeting title: {}\n", input.title);
-    if let Some(context) = &input.context {
-        prompt.push_str(&format!("Context: {context}\n"));
-    }
-    prompt.push_str("\nTranscript:\n");
-    prompt.push_str(&input.text);
-    prompt
-}
-
 fn user_turn(text: String) -> Vec<Value> {
     vec![json!({ "role": "user", "parts": [{ "text": text }] })]
 }
@@ -214,11 +208,8 @@ impl AiBackend for GeminiBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                input.system_prompt(
-                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
-                 decided and what happens next. Omit small talk.",
-                ),
-                user_turn(transcript_prompt(input)),
+                &input.system_prompt(prompts::SUMMARY),
+                user_turn(transcript_prompt(input, prompts::SUMMARY_REMINDER)),
                 false,
             ))
             .await?;
@@ -235,30 +226,32 @@ impl AiBackend for GeminiBackend {
                 "Extract the decisions reached in this meeting — things settled, not tasks. \
                  Reply with JSON only: {\"decisions\": [{\"text\": \"...\", \
                  \"reasoning\": \"...\" or null}]}. Return an empty list if nothing was decided.",
-                user_turn(transcript_prompt(input)),
+                user_turn(transcript_prompt(input, "")),
                 true,
             ))
             .await?;
 
-        Ok(Self::parse_json::<DecisionsWrapper>(&raw)?.decisions)
+        Ok(tidy_decisions(
+            Self::parse_json::<DecisionsWrapper>(&raw)?.decisions,
+        ))
     }
 
     async fn extract_action_items(
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
+        let system = format!("{} Reply with JSON of the form {{\"action_items\": [{{\"text\": \"...\", \"owner\": \"...\" or null, \"due_hint\": \"...\" or null}}]}}. Return an empty list if there are none.", prompts::ACTION_ITEMS);
         let raw = self
             .send(self.body(
-                "Extract the action items — work someone committed to doing. Reply with JSON \
-                 only: {\"action_items\": [{\"text\": \"...\", \"owner\": \"...\" or null, \
-                 \"due_hint\": \"...\" or null}]}. Keep due dates exactly as stated. Return an \
-                 empty list if there are none.",
-                user_turn(transcript_prompt(input)),
+                &system,
+                user_turn(transcript_prompt(input, prompts::ACTION_ITEMS_REMINDER)),
                 true,
             ))
             .await?;
 
-        Ok(Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items)
+        Ok(tidy_action_items(
+            Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items,
+        ))
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
@@ -268,14 +261,12 @@ impl AiBackend for GeminiBackend {
             ));
         }
 
-        let mut system = String::from(
+        // The request's own instruction when it brings one; the meetings question-answerer
+        // otherwise. See `ChatRequest::system`.
+        let system = request.system_prompt(
             "Answer questions about the user's meetings using only the material provided. \
              If the material does not contain the answer, say so plainly.",
         );
-        if !request.context.is_empty() {
-            system.push_str("\n\nMaterial:\n");
-            system.push_str(&request.context.join("\n---\n"));
-        }
 
         let contents: Vec<Value> = request
             .messages
@@ -498,5 +489,51 @@ mod tests {
             .collect();
 
         assert_eq!(roles, vec!["user", "model", "user"]);
+    }
+
+    const KEY: &str = "AIzaSyTESTKEYTESTKEYTESTKEYTESTKEY123";
+
+    /// reqwest puts the request URL in its error text, and that text is shown to the user and
+    /// logged. A key in the query string went with it.
+    #[tokio::test]
+    async fn a_connection_failure_does_not_put_the_key_in_the_error() {
+        let backend = GeminiBackend::new(KEY)
+            .expect("valid key")
+            .with_base_url("http://127.0.0.1:1/v1beta/models");
+
+        let err = backend
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("nothing listens on port 1");
+
+        assert!(matches!(err, AiError::Transport { .. }), "{err:?}");
+        assert!(!err.to_string().contains(KEY), "the key leaked: {err}");
+        assert!(!format!("{err:?}").contains(KEY), "the key leaked: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn the_key_travels_in_the_header_gemini_documents() {
+        let stub = crate::stub::Stub::start(|_| {
+            crate::stub::Reply::json(
+                200,
+                json!({ "candidates": [{ "content": { "parts": [{ "text": "ok" }] }, "finishReason": "STOP" }] }),
+            )
+        });
+        let backend = GeminiBackend::new(KEY)
+            .expect("valid key")
+            .with_base_url(format!("{}/v1beta/models", stub.url));
+
+        backend
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("the stub answers");
+
+        let sent = &stub.requests()[0];
+        assert!(!sent.target.contains(KEY), "{}", sent.target);
+        assert_eq!(sent.header("x-goog-api-key"), Some(KEY));
+        assert_eq!(
+            sent.path(),
+            "/v1beta/models/gemini-2.0-flash:generateContent"
+        );
     }
 }

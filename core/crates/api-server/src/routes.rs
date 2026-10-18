@@ -220,9 +220,10 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         schema_version,
         ai_local: state.ai().is_local(),
         // The policy-aware label, not `model_id()`. A user with routing configured is not using
-        // one model, and this field is read by a human. `model_id()` stays the default's model
-        // because it is what gets persisted and read back to build a backend.
-        ai_model: state.ai().model_label(),
+        // one model, and this field is read by a human. Resolved, because before anything had
+        // asked the daemon the label was our preference — `llama3.1` on a machine holding only
+        // `llama3.1:8b` — and the top bar named a model that was not installed.
+        ai_model: state.ai().resolved_model_label().await,
         // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
         // reports that it cannot record even in a build that otherwise could.
         can_record: recording::SUPPORTED && state.db_path().is_some(),
@@ -448,7 +449,7 @@ async fn switch_backend(
     let ai = state.ai();
     Ok(Json(serde_json::json!({
         "kind": kind.as_str(),
-        "model": ai.model_id(),
+        "model": ai.resolved_model_id().await,
         "is_local": ai.is_local(),
     })))
 }
@@ -1529,16 +1530,14 @@ async fn summarize_meeting(
 
     let mut input = TranscriptInput::new(title, transcript);
 
-    // Memories go in front of the template rather than replacing it: a template is an instruction
-    // about shape and a memory is context about the reader, and the two are not competing.
-    let instructions = match (memories.is_empty(), &template) {
-        (true, None) => None,
-        (true, Some(template)) => Some(template.prompt.clone()),
-        (false, None) => Some(memories.clone()),
-        (false, Some(template)) => Some(format!("{memories}\n{}", template.prompt)),
-    };
-    if let Some(instructions) = instructions {
-        input = input.with_instructions(instructions);
+    // A template is an instruction about shape and a memory is context about the reader, and the
+    // two are not competing — so they travel in separate fields. Passing memories *as* the
+    // instructions replaced the backend's summary instruction whenever no template was chosen.
+    if let Some(template) = &template {
+        input = input.with_instructions(template.prompt.clone());
+    }
+    if !memories.is_empty() {
+        input = input.with_background(memories);
     }
     // Only the summary honours the template. Decisions and action items are extractions with a
     // fixed output shape, and a prompt written to change prose would break the parse.
@@ -1568,7 +1567,9 @@ async fn summarize_meeting(
         repo.add_action_item(notewise_storage::NewActionItem {
             meeting_id,
             summary_id: Some(stored.id),
-            text: item.text.clone(),
+            // The deadline as it was said. `due_at` needs a date nobody stated, so the hint
+            // rides in the text rather than being dropped — see `text_with_due_hint`.
+            text: item.text_with_due_hint(),
             owner: item.owner.clone(),
             owner_person_id: None,
             due_at: None,
@@ -1771,7 +1772,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
             // it the only way to name what is running is to guess from `is_local`, which
             // matches several entries and picks the wrong one.
             "kind": state.ai().kind().as_str(),
-            "model": state.ai().model_id(),
+            "model": state.ai().resolved_model_id().await,
             "is_local": state.ai().is_local(),
         },
     })))
@@ -2866,6 +2867,88 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0]["distance"], 1);
         assert_eq!(summaries[0]["via"], "derived_from");
+    }
+
+    /// Extracts one action item with a deadline, the way every real model does.
+    #[derive(Debug)]
+    struct WithDeadline;
+
+    #[async_trait::async_trait]
+    impl AiBackend for WithDeadline {
+        fn model_id(&self) -> &str {
+            "with-deadline"
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+        async fn summarize(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<notewise_ai_router::SummaryOutput> {
+            Ok(notewise_ai_router::SummaryOutput {
+                text: "We agreed to ship.".into(),
+                model: "with-deadline".into(),
+            })
+        }
+        async fn extract_decisions(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedDecision>> {
+            Ok(Vec::new())
+        }
+        async fn extract_action_items(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedActionItem>> {
+            Ok(vec![notewise_ai_router::ExtractedActionItem {
+                text: "Write the migration plan".into(),
+                owner: Some("Sam".into()),
+                due_hint: Some("by Friday".into()),
+            }])
+        }
+        async fn chat(
+            &self,
+            _: &ChatRequest,
+        ) -> notewise_ai_router::Result<notewise_ai_router::ChatResponse> {
+            Err(notewise_ai_router::AiError::InvalidRequest("unused".into()))
+        }
+    }
+
+    /// The deadline was extracted and then dropped on the way to storage, so every action item
+    /// came out of a summary with no date at all.
+    #[tokio::test]
+    async fn an_extracted_deadline_survives_into_the_stored_action_item() {
+        let app = router(Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::with_backend(Box::new(WithDeadline)),
+        )));
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "Sam: I'll write the plan by Friday.", "start_ms": 0, "end_ms": 3000}]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/summarize"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, summary) = call(&app, get(&format!("/v1/meetings/{id}/summary"))).await;
+        let item = &summary["summary"]["action_items"][0];
+        assert_eq!(
+            item["text"], "Write the migration plan (due by Friday)",
+            "{summary}"
+        );
+        assert_eq!(item["owner"], "Sam");
     }
 
     #[tokio::test]

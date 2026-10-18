@@ -533,6 +533,10 @@ async fn set_title(
 
     let db = state.db().await;
     let meeting = notewise_storage::MeetingRepository::new(&db).set_title(id, title)?;
+    // Storage drops the meeting's stale vector on a rename; this schedules the rebuild, or the
+    // meeting would be missing from semantic search until some unrelated edit touched the index.
+    drop(db);
+    crate::indexing::touch(Arc::clone(&state));
     Ok(Json(serde_json::json!({ "title": meeting.title })))
 }
 
@@ -560,6 +564,9 @@ async fn set_segment_text(
 
     let db = state.db().await;
     notewise_storage::MeetingRepository::new(&db).set_segment_text(id, text)?;
+    // A corrected line changes what the meeting is found by. See `set_title`.
+    drop(db);
+    crate::indexing::touch(Arc::clone(&state));
     Ok(Json(serde_json::json!({ "text": text })))
 }
 
@@ -784,11 +791,19 @@ async fn put_rules(
             .map_err(|e| ApiError::Internal(format!("could not save the rules: {e}")))?;
     }
 
-    // Rebuild the live router so the change applies without a restart. Reusing the current kind
-    // and model means this is a policy change and never a silent backend change.
+    // Rebuild the live router so the change applies without a restart. Reusing the current kind,
+    // and the model and endpoint it was *configured* with, means this is a policy change and
+    // never a silent backend change. It used to pass `model_id()` and no endpoint: a custom
+    // OpenAI-compatible backend then could not be rebuilt at all (the rules were saved and the
+    // request failed), an Ollama on another machine became localhost, and Ollama's own
+    // preference was turned into a model the user had "chosen".
     let ai = state.ai();
     state
-        .switch_backend(ai.kind(), Some(ai.model_id().to_string()), None)
+        .switch_backend(
+            ai.kind(),
+            ai.configured_model().map(str::to_string),
+            ai.configured_endpoint().map(str::to_string),
+        )
         .await?;
 
     Ok(Json(RulesResponse {
@@ -1488,6 +1503,70 @@ mod tests {
             status,
             StatusCode::BAD_REQUEST,
             "blanking a line is a different operation from correcting one"
+        );
+    }
+
+    /// Storage drops a meeting's vector when its title or a line changes; without a refresh
+    /// scheduled here the meeting stayed out of semantic search until an unrelated edit.
+    #[tokio::test]
+    async fn a_rename_or_a_corrected_line_schedules_an_index_refresh() {
+        let state = Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(RouterConfig::mock()).expect("mock router"),
+        ));
+        let app = routes().with_state(Arc::clone(&state));
+
+        let (meeting_id, segment_id) = {
+            let db = state.db().await;
+            let repo = notewise_storage::MeetingRepository::new(&db);
+            let meeting = repo
+                .create(notewise_storage::NewMeeting {
+                    project_id: None,
+                    title: "Sync".into(),
+                    source: notewise_storage::MeetingSource::Import,
+                    started_at: chrono::Utc::now(),
+                })
+                .expect("a meeting");
+            let segment = repo
+                .add_segment(notewise_storage::NewTranscriptSegment {
+                    meeting_id: meeting.id,
+                    speaker: None,
+                    text: "we shipped it".into(),
+                    start_ms: 0,
+                    end_ms: 1000,
+                    confidence: None,
+                })
+                .expect("a segment");
+            (meeting.id, segment.id)
+        };
+
+        let before = state.indexing().generation();
+        let (status, _) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/meetings/{meeting_id}/title"),
+                serde_json::json!({ "title": "Billing sync" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let after_rename = state.indexing().generation();
+        assert!(after_rename > before, "a rename scheduled no refresh");
+
+        let (status, _) = call(
+            &app,
+            send(
+                "PUT",
+                &format!("/v1/segments/{segment_id}/text"),
+                serde_json::json!({ "text": "we shipped it on Friday" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            state.indexing().generation() > after_rename,
+            "a corrected line scheduled no refresh"
         );
     }
 
