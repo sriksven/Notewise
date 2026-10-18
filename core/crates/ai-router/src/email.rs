@@ -209,7 +209,7 @@ pub async fn generate_email_draft(
     }
 
     let request = ChatRequest::new(vec![ChatMessage::user(user_prompt(context, tone))])
-        .with_context(vec![SYSTEM_PROMPT.to_string()]);
+        .with_system(SYSTEM_PROMPT);
 
     let response = backend.chat(&request).await?;
     let (subject, body) = split_subject_and_body(&response.text, &context.meeting_title)?;

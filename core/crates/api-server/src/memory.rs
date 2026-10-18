@@ -449,8 +449,8 @@ async fn propose(state: &Shared, context: &str) -> Vec<Candidate> {
     let ai = state.ai();
 
     for attempt in 0..2 {
-        let request = ChatRequest::new(vec![ChatMessage::user(context)])
-            .with_context(vec![observer_prompt()]);
+        let request =
+            ChatRequest::new(vec![ChatMessage::user(context)]).with_system(observer_prompt());
 
         let Ok(reply) = ai.chat(&request).await else {
             // The model being unavailable ends the run rather than retrying: the meetings stay
@@ -736,9 +736,10 @@ mod tests {
                 .iter()
                 .map(|m| m.content.as_str())
                 .collect();
+            // The prompt a real backend would build, default and all.
             self.seen.lock().unwrap().push(format!(
                 "{}\n{}",
-                request.context.join("\n"),
+                request.system_prompt("Answer questions about the user's meetings."),
                 asked.join("\n")
             ));
 

@@ -504,12 +504,15 @@ async fn drive(
         // ignored, which costs one cheap read against a call that is already talking to a model.
         let memories = crate::memory::for_prompt(state, None, task).await;
 
-        let mut context = vec![system_prompt(task)];
+        // The protocol is the system prompt, not "material" under the meetings question-answerer
+        // the backend would otherwise put first — see `ChatRequest::system`.
+        let mut system = system_prompt(task);
         if !memories.is_empty() {
-            context.push(memories);
+            system.push_str("\n\n");
+            system.push_str(&memories);
         }
 
-        let request = ChatRequest::new(messages).with_context(context);
+        let request = ChatRequest::new(messages).with_system(system);
         let response = state
             .ai()
             .chat(&request)

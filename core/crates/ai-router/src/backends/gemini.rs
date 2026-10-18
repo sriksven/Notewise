@@ -261,14 +261,12 @@ impl AiBackend for GeminiBackend {
             ));
         }
 
-        let mut system = String::from(
+        // The request's own instruction when it brings one; the meetings question-answerer
+        // otherwise. See `ChatRequest::system`.
+        let system = request.system_prompt(
             "Answer questions about the user's meetings using only the material provided. \
              If the material does not contain the answer, say so plainly.",
         );
-        if !request.context.is_empty() {
-            system.push_str("\n\nMaterial:\n");
-            system.push_str(&request.context.join("\n---\n"));
-        }
 
         let contents: Vec<Value> = request
             .messages

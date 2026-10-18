@@ -262,14 +262,12 @@ impl AiBackend for OllamaBackend {
             ));
         }
 
-        let mut system = String::from(
+        // The request's own instruction when it brings one; the meetings question-answerer
+        // otherwise. See `ChatRequest::system`.
+        let system = request.system_prompt(
             "Answer questions about the user's meetings using only the material provided. \
              If the material does not contain the answer, say so plainly.",
         );
-        if !request.context.is_empty() {
-            system.push_str("\n\nMaterial:\n");
-            system.push_str(&request.context.join("\n---\n"));
-        }
 
         let mut messages = vec![json!({ "role": "system", "content": system })];
         messages.extend(request.messages.iter().map(|m| {
@@ -843,6 +841,50 @@ mod tests {
         );
         let user = text(&chats[1], 1).expect("a user turn");
         assert!(user.ends_with(prompts::ACTION_ITEMS_REMINDER), "{user}");
+    }
+
+    /// A request with its own instruction must not be framed as a question about meetings — that
+    /// framing is why "fix the grammar of this" came back as "I don't have any information about
+    /// your meetings".
+    #[tokio::test]
+    async fn a_chat_with_its_own_instruction_sends_that_instead_of_the_meetings_default() {
+        let daemon = daemon(&["llama3.1:8b"], 0);
+        let backend = pointed_at(&daemon);
+
+        backend
+            .chat(
+                &ChatRequest::new(vec![ChatMessage::user("their going too the store")])
+                    .with_system("Correct spelling and grammar. Return only the text."),
+            )
+            .await
+            .expect("answers");
+        backend
+            .chat(&ChatRequest::new(vec![ChatMessage::user(
+                "what did we decide?",
+            )]))
+            .await
+            .expect("answers");
+
+        let systems: Vec<String> = daemon
+            .requests()
+            .iter()
+            .filter(|r| r.path() == "/api/chat")
+            .map(|r| {
+                r.json()["messages"][0]["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            systems[0],
+            "Correct spelling and grammar. Return only the text."
+        );
+        assert!(
+            systems[1].starts_with("Answer questions about the user's meetings"),
+            "the default stays for a request that does not bring one: {}",
+            systems[1]
+        );
     }
 
     #[test]

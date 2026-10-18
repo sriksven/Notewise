@@ -776,6 +776,15 @@ impl Router {
             })
             .collect();
 
+        // The instruction too. Unlike a summary template it is often built from user content —
+        // the agent's task, the text on screen, the person's memories — so it is masked like the
+        // material it replaced.
+        let system = request.system.as_deref().map(|s| {
+            let (masked, r) = crate::redact::redact(s, policy);
+            report.merge(&r);
+            masked.into_owned()
+        });
+
         if !report.is_empty() {
             tracing::info!(
                 backend = self.kind.label(),
@@ -784,7 +793,11 @@ impl Router {
             );
         }
 
-        ChatRequest { context, messages }
+        ChatRequest {
+            context,
+            messages,
+            system,
+        }
     }
 }
 
@@ -1001,6 +1014,7 @@ mod tests {
 
         async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
             let mut seen = self.seen.lock().expect("spy lock");
+            seen.extend(request.system.iter().cloned());
             seen.extend(request.context.iter().cloned());
             seen.extend(request.messages.iter().map(|m| m.content.clone()));
             Ok(ChatResponse {
@@ -1091,6 +1105,25 @@ mod tests {
             2,
             "both the message and the context should be masked: {transmitted}"
         );
+    }
+
+    /// A request's own instruction is often built from user content — the text on screen, the
+    /// agent's task — so it is masked like the material it replaced, and it reaches the backend.
+    #[tokio::test]
+    async fn a_requests_own_instruction_is_carried_and_masked() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()));
+
+        let request = ChatRequest::new(vec![ChatMessage::user("what is this?")])
+            .with_system(format!("WHAT IS ON SCREEN:\nthe deploy key is {SECRET}"));
+        router.chat(&request).await.expect("chats");
+
+        let transmitted = spy.transmitted();
+        assert!(
+            transmitted.contains("WHAT IS ON SCREEN"),
+            "dropped: {transmitted}"
+        );
+        assert!(!transmitted.contains(SECRET), "{transmitted}");
     }
 
     /// Turning redaction off is possible but must be deliberate.

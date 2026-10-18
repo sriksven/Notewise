@@ -208,6 +208,17 @@ pub struct ChatRequest {
     pub context: Vec<String>,
     /// Conversation so far. Must be non-empty and end with a user message.
     pub messages: Vec<ChatMessage>,
+    /// The instruction for this request, in place of the backend's own.
+    ///
+    /// `None` keeps the default, which is a meetings question-answerer: "answer questions about
+    /// the user's meetings using only the material provided, and say so when it is not there".
+    /// That is right for Ask and wrong for everything else built on `chat`. Features used to pass
+    /// their instructions as `context`, where they arrived as *material* under that default — and
+    /// asked to fix the grammar of a sentence, `llama3.1:8b` answered "I don't have any
+    /// information about your meetings" in half of the runs, an answer the assistant would then
+    /// have typed over the user's selection.
+    #[serde(default)]
+    pub system: Option<String>,
 }
 
 impl ChatRequest {
@@ -215,12 +226,36 @@ impl ChatRequest {
         Self {
             context: Vec::new(),
             messages,
+            system: None,
         }
     }
 
     pub fn with_context(mut self, context: Vec<String>) -> Self {
         self.context = context;
         self
+    }
+
+    /// Replace the backend's default instruction. See [`Self::system`].
+    pub fn with_system(mut self, system: impl Into<String>) -> Self {
+        self.system = Some(system.into());
+        self
+    }
+
+    /// The system prompt to send: this request's instruction, or the backend's `default`, with
+    /// the material appended.
+    ///
+    /// One composition shared by every backend, so a backend cannot honour `system` and forget the
+    /// material, or the other way round.
+    pub fn system_prompt(&self, default: &str) -> String {
+        let mut system = match self.system.as_deref() {
+            Some(custom) if !custom.trim().is_empty() => custom.to_string(),
+            _ => default.to_string(),
+        };
+        if !self.context.is_empty() {
+            system.push_str("\n\nMaterial:\n");
+            system.push_str(&self.context.join("\n---\n"));
+        }
+        system
     }
 
     /// Whether this request is well-formed. Backends check this before spending a
