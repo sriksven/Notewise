@@ -3947,6 +3947,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{approved}");
         assert_eq!(approved["status"], "approved");
 
+        // A second approval conflicts with the draft's state. It was a 422 `invalid_state`
+        // reading "invalid stored value in column 'email_drafts.status'" — a damaged database, to
+        // anyone reading it.
+        let (status, again) = json(
+            &app,
+            Request::post(format!("/v1/emails/{draft_id}/approve"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{again}");
+        assert_eq!(again["code"], "refused", "{again}");
+        assert!(
+            !again["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid stored value"),
+            "{again}"
+        );
+
         let (status, discarded) = json(
             &app,
             Request::delete(format!("/v1/emails/{draft_id}"))
