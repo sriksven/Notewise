@@ -700,7 +700,13 @@ export default function App() {
                 there is no offer, which is almost always. */}
             <JoinPrompt
               canRecord={health?.can_record ?? false}
-              onStarted={(id) => navigate({ name: "meeting", id, tab: "transcript" })}
+              device={preferredDevice}
+              language={language}
+              onStarted={(id) => {
+                navigate({ name: "meeting", id, tab: "transcript" });
+                setQuestions([]);
+                void refresh();
+              }}
             />
 
             {route.name === "home" && (
