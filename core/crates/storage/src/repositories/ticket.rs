@@ -97,6 +97,26 @@ impl<'a> TicketRepository<'a> {
             .collect()
     }
 
+    /// Every ticket, whatever its status, in the same order as [`Self::list_open`].
+    ///
+    /// A board with a Done column needs the finished ones too. `list_open` stays the call for
+    /// "work still owed" — indexing, and the bare `GET /v1/tickets` older clients make — but a
+    /// board built on it showed a ticket moved to Done for the rest of the session and then lost
+    /// it on the next load, so the column it had just been moved to was always empty.
+    pub fn list_all(&self) -> Result<Vec<Ticket>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, title, description, status, owner, due_at,
+                    external_provider, external_id, external_url, created_at, updated_at
+             FROM tickets
+             ORDER BY due_at IS NULL, due_at",
+        )?;
+        let rows = stmt.query_map([], map_ticket)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
     pub fn list_in_project(&self, project_id: Id) -> Result<Vec<Ticket>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
@@ -304,6 +324,24 @@ mod tests {
             .map(|t| t.id)
             .collect();
         assert_eq!(ids, vec![open.id]);
+    }
+
+    #[test]
+    fn list_all_includes_closed_tickets() {
+        let db = db();
+        let repo = TicketRepository::new(&db);
+        let open = ticket(&db, "Open");
+        let done = ticket(&db, "Done");
+        let cancelled = ticket(&db, "Cancelled");
+        repo.set_status(done.id, WorkStatus::Done).unwrap();
+        repo.set_status(cancelled.id, WorkStatus::Cancelled)
+            .unwrap();
+
+        let mut ids: Vec<_> = repo.list_all().unwrap().into_iter().map(|t| t.id).collect();
+        ids.sort();
+        let mut expected = vec![open.id, done.id, cancelled.id];
+        expected.sort();
+        assert_eq!(ids, expected, "a board's Done column needs the done ones");
     }
 
     #[test]

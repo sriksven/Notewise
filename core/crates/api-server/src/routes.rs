@@ -2324,9 +2324,39 @@ async fn create_note(
     Ok(Json(note))
 }
 
-async fn list_tickets(State(state): State<Shared>) -> ApiResult<Json<Vec<Ticket>>> {
+#[derive(Debug, Default, Deserialize)]
+struct TicketListQuery {
+    /// `open` (the default: todo and in progress) or `all`.
+    ///
+    /// The default stays `open` so existing callers keep their meaning. A board with a Done column
+    /// asks for `all`; on `open` alone, a ticket moved to Done vanished on the next load.
+    #[serde(default)]
+    status: Option<String>,
+}
+
+async fn list_tickets(
+    State(state): State<Shared>,
+    Query(query): Query<TicketListQuery>,
+) -> ApiResult<Json<Vec<Ticket>>> {
+    // Refused rather than ignored: a typo answered with the open list looks exactly like a
+    // board whose done tickets were lost.
+    let all = match query.status.as_deref() {
+        None | Some("open") => false,
+        Some("all") => true,
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "unknown ticket filter '{other}'; expected open or all"
+            )))
+        }
+    };
+
     let db = state.db().await;
-    Ok(Json(TicketRepository::new(&db).list_open()?))
+    let repo = TicketRepository::new(&db);
+    Ok(Json(if all {
+        repo.list_all()?
+    } else {
+        repo.list_open()?
+    }))
 }
 
 // ---------------------------------------------------------------- search
@@ -3530,6 +3560,45 @@ mod tests {
         let (status, json) = call(&app(), get("/v1/tickets")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    /// A board with a Done column must get its done tickets back after a reload. The bare call
+    /// keeps meaning "open" for the clients that already rely on it.
+    #[tokio::test]
+    async fn a_done_ticket_is_listed_when_all_are_asked_for() {
+        let app = app();
+        let (status, created) = call(
+            &app,
+            post("/v1/tickets", serde_json::json!({"title": "Ship it"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let id = created["id"].as_str().unwrap().to_string();
+
+        let patch = Request::builder()
+            .method("PATCH")
+            .uri(format!("/v1/tickets/{id}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"status":"done"}"#))
+            .unwrap();
+        let (status, json) = call(&app, patch).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, open) = call(&app, get("/v1/tickets")).await;
+        assert!(open.as_array().unwrap().is_empty(), "{open}");
+
+        let (status, all) = call(&app, get("/v1/tickets?status=all")).await;
+        assert_eq!(status, StatusCode::OK, "{all}");
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0]["status"], "done");
+
+        let (status, _) = call(&app, get("/v1/tickets?status=finished")).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a typo must not silently answer with the open list"
+        );
     }
 
     // ------------------------------------------------------------------ recording
