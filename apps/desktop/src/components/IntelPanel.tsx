@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   CircleCheck,
   Link2,
@@ -79,6 +80,60 @@ const TONE: Partial<Record<AmbiguityKind, string>> = {
   unassigned_action: "bg-warn text-warn-text border-warn-line",
 };
 
+/** How long a question stays up after it arrives. The engine's `ClarifierConfig::staleness_ms`. */
+export const STALE_AFTER_MS = 5 * 60_000;
+
+/** How many questions show at once. The engine's `ClarifierConfig::max_pending`. */
+export const MAX_SHOWN = 3;
+
+/** One question's identity across polls: the same words about the same moment. */
+export function questionKey(question: ClarifyingQuestion): string {
+  return `${question.at_ms}:${question.question}`;
+}
+
+/**
+ * The questions still worth showing: newest first, none stale, at most {@link MAX_SHOWN}.
+ *
+ * The window appends every question it receives and keeps them until the recording ends, so
+ * without this an hour-long meeting grew one long list, oldest at the top — the question about
+ * what was just said sat below the fold, under ones about things said half an hour ago. The engine
+ * defines a cap and a staleness for exactly this and nothing on the live path applied them.
+ *
+ * Staleness counts from when a question *arrived*, kept in `firstSeen`: during a live recording
+ * the wall clock and the meeting advance together, and arrival is the moment the user could
+ * first have asked it.
+ */
+export function currentQuestions(
+  questions: ClarifyingQuestion[],
+  firstSeen: Map<string, number>,
+  now: number,
+): ClarifyingQuestion[] {
+  return questions
+    .filter((question) => now - (firstSeen.get(questionKey(question)) ?? now) < STALE_AFTER_MS)
+    .sort((a, b) => b.at_ms - a.at_ms)
+    .slice(0, MAX_SHOWN);
+}
+
+/** {@link currentQuestions}, kept current as time passes. */
+function useCurrentQuestions(questions: ClarifyingQuestion[]): ClarifyingQuestion[] {
+  const firstSeen = useRef(new Map<string, number>());
+  // Re-rendered on a slow tick while anything is showing, so a question expires on its own
+  // rather than whenever something else happens to redraw the panel.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (questions.length === 0) return;
+    const id = setInterval(() => setTick((tick) => tick + 1), 30_000);
+    return () => clearInterval(id);
+  }, [questions.length]);
+
+  const now = Date.now();
+  for (const question of questions) {
+    const key = questionKey(question);
+    if (!firstSeen.current.has(key)) firstSeen.current.set(key, now);
+  }
+  return currentQuestions(questions, firstSeen.current, now);
+}
+
 function Section({
   icon,
   title,
@@ -137,6 +192,8 @@ export function IntelPanel({
   onDismissQuestion,
   onClose,
 }: Props) {
+  const shown = useCurrentQuestions(questions);
+
   return (
     <aside
       aria-label="Meeting intelligence"
@@ -171,9 +228,9 @@ export function IntelPanel({
           <Section
             icon={<HelpCircle size={13} aria-hidden />}
             title="Worth asking"
-            count={questions.length}
+            count={shown.length}
           >
-            {questions.length === 0 ? (
+            {shown.length === 0 ? (
               <Empty>
                 {!isRecording
                   ? "Suggestions are made while a meeting is running, when there is still time to ask."
@@ -182,9 +239,11 @@ export function IntelPanel({
               </Empty>
             ) : (
               <ul className="space-y-2">
-                {questions.map((question, index) => (
+                {shown.map((question) => (
                   <li
-                    key={`${question.at_ms}-${index}`}
+                    // Not the index: dismissing one would shift every key after it, and React
+                    // would hand the next card the dismissed one's hover and focus state.
+                    key={questionKey(question)}
                     className="group rounded-lg border border-hairline bg-surface p-2.5"
                   >
                     <div className="mb-1.5 flex items-start justify-between gap-2">
@@ -200,8 +259,10 @@ export function IntelPanel({
                         type="button"
                         onClick={() => onDismissQuestion(question)}
                         aria-label="Dismiss this question"
+                        // Shown on keyboard focus too: hover-only made Tab land on an invisible
+                        // control.
                         className="shrink-0 text-ink-faint opacity-0 transition
-                                   hover:text-ink group-hover:opacity-100"
+                                   hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
                       >
                         <X size={13} aria-hidden />
                       </button>

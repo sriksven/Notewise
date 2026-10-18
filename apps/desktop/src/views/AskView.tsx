@@ -13,6 +13,21 @@ interface Turn {
   answer: GroundedAnswer | null;
 }
 
+/**
+ * Why an answer has no material behind it, in words a user can act on.
+ *
+ * Two different situations reach here, and they call for opposite responses: nothing matched
+ * (other words may find it), or material was found and none of it answers the question (it is
+ * not there to find). This used to say "nothing matched — retrieval is by word" in both, directly
+ * above the engine's own "looked at three passages and none of them answer that", and the claim
+ * about words is false whenever the semantic index is on.
+ */
+export function notGroundedNote(answer: GroundedAnswer): string {
+  return (answer.considered ?? 0) > 0
+    ? "Some of your material looked related, but none of it answers this."
+    : "Nothing in your workspace matched this. Different wording may find it.";
+}
+
 const SUGGESTIONS = [
   "What did we decide about pricing?",
   "What am I supposed to be doing this week?",
@@ -147,8 +162,7 @@ export function AskView({ onNavigate }: Props) {
                       <p className="mb-2 flex items-start gap-1.5 rounded-lg border border-warn-line
                                     bg-warn px-3 py-2 text-[12px] leading-relaxed text-warn-text">
                         <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
-                        Nothing in your workspace matched this. Retrieval is by word, so different
-                        wording may find it.
+                        {notGroundedNote(turn.answer)}
                       </p>
                     )}
 

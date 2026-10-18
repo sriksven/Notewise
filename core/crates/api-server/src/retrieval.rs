@@ -413,6 +413,16 @@ pub fn fuse(rankings: &[Vec<(&'static str, Id)>]) -> Vec<(&'static str, Id)> {
 /// `preferred` holds the specific chunks semantic search matched. Where they exist they are
 /// used instead of the whole entity: two paragraphs that actually answer the question ground
 /// an answer better than the first three thousand characters of an hour-long transcript.
+///
+/// # Only while they are still true
+///
+/// A stored chunk is a copy of the entity as it was when it was embedded, and the index is
+/// refreshed in a background pass that does not see every kind of edit. Correct a line of a
+/// transcript — "Team is 49 dollars" to "59 dollars" — and the meeting's chunks still say 49;
+/// measured on a real workspace, Ask went on answering "49 dollars a month" after the
+/// correction and after a rebuild, because the stored copy was handed to the model as the
+/// passage. So a chunk is used only if it still occurs in the entity's current text; one that
+/// does not is from an older version, and the live text is used instead.
 fn assemble(
     db: &Database,
     ranked: Vec<(&'static str, Id)>,
@@ -430,9 +440,21 @@ fn assemble(
             continue;
         };
 
-        let source = match preferred.get(&(kind, id)) {
-            Some(chunks) if !chunks.is_empty() => chunks.join("\n\n…\n\n"),
-            _ => passage.text,
+        let current: Vec<&str> = preferred
+            .get(&(kind, id))
+            .map(|chunks| {
+                let body = crate::indexing::indexed_body(kind, &passage.title, &passage.text);
+                chunks
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|chunk| body.contains(chunk))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let source = if current.is_empty() {
+            passage.text
+        } else {
+            current.join("\n\n…\n\n")
         };
 
         let allowance = budget.min(MAX_PASSAGE_CHARS);
@@ -890,6 +912,63 @@ mod tests {
             "lengths: {:?}",
             passages.iter().map(|p| p.text.len()).collect::<Vec<_>>()
         );
+    }
+
+    /// A stored chunk is a copy of the meeting as it was. Correct a line and the copy still says
+    /// what was wrong — and was handed to the model as the passage, so Ask kept answering with
+    /// the figure the user had just fixed.
+    #[test]
+    fn a_chunk_the_entity_no_longer_contains_is_never_served() {
+        let db = db();
+        let id = meeting_with(
+            &db,
+            "Pricing review",
+            &["Starter is 19 dollars.", "Team is 49 dollars a month."],
+        );
+        let repo = MeetingRepository::new(&db);
+        // Exactly what the indexer cut before the correction.
+        let stale = crate::indexing::indexed_body(
+            "meeting",
+            "Pricing review",
+            &repo.transcript_text(id).expect("transcript"),
+        );
+        let line = repo.segments(id).expect("segments")[1].id;
+        repo.set_segment_text(line, "Team is 59 dollars a month.")
+            .expect("correct it");
+
+        let preferred = BTreeMap::from([(("meeting", id), vec![stale])]);
+        let passages = assemble(&db, vec![("meeting", id)], &preferred);
+
+        assert_eq!(passages.len(), 1);
+        assert!(
+            passages[0].text.contains("59 dollars"),
+            "{}",
+            passages[0].text
+        );
+        assert!(
+            !passages[0].text.contains("49 dollars"),
+            "{}",
+            passages[0].text
+        );
+    }
+
+    /// The guard must not cost the case chunks exist for: a current chunk still beats the
+    /// whole entity.
+    #[test]
+    fn a_chunk_that_still_matches_is_used_instead_of_the_whole_entity() {
+        let db = db();
+        let id = meeting_with(
+            &db,
+            "Pricing review",
+            &["Starter is 19 dollars.", "Team is 49 dollars a month."],
+        );
+        let preferred = BTreeMap::from([(
+            ("meeting", id),
+            vec!["Team is 49 dollars a month.".to_string()],
+        )]);
+
+        let passages = assemble(&db, vec![("meeting", id)], &preferred);
+        assert_eq!(passages[0].text, "Team is 49 dollars a month.");
     }
 
     #[test]

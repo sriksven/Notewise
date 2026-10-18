@@ -98,6 +98,13 @@ export interface GroundedAnswer {
    * is by word and a rewording may find it.
    */
   grounded: boolean;
+  /**
+   * How many passages retrieval found before they were checked for relevance.
+   *
+   * Tells "found nothing" (0: try other words) from "found some, none answer it" — the material
+   * genuinely is not there. Absent from the per-note endpoint's older responses.
+   */
+  considered?: number;
 }
 
 /** A sink this build contains, whether or not it has been turned on. */
@@ -333,9 +340,22 @@ export type AmbiguityKind =
 
 export interface ClarifyingQuestion {
   question: string;
+  /** The words that prompted it, as said — the engine drops a question whose quote is not. */
   about: string;
   kind: AmbiguityKind;
+  /** When the prompting statement was said, in meeting time. */
   at_ms: number;
+}
+
+/**
+ * What a client carries between question polls, opaque to it.
+ *
+ * Returned by every `questions` response and sent back unchanged with the next request for the
+ * same meeting. Start a new meeting with none.
+ */
+export interface QuestionSession {
+  asked: string[];
+  last_suggestion_ms: number | null;
 }
 
 export interface Ticket {
@@ -1079,11 +1099,20 @@ export const api = {
   exportUrl: (id: string, variant: "full" | "brief" | "transcript" = "full") =>
     `/v1/meetings/${id}/export?variant=${variant}`,
 
-  questions: (id: string) =>
-    request<{ questions: ClarifyingQuestion[]; reason?: string }>(
-      `/v1/meetings/${id}/questions`,
-      { method: "POST", body: JSON.stringify({}) },
-    ),
+  /**
+   * Questions worth asking about a live meeting.
+   *
+   * The engine keeps no state per meeting, so its cooldown and its memory of what was already
+   * asked only work if the caller carries them: pass back the `session` the previous response
+   * returned. Without it every poll is a model call that may reword a question already shown.
+   */
+  questions: (id: string, session?: QuestionSession) =>
+    request<
+      { questions: ClarifyingQuestion[]; reason?: string; cooling_down?: boolean } & QuestionSession
+    >(`/v1/meetings/${id}/questions`, {
+      method: "POST",
+      body: JSON.stringify(session ?? {}),
+    }),
 
   chat: (id: string, messages: Array<{ role: string; content: string }>) =>
     request<{ text: string; model: string }>(`/v1/meetings/${id}/chat`, {

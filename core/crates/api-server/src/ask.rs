@@ -59,6 +59,36 @@ fn latest_question(messages: &[Turn]) -> Option<&str> {
         .map(|m| m.content.as_str())
 }
 
+/// What retrieval searches for: the latest question, or — when it only makes sense through the
+/// one before it — both.
+///
+/// Searching on the latest question alone is right when it changes the subject ("and what about
+/// headcount?"), and is why earlier turns are not pooled. It fails a follow-up that points back:
+/// "Who owns that?" has one search term, "owns", which matches nothing, so after "What did we
+/// decide about the search cluster?" the answer was "Nothing in this workspace matches that
+/// question" — measured on `llama3.1:8b`, against a meeting that said who owns it. A short
+/// question that refers back with a pronoun is searched together with the question it refers to.
+fn retrieval_query(messages: &[Turn]) -> Option<String> {
+    let mut asked = messages.iter().rev().filter(|m| m.role != "assistant");
+    let latest = asked.next()?.content.as_str();
+
+    let refers_back = retrieval::terms(latest).len() <= 2
+        && latest
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| REFERRING_WORDS.contains(&word.to_lowercase().as_str()));
+
+    Some(match asked.next() {
+        Some(previous) if refers_back => format!("{} {latest}", previous.content),
+        _ => latest.to_string(),
+    })
+}
+
+/// Words that point at something said earlier rather than naming it.
+const REFERRING_WORDS: &[&str] = &[
+    "it", "its", "that", "this", "those", "these", "they", "them", "their", "he", "him", "his",
+    "she", "her", "there",
+];
+
 fn to_router_messages(messages: Vec<Turn>) -> Vec<ChatMessage> {
     messages
         .into_iter()
@@ -94,9 +124,8 @@ async fn chat_about_note(
         return Err(ApiError::BadRequest("messages must not be empty".into()));
     }
 
-    let question = latest_question(&body.messages)
-        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
-        .to_string();
+    let question = retrieval_query(&body.messages)
+        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?;
 
     let wide = body.scope.as_deref() == Some("workspace");
 
@@ -159,9 +188,8 @@ async fn ask_workspace(
         return Err(ApiError::BadRequest("messages must not be empty".into()));
     }
 
-    let question = latest_question(&body.messages)
-        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
-        .to_string();
+    let question = retrieval_query(&body.messages)
+        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?;
 
     let retrieved = retrieval::gather_hybrid(&state, &question).await?;
     let considered = retrieved.len();
@@ -225,10 +253,24 @@ async fn answer(
     let request = ChatRequest::new(to_router_messages(messages)).with_context(context);
     let response = state.ai().chat(&request).await?;
 
+    let (text, cited) = check_references(&response.text, passages.len());
+    // The passages the answer points at, under the numbers it uses. All of them when it points
+    // at none — an answer that cites nothing was still written from this material, and hiding
+    // the material would present it as having no source.
+    let citations: Vec<serde_json::Value> = retrieval::citations(&passages)
+        .into_iter()
+        .filter(|citation| {
+            cited.is_empty()
+                || citation["n"]
+                    .as_u64()
+                    .is_some_and(|n| cited.contains(&(n as usize)))
+        })
+        .collect();
+
     Ok(Json(serde_json::json!({
-        "text": response.text,
+        "text": text,
         "model": response.model,
-        "citations": retrieval::citations(&passages),
+        "citations": citations,
         // How many passages retrieval produced before the relevance filter. Reported so a
         // client can tell "found nothing" from "found six and discarded them", and so this is
         // diagnosable without attaching a debugger to a model call.
@@ -241,6 +283,86 @@ async fn answer(
         // matched" in the UI, directly under the citation it had just produced.
         "grounded": !passages.is_empty(),
     })))
+}
+
+/// Hold an answer's `[n]` references to the passages it was actually given.
+///
+/// Returns the text with every reference resolved, and the passage numbers it cites.
+///
+/// # Why the text is changed
+///
+/// The citation list under an answer is its legend: `[2]` in the text is the chip numbered 2.
+/// Two things broke that, both measured on `llama3.1:8b`:
+///
+/// - **References to passages that do not exist.** Given one passage — a four-line transcript —
+///   the model answered "According to [3], Raj will own the OpenSearch migration. According to
+///   [4], the cutover is October 3rd", numbering the transcript's lines. The text pointed at
+///   sources the user could not open. With one passage there is only one thing such a reference
+///   can mean, so it becomes `[1]`; with several there is no telling which was meant, and it is
+///   removed rather than guessed.
+/// - **Passages listed that the answer never used.** Every retrieved passage was returned as a
+///   citation, so a question about Enterprise pricing showed a chip for a 1:1 about someone's
+///   medical leave beside an answer that had not used it. Only cited passages are listed now.
+///
+/// Brackets holding anything but numbers — a quoted `[inaudible]`, `[Dana: …]` — are not
+/// references and are left alone.
+fn check_references(text: &str, passages: usize) -> (String, Vec<usize>) {
+    let mut out = String::with_capacity(text.len());
+    let mut cited = Vec::new();
+    let mut rest = text;
+
+    while let Some(open) = rest.find('[') {
+        let (before, from) = rest.split_at(open);
+        out.push_str(before);
+        let Some(close) = from.find(']') else {
+            rest = from;
+            break;
+        };
+        let inner = &from[1..close];
+        let numbers: Option<Vec<usize>> = if !inner.trim().is_empty()
+            && inner
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
+        {
+            inner
+                .split([',', ' '])
+                .filter(|piece| !piece.is_empty())
+                .map(|piece| piece.parse().ok())
+                .collect()
+        } else {
+            None
+        };
+
+        match numbers {
+            Some(numbers) => {
+                let mut valid: Vec<usize> = numbers
+                    .into_iter()
+                    .map(|n| if passages == 1 { 1 } else { n })
+                    .filter(|n| (1..=passages).contains(n))
+                    .collect();
+                valid.dedup();
+                if valid.is_empty() {
+                    // The space that introduced the reference goes with it.
+                    if out.ends_with(' ') {
+                        out.pop();
+                    }
+                } else {
+                    let list: Vec<String> = valid.iter().map(ToString::to_string).collect();
+                    out.push('[');
+                    out.push_str(&list.join(", "));
+                    out.push(']');
+                    cited.extend(valid);
+                }
+            }
+            None => out.push_str(&from[..=close]),
+        }
+        rest = &from[close + 1..];
+    }
+
+    out.push_str(rest);
+    cited.sort_unstable();
+    cited.dedup();
+    (out, cited)
 }
 
 #[cfg(test)]
@@ -509,6 +631,137 @@ mod tests {
         let (app, _state) = app();
         let (status, _) = post_json(&app, "/v1/notes/not-an-id/chat", ask("hi")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // ------------------------------------------------------------ references
+
+    #[test]
+    fn references_to_real_passages_are_kept_and_reported() {
+        let (text, cited) = check_references("Three tiers [1], set by Dana [3].", 3);
+        assert_eq!(text, "Three tiers [1], set by Dana [3].");
+        assert_eq!(cited, vec![1, 3]);
+    }
+
+    /// Measured: one four-line passage, answered "According to [3] … According to [4] …".
+    #[test]
+    fn with_one_passage_every_reference_means_that_passage() {
+        let (text, cited) = check_references(
+            "According to [3], Raj owns it. According to [4], cutover is Oct 3.",
+            1,
+        );
+        assert_eq!(
+            text,
+            "According to [1], Raj owns it. According to [1], cutover is Oct 3."
+        );
+        assert_eq!(cited, vec![1]);
+    }
+
+    #[test]
+    fn with_several_passages_a_reference_to_none_of_them_is_removed() {
+        let (text, cited) = check_references("Raj owns it [7]. Dana [2, 9] agreed.", 2);
+        assert_eq!(text, "Raj owns it. Dana [2] agreed.");
+        assert_eq!(cited, vec![2]);
+    }
+
+    #[test]
+    fn brackets_that_are_not_references_are_left_alone() {
+        let raw = "She said [inaudible] and [Dana: I'll update it]. An unclosed [1";
+        let (text, cited) = check_references(raw, 2);
+        assert_eq!(text, raw);
+        assert!(cited.is_empty());
+    }
+
+    /// The citation list is the legend for the `[n]` in the text. A chip for a passage the answer
+    /// never used — measured: a 1:1 about someone's medical leave, under an answer about pricing —
+    /// is a source that is not one.
+    #[tokio::test]
+    async fn only_the_passages_an_answer_cites_are_listed() {
+        let (app, state) = app();
+        seed_meeting(&state, "Pricing review", "the pricing tiers are settled").await;
+        seed_note(&state, "Pricing notes", "pricing: three tiers").await;
+
+        // The mock backend echoes the question, so this is the answer's text: it cites [2] and a
+        // passage that does not exist.
+        let (status, body) = post_json(&app, "/v1/ask", ask("pricing tiers [2] [9]")).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let text = body["text"].as_str().expect("text");
+        assert!(!text.contains("[9]"), "{text}");
+        let citations = body["citations"].as_array().expect("citations");
+        assert_eq!(citations.len(), 1, "{citations:?}");
+        assert_eq!(
+            citations[0]["n"], 2,
+            "numbered as in the text: {citations:?}"
+        );
+    }
+
+    /// "Who owns that?" searches for "owns" alone, which matches nothing; measured, it was
+    /// answered "Nothing in this workspace matches" right after a question it follows on from.
+    #[tokio::test]
+    async fn a_follow_up_that_points_back_is_searched_with_what_it_points_at() {
+        let (app, state) = app();
+        seed_meeting(
+            &state,
+            "Infrastructure sync",
+            "We decided to move the search cluster to OpenSearch, and Raj will own that migration.",
+        )
+        .await;
+        seed_meeting(&state, "Hiring", "we approved two backend headcount").await;
+
+        let (status, body) = post_json(
+            &app,
+            "/v1/ask",
+            serde_json::json!({"messages": [
+                {"role": "user", "content": "What did we decide about the search cluster?"},
+                {"role": "assistant", "content": "To move it to OpenSearch [1]."},
+                {"role": "user", "content": "Who owns that?"}
+            ]}),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["grounded"], true, "{body}");
+        let citations = body["citations"].as_array().expect("citations");
+        assert!(
+            citations
+                .iter()
+                .any(|c| c["title"] == "Infrastructure sync"),
+            "{citations:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_short_question_that_refers_back_takes_the_previous_one_along() {
+        let turn = |role: &str, content: &str| Turn {
+            role: role.into(),
+            content: content.into(),
+        };
+        let thread = |last: &str| {
+            vec![
+                turn("user", "What did we decide about pricing?"),
+                turn("assistant", "Three tiers."),
+                turn("user", last),
+            ]
+        };
+
+        assert_eq!(
+            retrieval_query(&thread("And who owns it?")).as_deref(),
+            Some("What did we decide about pricing? And who owns it?")
+        );
+        // A change of subject stands alone, which is why earlier turns are not pooled.
+        assert_eq!(
+            retrieval_query(&thread("and what about headcount?")).as_deref(),
+            Some("and what about headcount?")
+        );
+        // A full question that happens to contain "it" stands alone too.
+        assert_eq!(
+            retrieval_query(&thread(
+                "Did the hiring plan for it include two backend engineers?"
+            ))
+            .as_deref(),
+            Some("Did the hiring plan for it include two backend engineers?")
+        );
+        assert!(retrieval_query(&[turn("assistant", "hello")]).is_none());
     }
 
     /// Retrieval must follow the conversation. A follow-up question should find material for
