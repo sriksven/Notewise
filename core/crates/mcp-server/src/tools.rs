@@ -472,6 +472,20 @@ fn create_ticket(db: &Database, args: &Value) -> Result<Value> {
         return Err(McpError::InvalidParams("'title' must not be blank".into()));
     }
 
+    // Resolved before the ticket exists. A malformed id used to be rejected *after* the ticket was
+    // filed, so the agent was told the call failed while a ticket sat in the workspace; and an id
+    // naming no meeting was stored as an edge to nothing — the edge table has no foreign keys.
+    let meeting_id = match args.get("meeting_id").and_then(Value::as_str) {
+        Some(raw) => {
+            let id: Id = raw
+                .parse()
+                .map_err(|_| McpError::InvalidParams(format!("'{raw}' is not a valid id")))?;
+            MeetingRepository::new(db).get(id)?;
+            Some(id)
+        }
+        None => None,
+    };
+
     let ticket = TicketRepository::new(db).create(NewTicket {
         project_id: None,
         title,
@@ -486,10 +500,7 @@ fn create_ticket(db: &Database, args: &Value) -> Result<Value> {
         due_at: None,
     })?;
 
-    if let Some(raw) = args.get("meeting_id").and_then(Value::as_str) {
-        let meeting_id: Id = raw
-            .parse()
-            .map_err(|_| McpError::InvalidParams(format!("'{raw}' is not a valid id")))?;
+    if let Some(meeting_id) = meeting_id {
         Graph::new(db).connect(
             NodeRef::new(NodeKind::Ticket, ticket.id),
             EdgeKind::DerivedFrom,
@@ -1078,6 +1089,31 @@ mod tests {
         assert_eq!(first["id"], second["id"], "filed a duplicate ticket");
         assert_eq!(first["already_existed"], false);
         assert_eq!(second["already_existed"], true);
+    }
+
+    /// A ticket for a meeting that is not there is the agent's mistake, and must leave no ticket
+    /// behind. A malformed id was rejected only after the ticket was filed, and an unknown one was
+    /// stored as a link to nothing.
+    #[test]
+    fn a_ticket_for_an_unknown_meeting_is_refused_and_not_filed() {
+        let db = db();
+        for meeting_id in ["not-an-id", "00000000-0000-4000-8000-00000000abcd"] {
+            let err = call(
+                &db,
+                "create_ticket",
+                &json!({ "title": "Orphan", "meeting_id": meeting_id }),
+                WriteAccess::Allowed,
+            )
+            .expect_err("must refuse");
+            assert_eq!(
+                err.code(),
+                crate::protocol::INVALID_PARAMS,
+                "{meeting_id}: {err}"
+            );
+        }
+
+        assert!(TicketRepository::new(&db).list_all().unwrap().is_empty());
+        assert_eq!(Graph::new(&db).edge_count().unwrap(), 0);
     }
 
     #[test]
