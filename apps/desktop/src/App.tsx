@@ -771,6 +771,7 @@ export default function App() {
                 onModeChange={theme.setMode}
                 onAccentChange={theme.setAccent}
                 onNavigate={navigate}
+                onEngineChange={() => void refresh()}
               />
             )}
             {route.name === "about" && <AboutView health={health} />}

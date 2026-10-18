@@ -33,7 +33,15 @@ import {
  * doing, and how do I stop it". Composing an arbitrary rule stays an API call until there is
  * evidence anyone wants to.
  */
-export function RoutingSettings() {
+interface Props {
+  /**
+   * The policy in force changed. The engine names its model after the policy ("mock + 1 route"),
+   * so the window's copy of `/health` is stale the moment a rule is installed or removed.
+   */
+  onChanged?: () => void;
+}
+
+export function RoutingSettings({ onChanged }: Props = {}) {
   const [state, setState] = useState<RoutingRules | null>(null);
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [explain, setExplain] = useState<RoutingExplain | null>(null);
@@ -79,6 +87,7 @@ export function RoutingSettings() {
     setError(null);
     try {
       setState(await api.installDefaultRouting(backend));
+      onChanged?.();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "could not install the policy");
     } finally {
@@ -93,6 +102,7 @@ export function RoutingSettings() {
     try {
       const kept = state.rules.filter((r) => r.name !== name);
       setState(await api.saveRoutingRules(kept));
+      onChanged?.();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "could not save the policy");
     } finally {
