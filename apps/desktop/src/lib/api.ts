@@ -98,6 +98,13 @@ export interface GroundedAnswer {
    * is by word and a rewording may find it.
    */
   grounded: boolean;
+  /**
+   * How many passages retrieval found before they were checked for relevance.
+   *
+   * Tells "found nothing" (0: try other words) from "found some, none answer it" — the material
+   * genuinely is not there. Absent from the per-note endpoint's older responses.
+   */
+  considered?: number;
 }
 
 /** A sink this build contains, whether or not it has been turned on. */
