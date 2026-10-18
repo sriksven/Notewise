@@ -231,18 +231,25 @@ mod imp {
     /// Returns a boxed source so the caller does not need a different type per platform. Only
     /// macOS has an implementation today; elsewhere this is an error the caller treats as
     /// "microphone only", which is exactly right.
+    ///
+    /// `origin` is the microphone's time zero. The tap opens after it, and counting its time from
+    /// its own opening would put everything the far end said early by the difference.
     fn open_system_audio(
         config: &CaptureConfig,
+        origin: std::time::Instant,
     ) -> std::result::Result<Box<dyn notewise_audio_capture::AudioSource>, String> {
         #[cfg(target_os = "macos")]
         {
             notewise_audio_capture::SystemAudioSource::open(config)
-                .map(|s| Box::new(s) as Box<dyn notewise_audio_capture::AudioSource>)
+                .map(|s| {
+                    Box::new(s.with_clock_origin(origin))
+                        as Box<dyn notewise_audio_capture::AudioSource>
+                })
                 .map_err(|e| e.to_string())
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = config;
+            let _ = (config, origin);
             Err("system audio capture is not implemented on this platform".into())
         }
     }
@@ -316,6 +323,14 @@ mod imp {
             MicrophoneSource::open(&capture).map_err(|e| RecordingError::Failed(e.to_string()))?;
         let device = source.device_name().to_string();
 
+        // Time zero for everything this recording stamps. The microphone delivers from here on
+        // and its samples are counted from now, so a transcript segment at 5000 ms was said five
+        // seconds after this. The meeting starts here too, rather than after the model has
+        // loaded: speaker events from the browser extension are timed from the meeting's start,
+        // and a start a second late would put every named turn a second off its words.
+        let capture_origin = std::time::Instant::now();
+        let started_at = Utc::now();
+
         // The far end of the call, if this machine will give it to us.
         //
         // Deliberately not fatal. System audio needs a Screen Recording grant that many users
@@ -323,7 +338,7 @@ mod imp {
         // yesterday — refusing to record at all because the *better* mode is unavailable would
         // be a regression dressed up as a feature.
         let system_source = if request.capture_system_audio {
-            match open_system_audio(&capture) {
+            match open_system_audio(&capture, capture_origin) {
                 Ok(source) => Some(source),
                 Err(e) => {
                     tracing::info!(
@@ -355,7 +370,7 @@ mod imp {
                     .clone()
                     .unwrap_or_else(|| format!("Meeting {}", Utc::now().format("%Y-%m-%d %H:%M"))),
                 source: MeetingSource::Microphone,
-                started_at: Utc::now(),
+                started_at,
             })
             .map_err(|e| RecordingError::Failed(e.to_string()))?;
 
