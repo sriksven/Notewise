@@ -1,7 +1,7 @@
 # Browser extension
 
 > **Status: implemented, unverified against live meeting pages.** The platform-independent logic is
-> tested (`npm test`, 28 tests). The DOM selectors are not, and cannot be — see
+> tested (`npm test`, 39 tests). The DOM selectors are not, and cannot be — see
 > [What is not tested](#what-is-not-tested).
 
 Two jobs, and they send different things.
@@ -101,8 +101,9 @@ fifth participant in the call. See `docs/superpowers/specs/2026-08-14-speaker-id
 | Which participant is you | Chat, screen contents, page text |
 | | Meeting title or URL |
 
-To `http://127.0.0.1:47821/v1/meetings/:id/speaker-events`, the same loopback API the CLI and the
-desktop frontend use. The extension gets no special access.
+To `http://127.0.0.1:<port>/v1/meetings/:id/speaker-events`, on whichever of ports 47821–47830 the
+engine took — the same loopback API the CLI and the desktop frontend use. The extension gets no
+special access.
 
 **It runs only while the engine is recording.** With no recording in progress, no timer runs and
 nothing is read. That is a privacy property, not an optimisation — the extension is inert unless you
@@ -111,7 +112,8 @@ have already chosen to record.
 ## Permissions
 
 `"permissions": []`. Empty, and worth stating plainly: no `tabCapture`, no `storage`, no `scripting`,
-no `activeTab`. The only `host_permissions` entry is `http://127.0.0.1:47821/*`.
+no `activeTab`. The only `host_permissions` are the engine's ten loopback ports,
+`http://127.0.0.1:47821/*` to `http://127.0.0.1:47830/*`.
 
 ## Install
 
@@ -133,12 +135,22 @@ Manifest V3. `src/content.js` is a loader — a content script is not an ES modu
 `import`, so it reaches `src/session.js` by dynamic import. Keeping the logic in real modules is what
 makes it testable under `node --test` with no bundler to drift out of date.
 
-| File | Job |
-|---|---|
-| `src/platforms.js` | Reduces each platform's DOM to `{id, displayName, speaking, isLocal}[]` |
-| `src/tracker.js` | Turns polled observations into turns on the recording's clock |
-| `src/engine.js` | The loopback API client |
-| `src/session.js` | Starts and stops tracking with the engine's recording |
+**The meeting page never calls the engine itself.** A content script's request is the page's
+request: Chrome applies the meeting page's origin to it, ignores the extension's `host_permissions`,
+and refuses a public page's request to loopback outright. An earlier version fetched from the page,
+and on a real Meet page nothing it sent ever arrived. So the page side asks the service worker by
+message, and the worker — on the extension's own origin, where the loopback permissions apply —
+makes the request. The worker posts speaker events only to one of the ten loopback origins, whatever
+it is asked.
+
+| File | Runs on | Job |
+|---|---|---|
+| `src/platforms.js` | page | Reduces each platform's DOM to `{id, displayName, speaking, isLocal}[]` |
+| `src/tracker.js` | page | Turns polled observations into turns on the recording's clock |
+| `src/session.js` | page | Starts and stops tracking with the engine's recording |
+| `src/relay.js` | both | The messages between the page and the worker, and what the worker will do |
+| `src/background.js` | worker | The service worker: receives those messages |
+| `src/engine.js` | worker | The loopback API client |
 
 ### Two things that are subtle
 

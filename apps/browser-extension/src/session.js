@@ -26,8 +26,18 @@
 
 import { activeMeeting, platformFor } from "./platforms.js";
 import { SpeakerTracker, INTERVAL_MS } from "./tracker.js";
-import { activeRecording, postJoinSignal, postSpeakerEvents } from "./engine.js";
+import { engineViaWorker } from "./relay.js";
 import { JoinAnnouncer, RETRY_MS } from "./join.js";
+
+/*
+ * The engine, reached through the service worker rather than fetched from here. This module runs
+ * on the meeting page, where a request to loopback is the page's request and Chrome refuses it —
+ * see `relay.js`. `chrome.runtime` is read on every call, not once: after the extension is reloaded
+ * it is gone from pages that still run the old script, and that must read as "nobody listening".
+ */
+const { activeRecording, postJoinSignal, postSpeakerEvents } = engineViaWorker((message) =>
+  chrome.runtime.sendMessage(message),
+);
 
 /*
  * Loaded by `content.js` via dynamic import rather than being the content script itself: a

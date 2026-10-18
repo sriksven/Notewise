@@ -5,6 +5,9 @@
  * the CLI and the desktop frontend use. Nothing here reaches the network: `127.0.0.1` is refused by
  * `Server::bind` if it is ever pointed anywhere else.
  *
+ * Runs in the service worker (`background.js`), never on the meeting page. A request made from a
+ * content script is the page's request, which Chrome refuses to send to loopback — see `relay.js`.
+ *
  * # Finding it
  *
  * The engine does not sit on one known port. The desktop shell picks the first free port in a
@@ -23,6 +26,9 @@ export const PORT_COUNT = 10;
 export const PORTS = Array.from({ length: PORT_COUNT }, (_, i) => FIRST_PORT + i);
 
 const origin = (port) => `http://127.0.0.1:${port}`;
+
+/** Every origin an engine can be on. The worker posts speaker events to one of these or nowhere. */
+export const ORIGINS = PORTS.map(origin);
 
 /** How long a single probe may take. A port with nothing on it refuses immediately; one with
  *  unrelated software on it may not answer at all, and must not hold up the others. */
