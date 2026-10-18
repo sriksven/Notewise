@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{AiError, Result};
+use crate::prompts::{self, transcript_prompt};
 use crate::types::{
     ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
     TranscriptInput,
@@ -258,16 +259,6 @@ impl OpenAiCompatBackend {
     }
 }
 
-fn transcript_prompt(input: &TranscriptInput) -> String {
-    let mut prompt = format!("Meeting title: {}\n", input.title);
-    if let Some(context) = &input.context {
-        prompt.push_str(&format!("Context: {context}\n"));
-    }
-    prompt.push_str("\nTranscript:\n");
-    prompt.push_str(&input.text);
-    prompt
-}
-
 #[async_trait]
 impl AiBackend for OpenAiCompatBackend {
     fn model_id(&self) -> &str {
@@ -281,11 +272,11 @@ impl AiBackend for OpenAiCompatBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                input.system_prompt(
-                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
-                 decided and what happens next. Omit small talk.",
-                ),
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                input.system_prompt(prompts::SUMMARY),
+                vec![json!({
+                    "role": "user",
+                    "content": transcript_prompt(input, prompts::SUMMARY_REMINDER),
+                })],
                 false,
             ))
             .await?;
@@ -302,7 +293,7 @@ impl AiBackend for OpenAiCompatBackend {
                 "Extract the decisions reached in this meeting — things settled, not tasks. \
                  Reply with JSON only: {\"decisions\": [{\"text\": \"...\", \
                  \"reasoning\": \"...\" or null}]}. Return an empty list if nothing was decided.",
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                vec![json!({ "role": "user", "content": transcript_prompt(input, "") })],
                 true,
             ))
             .await?;
@@ -314,13 +305,14 @@ impl AiBackend for OpenAiCompatBackend {
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
+        let system = format!("{} Reply with JSON of the form {{\"action_items\": [{{\"text\": \"...\", \"owner\": \"...\" or null, \"due_hint\": \"...\" or null}}]}}. Return an empty list if there are none.", prompts::ACTION_ITEMS);
         let raw = self
             .send(self.body(
-                "Extract the action items — work someone committed to doing. Reply with JSON \
-                 only: {\"action_items\": [{\"text\": \"...\", \"owner\": \"...\" or null, \
-                 \"due_hint\": \"...\" or null}]}. Keep due dates exactly as stated. Return an \
-                 empty list if there are none.",
-                vec![json!({ "role": "user", "content": transcript_prompt(input) })],
+                &system,
+                vec![json!({
+                    "role": "user",
+                    "content": transcript_prompt(input, prompts::ACTION_ITEMS_REMINDER),
+                })],
                 true,
             ))
             .await?;

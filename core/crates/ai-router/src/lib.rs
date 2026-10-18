@@ -44,6 +44,7 @@ mod embed;
 mod error;
 pub mod memory;
 mod policy;
+mod prompts;
 mod redact;
 mod router;
 #[cfg(test)]

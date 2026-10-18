@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use crate::embed::is_embedding_model;
 use crate::error::{AiError, Result};
+use crate::prompts::{self, transcript_prompt};
 use crate::tags;
 use crate::types::{
     ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
@@ -180,16 +181,6 @@ impl OllamaBackend {
     }
 }
 
-fn transcript_prompt(input: &TranscriptInput) -> String {
-    let mut prompt = format!("Meeting title: {}\n", input.title);
-    if let Some(context) = &input.context {
-        prompt.push_str(&format!("Context: {context}\n"));
-    }
-    prompt.push_str("\nTranscript:\n");
-    prompt.push_str(&input.text);
-    prompt
-}
-
 #[async_trait]
 impl AiBackend for OllamaBackend {
     /// The tag in use, once it is known.
@@ -211,11 +202,8 @@ impl AiBackend for OllamaBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .complete(
-                input.system_prompt(
-                    "Summarize this meeting transcript. Lead with the outcome. Cover what was \
-                 decided and what happens next. Omit small talk.",
-                ),
-                &transcript_prompt(input),
+                input.system_prompt(prompts::SUMMARY),
+                &transcript_prompt(input, prompts::SUMMARY_REMINDER),
                 false,
             )
             .await?;
@@ -233,7 +221,7 @@ impl AiBackend for OllamaBackend {
                 "Extract the decisions reached in this meeting. Reply with JSON of the form \
                  {\"decisions\": [{\"text\": \"...\", \"reasoning\": \"...\" or null}]}. \
                  Return an empty list if nothing was decided.",
-                &transcript_prompt(input),
+                &transcript_prompt(input, ""),
                 true,
             )
             .await?;
@@ -250,13 +238,11 @@ impl AiBackend for OllamaBackend {
         &self,
         input: &TranscriptInput,
     ) -> Result<Vec<ExtractedActionItem>> {
+        let system = format!("{} Reply with JSON of the form {{\"action_items\": [{{\"text\": \"...\", \"owner\": \"...\" or null, \"due_hint\": \"...\" or null}}]}}. Return an empty list if there are none.", prompts::ACTION_ITEMS);
         let raw = self
             .complete(
-                "Extract the action items from this meeting. Reply with JSON of the form \
-                 {\"action_items\": [{\"text\": \"...\", \"owner\": \"...\" or null, \
-                 \"due_hint\": \"...\" or null}]}. Keep due dates exactly as stated. \
-                 Return an empty list if there are none.",
-                &transcript_prompt(input),
+                &system,
+                &transcript_prompt(input, prompts::ACTION_ITEMS_REMINDER),
                 true,
             )
             .await?;
@@ -821,6 +807,42 @@ mod tests {
 
         backend.probe().await.expect("a chat model is installed");
         assert_eq!(backend.model_id(), "llama3.1:8b");
+    }
+
+    /// The rules have to reach the model, and the reminder has to be the last thing it reads —
+    /// that ordering is what stopped a colleague's family emergency becoming an action item.
+    #[tokio::test]
+    async fn summaries_and_action_items_send_the_shared_rules_with_the_reminder_last() {
+        let daemon = daemon(&["llama3.1:8b"], 0);
+        let backend = pointed_at(&daemon);
+        let input = TranscriptInput::new("Standup", "Sam: I'll ship it by Friday.");
+
+        backend.summarize(&input).await.expect("a summary");
+        // The stub's reply is not JSON, so this fails to parse; only the request matters here.
+        let _ = backend.extract_action_items(&input).await;
+
+        let chats: Vec<Value> = daemon
+            .requests()
+            .iter()
+            .filter(|r| r.path() == "/api/chat")
+            .map(Recorded::json)
+            .collect();
+        let text =
+            |chat: &Value, n: usize| chat["messages"][n]["content"].as_str().map(str::to_owned);
+
+        assert_eq!(text(&chats[0], 0).as_deref(), Some(prompts::SUMMARY));
+        let user = text(&chats[0], 1).expect("a user turn");
+        assert!(user.contains("Sam: I'll ship it by Friday."), "{user}");
+        assert!(user.ends_with(prompts::SUMMARY_REMINDER), "{user}");
+
+        let system = text(&chats[1], 0).expect("a system turn");
+        assert!(system.starts_with(prompts::ACTION_ITEMS), "{system}");
+        assert!(
+            system.contains("\"due_hint\""),
+            "the reply shape is still asked for: {system}"
+        );
+        let user = text(&chats[1], 1).expect("a user turn");
+        assert!(user.ends_with(prompts::ACTION_ITEMS_REMINDER), "{user}");
     }
 
     #[test]
