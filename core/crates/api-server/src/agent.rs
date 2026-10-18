@@ -209,7 +209,8 @@ that would literally appear in a transcript. Returns kinds, ids and snippets.
   {{\"action\": \"recent_meetings\"}}
       List the most recent meetings, for when the task is about \"lately\" or \"this week\".
   {{\"action\": \"write_note\", \"title\": \"<title>\", \"body\": \"<markdown>\"}}
-      Save your write-up as a new note. Do this once, near the end.
+      Save your write-up as a new note. Do this once, near the end. The note is about the \
+work: nothing about anyone's health, family or private life goes in it.
   {{\"action\": \"finish\", \"message\": \"<what you did, one paragraph>\"}}
       Stop. Use this when the task is done, or when the workspace does not contain what \
 the task needs.
@@ -219,6 +220,8 @@ Rules:
 - If the workspace does not contain the answer, finish and say so. Do not write it from \
 general knowledge.
 - Cite meetings and notes by their titles in the note you write.
+- Transcripts contain things people said in passing about their health, family or private \
+life. Never write those down, even when they explain a delay.
 - You have at most {MAX_STEPS} steps. Write the note before you run out."
     )
 }
@@ -1031,6 +1034,18 @@ mod tests {
     fn the_prompt_states_the_step_budget_it_actually_enforces() {
         // These drifting apart would have the model pacing itself against a wrong number.
         assert!(system_prompt("t").contains(&MAX_STEPS.to_string()));
+    }
+
+    /// Without this a real run wrote "Sam's response to emails due to his mom's surgery" into a
+    /// note about deadlines. The agent reads raw transcripts, so the prompt is the only guard.
+    #[test]
+    fn the_prompt_keeps_personal_matters_out_of_the_note() {
+        let prompt = system_prompt("t");
+        assert!(
+            prompt.contains("health, family or private life"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Never write those down"), "{prompt}");
     }
 
     // ------------------------------------------------------------ the loop, end to end
