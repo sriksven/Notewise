@@ -20,7 +20,7 @@ pub enum McpError {
     UnsupportedMethod(String),
 
     /// A mutating tool was called on a read-only session.
-    #[error("'{0}' changes stored data, and this session is read-only;              restart the server with --allow-writes to permit it")]
+    #[error("'{0}' changes stored data, and this session is read-only; restart the server with --allow-writes to permit it")]
     WriteDenied(String),
 }
 

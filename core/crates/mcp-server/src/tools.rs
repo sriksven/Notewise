@@ -967,6 +967,9 @@ mod tests {
                 matches!(err, McpError::WriteDenied(_)),
                 "'{name}' gave {err:?} rather than refusing"
             );
+            // The agent shows this to a person. It carried a run of fourteen spaces from a
+            // reflowed string literal.
+            assert!(!err.to_string().contains("  "), "{err}");
         }
     }
 
