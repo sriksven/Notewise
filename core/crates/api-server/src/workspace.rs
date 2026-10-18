@@ -150,6 +150,9 @@ async fn delete_note(
         // The edge table has no foreign keys, so nothing cascades for it. Without this the
         // note's links survive it and point at a row that is gone.
         Graph::new(&db).detach(NodeRef::new(NodeKind::Note, id))?;
+        // Nor does the embedding table, which holds the note's text in its chunks. Emptying the
+        // trash already dropped them; purging one note directly left them behind.
+        EmbeddingRepository::new(&db).delete_for_entity("note", id)?;
         repo.purge(id)?;
         drop(db);
         crate::indexing::touch(Arc::clone(&state));
@@ -217,7 +220,7 @@ async fn empty_trash(State(state): State<Shared>) -> ApiResult<Json<Emptied>> {
 
     let mut destroyed = 0;
     for id in meetings.trashed_ids()? {
-        graph.detach(NodeRef::new(NodeKind::Meeting, id))?;
+        detach_meeting(&db, id)?;
         embeddings.delete_for_entity("meeting", id)?;
         // The transcript, summaries, decisions and action items go with it by cascade.
         meetings.delete(id)?;
@@ -260,7 +263,7 @@ async fn delete_meeting(
 
     if query.purge {
         let meeting = repo.get(id)?;
-        Graph::new(&db).detach(NodeRef::new(NodeKind::Meeting, id))?;
+        detach_meeting(&db, id)?;
         EmbeddingRepository::new(&db).delete_for_entity("meeting", id)?;
         repo.delete(id)?;
         return Ok(Json(meeting));
@@ -283,6 +286,28 @@ async fn restore_meeting(
     // indexing pass rebuilds them, which is why `collect_pending` compares timestamps rather
     // than assuming what is missing was never there.
     Ok(Json(MeetingRepository::new(&db).restore(id)?))
+}
+
+/// Remove the graph edges of a meeting about to be destroyed, and of everything it owns.
+///
+/// Its summaries, decisions and action items go with it by cascade, but their edges do not — the
+/// edge table has no foreign keys. Detaching only the meeting left, among others, the
+/// `became_ticket` edge of every promoted action item pointing out of a row that no longer exists.
+fn detach_meeting(db: &notewise_storage::Database, meeting_id: Id) -> ApiResult<()> {
+    let graph = Graph::new(db);
+    let summaries = SummaryRepository::new(db);
+
+    for summary in summaries.list_for_meeting(meeting_id)? {
+        graph.detach(NodeRef::new(NodeKind::Summary, summary.id))?;
+    }
+    for decision in summaries.decisions_for_meeting(meeting_id)? {
+        graph.detach(NodeRef::new(NodeKind::Decision, decision.id))?;
+    }
+    for item in summaries.action_items_for_meeting(meeting_id)? {
+        graph.detach(NodeRef::new(NodeKind::ActionItem, item.id))?;
+    }
+    graph.detach(NodeRef::new(NodeKind::Meeting, meeting_id))?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -450,6 +475,10 @@ async fn delete_ticket(
     let id = parse_id(&id)?;
     let db = state.db().await;
     TicketRepository::new(&db).delete(id)?;
+    // Neither table cascades: without these, the meeting it came from kept listing it as related
+    // (with no name, since the row is gone), and its text stayed in the semantic index.
+    Graph::new(&db).detach(NodeRef::new(NodeKind::Ticket, id))?;
+    EmbeddingRepository::new(&db).delete_for_entity("ticket", id)?;
     Ok(Json(Deleted { deleted: true }))
 }
 
@@ -551,6 +580,9 @@ async fn delete_action_item(
     let id = parse_id(&id)?;
     let db = state.db().await;
     SummaryRepository::new(&db).delete_action_item(id)?;
+    // A promoted item's `became_ticket` edge would otherwise outlive it, and the meeting would keep
+    // reaching a deleted item through its ticket.
+    Graph::new(&db).detach(NodeRef::new(NodeKind::ActionItem, id))?;
     Ok(Json(Deleted { deleted: true }))
 }
 
@@ -652,6 +684,7 @@ async fn delete_decision(
     let id = parse_id(&id)?;
     let db = state.db().await;
     SummaryRepository::new(&db).delete_decision(id)?;
+    Graph::new(&db).detach(NodeRef::new(NodeKind::Decision, id))?;
     Ok(Json(Deleted { deleted: true }))
 }
 
@@ -719,6 +752,9 @@ async fn delete_person(
     let id = parse_id(&id)?;
     let db = state.db().await;
     PersonRepository::new(&db).delete(id)?;
+    // Participation cascades; the `mentions` edge from each meeting they attended does not, and
+    // kept the person listed as related to those meetings with no name.
+    Graph::new(&db).detach(NodeRef::new(NodeKind::Person, id))?;
     Ok(Json(Deleted { deleted: true }))
 }
 
@@ -1896,5 +1932,107 @@ mod tests {
 
         let (_, notes) = call(&app, get(&format!("/v1/meetings/{meeting}/notes"))).await;
         assert!(notes.as_array().expect("array").is_empty());
+    }
+
+    /// Every delete has to take its edges with it. Each of these left them behind, and the meeting
+    /// kept listing a ticket or a person with no name — the row was gone, the link was not.
+    #[tokio::test]
+    async fn deleting_a_ticket_an_item_or_a_person_removes_their_edges() {
+        let (app, state) = app();
+        let meeting = seed_meeting(&state, "Kickoff", 1_700_000_000).await;
+
+        let (_, ticket) = call(
+            &app,
+            json_request(
+                "POST",
+                "/v1/tickets",
+                serde_json::json!({"title": "Linked", "meeting_id": meeting.to_string()}),
+            ),
+        )
+        .await;
+        let (_, item) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/meetings/{meeting}/action-items"),
+                serde_json::json!({"text": "Promote me"}),
+            ),
+        )
+        .await;
+        let item = item["id"].as_str().unwrap().to_string();
+        let (status, promoted) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/action-items/{item}/promote"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{promoted}");
+        let (_, person) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/meetings/{meeting}/participants"),
+                serde_json::json!({"display_name": "Temp"}),
+            ),
+        )
+        .await;
+
+        for uri in [
+            format!("/v1/tickets/{}", ticket["id"].as_str().unwrap()),
+            format!("/v1/action-items/{item}"),
+            format!("/v1/tickets/{}", promoted["id"].as_str().unwrap()),
+            format!("/v1/people/{}", person["id"].as_str().unwrap()),
+        ] {
+            let (status, body) = call(&app, delete(&uri)).await;
+            assert_eq!(status, StatusCode::OK, "{uri}: {body}");
+        }
+
+        let db = state.db().await;
+        assert_eq!(
+            Graph::new(&db).edge_count().expect("count"),
+            0,
+            "every edge had an end that was deleted"
+        );
+    }
+
+    /// A purged meeting's action items go by cascade; the `became_ticket` edge of one that was
+    /// promoted did not, and pointed out of a row that no longer existed.
+    #[tokio::test]
+    async fn purging_a_meeting_removes_the_edges_of_what_it_owned() {
+        let (app, state) = app();
+        let meeting = seed_meeting(&state, "Kickoff", 1_700_000_000).await;
+        let (_, item) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/meetings/{meeting}/action-items"),
+                serde_json::json!({"text": "Promote me"}),
+            ),
+        )
+        .await;
+        let item = item["id"].as_str().unwrap().to_string();
+        let (_, ticket) = call(
+            &app,
+            json_request(
+                "POST",
+                &format!("/v1/action-items/{item}/promote"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        let ticket: Id = ticket["id"].as_str().unwrap().parse().unwrap();
+
+        let (status, body) =
+            call(&app, delete(&format!("/v1/meetings/{meeting}?purge=true"))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let db = state.db().await;
+        // The ticket outlives the meeting — that is the point of promoting — but nothing it is
+        // linked to does.
+        assert!(TicketRepository::new(&db).get(ticket).is_ok());
+        assert_eq!(Graph::new(&db).edge_count().expect("count"), 0);
     }
 }
