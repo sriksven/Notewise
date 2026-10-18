@@ -688,6 +688,9 @@ mod tests {
         seen: Arc<StdMutex<Vec<String>>>,
     }
 
+    /// Stands in for a backend's own summary instruction.
+    const SCRIPTED_INSTRUCTION: &str = "Summarize this meeting transcript.";
+
     #[async_trait::async_trait]
     impl AiBackend for Scripted {
         fn model_id(&self) -> &str {
@@ -700,11 +703,12 @@ mod tests {
             &self,
             input: &notewise_ai_router::TranscriptInput,
         ) -> notewise_ai_router::Result<notewise_ai_router::SummaryOutput> {
-            // Instructions are where a memory lands on the summary path.
+            // The system prompt a real backend would build, so a test sees both the instruction and
+            // the memories — and would see the instruction go missing.
             self.seen
                 .lock()
                 .unwrap()
-                .push(input.instructions.clone().unwrap_or_default());
+                .push(input.system_prompt(SCRIPTED_INSTRUCTION).into_owned());
             Ok(notewise_ai_router::SummaryOutput {
                 text: "a summary".into(),
                 model: "scripted".into(),
@@ -1282,6 +1286,13 @@ mod tests {
         assert!(
             sent.contains("keep in mind about the person"),
             "and it should arrive labelled: {sent}"
+        );
+        // Beside the summary instruction, not instead of it. With memories passed as the
+        // instructions, a workspace that remembered anything got summaries written from no
+        // instruction at all.
+        assert!(
+            sent.starts_with(SCRIPTED_INSTRUCTION),
+            "the summary instruction was replaced: {sent}"
         );
     }
 

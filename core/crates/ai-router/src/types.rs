@@ -20,6 +20,16 @@ pub struct TranscriptInput {
     /// *instruction* about the output, and a backend has to treat them differently — one goes in the
     /// user message, the other in the system prompt.
     pub instructions: Option<String>,
+    /// Standing facts about the reader — their memories — to shape the output by.
+    ///
+    /// Separate from `instructions` because the two are not alternatives. Memories used to be
+    /// passed *as* the instructions, which replaced the summary instruction outright: with three
+    /// memories stored, `llama3.1:8b` got no instruction at all, opened with "Here is the
+    /// summary:", and listed the memories as things said in the meeting. Separate from `context`
+    /// because this is not material about the meeting either. It is the user's own data, so unlike
+    /// a template it is masked before it leaves the machine.
+    #[serde(default)]
+    pub background: Option<String>,
 }
 
 impl TranscriptInput {
@@ -29,14 +39,28 @@ impl TranscriptInput {
         self
     }
 
-    /// The instruction to send: a template's prompt when one was chosen, else the backend's own.
+    /// Tell the backend who the output is for. See [`Self::background`].
+    pub fn with_background(mut self, background: impl Into<String>) -> Self {
+        self.background = Some(background.into());
+        self
+    }
+
+    /// The instruction to send — a template's prompt when one was chosen, else the backend's own —
+    /// followed by the reader's background when there is any.
     ///
-    /// A method rather than each backend checking the field, so a backend that forgets is a backend
+    /// A method rather than each backend checking the fields, so a backend that forgets is a backend
     /// that never compiled — and so every backend's default stays written where that backend is.
-    pub fn system_prompt<'a>(&'a self, default: &'a str) -> &'a str {
-        match self.instructions.as_deref() {
+    pub fn system_prompt<'a>(&'a self, default: &'a str) -> std::borrow::Cow<'a, str> {
+        let instruction = match self.instructions.as_deref() {
             Some(custom) if !custom.trim().is_empty() => custom,
             _ => default,
+        };
+        match self.background.as_deref().map(str::trim) {
+            Some(background) if !background.is_empty() => std::borrow::Cow::Owned(format!(
+                "{instruction}\n\n{background}\nThat describes who will read this, not what was \
+                 said: never report it as part of the meeting."
+            )),
+            _ => std::borrow::Cow::Borrowed(instruction),
         }
     }
 
@@ -46,6 +70,7 @@ impl TranscriptInput {
             text: text.into(),
             context: None,
             instructions: None,
+            background: None,
         }
     }
 
@@ -214,6 +239,28 @@ pub struct ChatResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Memories used to be passed as the instructions and replaced the summary instruction.
+    #[test]
+    fn a_background_is_added_to_the_instruction_rather_than_replacing_it() {
+        let plain = TranscriptInput::new("Sync", "text");
+        assert_eq!(plain.system_prompt("Summarize."), "Summarize.");
+
+        let known = plain.clone().with_background("- I prefer short bullets");
+        let prompt = known.system_prompt("Summarize.");
+        assert!(prompt.starts_with("Summarize."), "{prompt}");
+        assert!(prompt.contains("- I prefer short bullets"), "{prompt}");
+        assert!(
+            prompt.contains("never report it as part of the meeting"),
+            "{prompt}"
+        );
+
+        let templated = known.with_instructions("Write minutes.");
+        let prompt = templated.system_prompt("Summarize.");
+        assert!(prompt.starts_with("Write minutes."), "{prompt}");
+        assert!(prompt.contains("- I prefer short bullets"), "{prompt}");
+        assert!(!prompt.contains("Summarize."), "{prompt}");
+    }
 
     #[test]
     fn transcript_builder_sets_context() {

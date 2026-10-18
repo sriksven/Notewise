@@ -202,7 +202,7 @@ impl AiBackend for OllamaBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .complete(
-                input.system_prompt(prompts::SUMMARY),
+                &input.system_prompt(prompts::SUMMARY),
                 &transcript_prompt(input, prompts::SUMMARY_REMINDER),
                 false,
             )

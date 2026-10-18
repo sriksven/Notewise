@@ -668,13 +668,20 @@ impl Router {
         }
 
         let (text, report) = crate::redact::redact(&input.text, policy);
-        let (context, context_report) = match input.context.as_deref() {
-            Some(c) => {
-                let (masked, r) = crate::redact::redact(c, policy);
-                (Some(masked.into_owned()), r)
-            }
-            None => (None, RedactionReport::default()),
+        let mut context_report = RedactionReport::default();
+        let mut mask = |field: Option<&str>| {
+            field.map(|value| {
+                let (masked, r) = crate::redact::redact(value, policy);
+                context_report.merge(&r);
+                masked.into_owned()
+            })
         };
+        // Every field that reaches the provider. The title is typed by a person and pasted from
+        // calendars ("Call with priya@acme.com"); the background is the user's own memories, which
+        // can say anything they typed. Both used to go out unmasked beside a masked transcript.
+        let title = mask(Some(&input.title)).unwrap_or_default();
+        let context = mask(input.context.as_deref());
+        let background = mask(input.background.as_deref());
 
         if !report.is_empty() || !context_report.is_empty() {
             tracing::info!(
@@ -686,13 +693,14 @@ impl Router {
         }
 
         TranscriptInput {
-            title: input.title.clone(),
+            title,
             text: text.into_owned(),
             context,
             // Carried through unmasked, deliberately. This is the user's own template prompt, not
             // meeting material — redacting it would mangle an instruction they wrote, and there is
             // no transcript content in it to protect.
             instructions: input.instructions.clone(),
+            background,
         }
     }
 
@@ -907,7 +915,12 @@ mod tests {
         }
 
         async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
-            self.seen.lock().expect("spy lock").push(input.text.clone());
+            // Everything a backend would send: the title and the composed system prompt go over
+            // the wire as surely as the transcript does.
+            let mut seen = self.seen.lock().expect("spy lock");
+            seen.push(input.title.clone());
+            seen.push(input.system_prompt("instruction").into_owned());
+            seen.push(input.text.clone());
             Ok(SummaryOutput {
                 text: String::new(),
                 model: "spy".into(),
@@ -965,6 +978,24 @@ mod tests {
             transmitted.contains("Sam read out"),
             "surrounding transcript must survive: {transmitted}"
         );
+    }
+
+    /// The title and the reader's memories travel beside the transcript and were not masked.
+    #[tokio::test]
+    async fn the_title_and_the_readers_background_are_masked_too() {
+        let spy = std::sync::Arc::new(SpyBackend::cloud());
+        let router = Router::with_backend(Box::new(spy.clone()))
+            .with_redaction(RedactionPolicy::SecretsAndContacts);
+        let input = TranscriptInput::new("Call with priya@acme.example", "We agreed to ship.")
+            .with_background(format!("- my deploy key is {SECRET}"));
+
+        router.summarize(&input).await.expect("summarizes");
+
+        let transmitted = spy.transmitted();
+        assert!(!transmitted.contains("priya@acme.example"), "{transmitted}");
+        assert!(!transmitted.contains(SECRET), "{transmitted}");
+        assert!(transmitted.contains("[redacted:email]"), "{transmitted}");
+        assert!(transmitted.contains("[redacted:api_key]"), "{transmitted}");
     }
 
     /// A local backend must get the real text. Masking there would degrade the summary for

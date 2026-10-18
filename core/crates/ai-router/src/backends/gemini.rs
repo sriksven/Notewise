@@ -205,7 +205,7 @@ impl AiBackend for GeminiBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                input.system_prompt(prompts::SUMMARY),
+                &input.system_prompt(prompts::SUMMARY),
                 user_turn(transcript_prompt(input, prompts::SUMMARY_REMINDER)),
                 false,
             ))

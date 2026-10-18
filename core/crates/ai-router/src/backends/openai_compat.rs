@@ -272,7 +272,7 @@ impl AiBackend for OpenAiCompatBackend {
     async fn summarize(&self, input: &TranscriptInput) -> Result<SummaryOutput> {
         let text = self
             .send(self.body(
-                input.system_prompt(prompts::SUMMARY),
+                &input.system_prompt(prompts::SUMMARY),
                 vec![json!({
                     "role": "user",
                     "content": transcript_prompt(input, prompts::SUMMARY_REMINDER),

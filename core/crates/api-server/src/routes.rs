@@ -1529,16 +1529,14 @@ async fn summarize_meeting(
 
     let mut input = TranscriptInput::new(title, transcript);
 
-    // Memories go in front of the template rather than replacing it: a template is an instruction
-    // about shape and a memory is context about the reader, and the two are not competing.
-    let instructions = match (memories.is_empty(), &template) {
-        (true, None) => None,
-        (true, Some(template)) => Some(template.prompt.clone()),
-        (false, None) => Some(memories.clone()),
-        (false, Some(template)) => Some(format!("{memories}\n{}", template.prompt)),
-    };
-    if let Some(instructions) = instructions {
-        input = input.with_instructions(instructions);
+    // A template is an instruction about shape and a memory is context about the reader, and the
+    // two are not competing — so they travel in separate fields. Passing memories *as* the
+    // instructions replaced the backend's summary instruction whenever no template was chosen.
+    if let Some(template) = &template {
+        input = input.with_instructions(template.prompt.clone());
+    }
+    if !memories.is_empty() {
+        input = input.with_background(memories);
     }
     // Only the summary honours the template. Decisions and action items are extractions with a
     // fixed output shape, and a prompt written to change prose would break the parse.
