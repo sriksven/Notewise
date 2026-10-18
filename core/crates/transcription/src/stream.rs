@@ -32,6 +32,8 @@
 //! - Unbroken speech still produces text every [`UtteranceConfig::max_utterance_ms`], so a
 //!   monologue streams instead of going quiet.
 
+use std::collections::VecDeque;
+
 use notewise_audio_capture::Vad;
 
 /// A buffer of audio worth decoding, and where it sits in the recording.
@@ -64,9 +66,19 @@ pub struct UtteranceConfig {
     ///
     /// Someone reading a list aloud can go a long time without a gap the gate notices. Without
     /// a cap the transcript would show nothing for as long as they kept going. The cost is a
-    /// cut mid-phrase, which the decoder may mis-transcribe at the seam — accepted, because
-    /// the alternative is no text at all.
+    /// cut mid-phrase — which is why the cut is not made at the cap itself but at the quietest
+    /// moment in the [`Self::cut_search_ms`] before it. See [`UtteranceBuffer::push`].
     pub max_utterance_ms: i64,
+
+    /// How far back from the length cap to look for somewhere quiet to cut.
+    ///
+    /// A cut through a word loses it from both halves: the decoder drops the fragment at the end
+    /// of one buffer and the fragment at the start of the next. Measured on eight clauses of
+    /// unbroken speech, cutting exactly at the cap dropped "so the margin story" outright and
+    /// turned "billing" into "big building". Even fluent speech dips between words and clauses
+    /// every second or so, so two seconds of search finds one; what follows the cut is kept and
+    /// begins the next buffer.
+    pub cut_search_ms: i64,
 
     /// Speech a buffer must contain before it is worth decoding.
     ///
@@ -95,6 +107,7 @@ impl Default for UtteranceConfig {
             // Vad's hangover is 280 ms; this must clear it.
             endpoint_silence_ms: 500,
             max_utterance_ms: 8_000,
+            cut_search_ms: 2_000,
             min_speech_ms: 240,
             preroll_ms: 300,
             max_silence_ms: 1_000,
@@ -115,8 +128,15 @@ pub struct UtteranceBuffer {
 
     /// Audio accumulated since the last decode or discard.
     buffer: Vec<f32>,
-    /// Milliseconds of audio consumed before `buffer` begins.
-    offset_ms: i64,
+    /// What each pushed chunk still in `buffer` contributed, as `(samples, speech_ms)`, oldest
+    /// first. Lets a cut part-way through the buffer say how much speech is left after it.
+    chunks: VecDeque<(usize, i64)>,
+    /// Samples consumed before `buffer` begins.
+    ///
+    /// Counted in samples rather than milliseconds: cuts and discards land on arbitrary samples,
+    /// and rounding each one to a millisecond would drift a long meeting's timings by up to a
+    /// millisecond per cut.
+    offset_samples: u64,
     /// Speech found in `buffer`, in milliseconds.
     speech_ms: i64,
     /// Unbroken silence at the tail of `buffer`, in milliseconds.
@@ -138,7 +158,8 @@ impl UtteranceBuffer {
             vad: Vad::default(),
             sample_rate,
             buffer: Vec::new(),
-            offset_ms: 0,
+            chunks: VecDeque::new(),
+            offset_samples: 0,
             speech_ms: 0,
             silence_ms: 0,
             gate_on_speech: true,
@@ -165,7 +186,10 @@ impl UtteranceBuffer {
 
     /// Milliseconds of audio consumed before the current buffer.
     pub fn offset_ms(&self) -> i64 {
-        self.offset_ms
+        if self.sample_rate == 0 {
+            return 0;
+        }
+        (self.offset_samples * 1000 / self.sample_rate as u64) as i64
     }
 
     /// Audio currently held, in milliseconds.
@@ -195,6 +219,7 @@ impl UtteranceBuffer {
         let duration_ms = ms_for(samples.len(), self.sample_rate);
 
         self.buffer.extend_from_slice(samples);
+        self.chunks.push_back((samples.len(), report.speech_ms));
         self.speech_ms += report.speech_ms;
         if report.has_speech() {
             self.silence_ms = 0;
@@ -216,8 +241,10 @@ impl UtteranceBuffer {
 
         if self.buffered_ms() >= self.config.max_utterance_ms {
             if has_enough_speech {
-                // Still talking. Cut anyway so the transcript keeps moving.
-                return Some(self.take());
+                // Still talking. Cut anyway so the transcript keeps moving — but where the speaker
+                // is quietest, not wherever the cap happened to land, and keep what follows.
+                let cut = self.quietest_cut();
+                return Some(self.take_until(cut));
             }
             // Long, and nothing in it. Never send this to a model.
             self.discard();
@@ -254,14 +281,70 @@ impl UtteranceBuffer {
 
     /// Take the buffer and advance the clock past it.
     fn take(&mut self) -> Utterance {
-        let samples = std::mem::take(&mut self.buffer);
-        let offset_ms = self.offset_ms;
+        self.take_until(self.buffer.len())
+    }
 
-        self.offset_ms += ms_for(samples.len(), self.sample_rate);
-        self.speech_ms = 0;
-        self.silence_ms = 0;
+    /// Take the buffer up to `cut`, keeping the rest to start the next one.
+    ///
+    /// The kept audio's speech is re-counted from the chunks it came from, rather than reset to
+    /// zero: it is the middle of somebody talking, and if they stop right after the cut it must
+    /// still be decoded rather than discarded as a quiet room.
+    fn take_until(&mut self, cut: usize) -> Utterance {
+        let cut = cut.min(self.buffer.len());
+        let rest = self.buffer.split_off(cut);
+        let samples = std::mem::replace(&mut self.buffer, rest);
+        let offset_ms = self.offset_ms();
+        self.offset_samples += samples.len() as u64;
+
+        let mut consumed = samples.len();
+        let mut kept = VecDeque::new();
+        let mut speech_ms = 0;
+        for (len, speech) in self.chunks.drain(..) {
+            if consumed >= len {
+                consumed -= len;
+                continue;
+            }
+            let keep = len - consumed;
+            // The chunk the cut fell inside keeps its speech in proportion to what is left of it.
+            let share = speech * keep as i64 / len.max(1) as i64;
+            consumed = 0;
+            kept.push_back((keep, share));
+            speech_ms += share;
+        }
+        self.chunks = kept;
+        self.speech_ms = speech_ms;
+        self.silence_ms = self.silence_ms.min(self.buffered_ms());
 
         Utterance { samples, offset_ms }
+    }
+
+    /// Where to cut a buffer that reached the length cap: the quietest moment near its end.
+    ///
+    /// Energy over 20 ms windows, stepped by 10 ms, across the last
+    /// [`UtteranceConfig::cut_search_ms`] — never earlier than half way, so a cut cannot leave the
+    /// decoder a sliver. The cut is the middle of the quietest window: a pause between clauses if
+    /// there is one, a stop consonant or the gap between two words if not.
+    fn quietest_cut(&self) -> usize {
+        let len = self.buffer.len();
+        let window = samples_for(20, self.sample_rate).max(1);
+        let hop = (window / 2).max(1);
+        let from = len
+            .saturating_sub(samples_for(self.config.cut_search_ms, self.sample_rate))
+            .max(len / 2);
+
+        let mut best = (f64::INFINITY, len);
+        let mut start = from;
+        while start + window <= len {
+            let energy: f64 = self.buffer[start..start + window]
+                .iter()
+                .map(|s| f64::from(*s) * f64::from(*s))
+                .sum();
+            if energy < best.0 {
+                best = (energy, start + window / 2);
+            }
+            start += hop;
+        }
+        best.1
     }
 
     /// Drop buffered silence, keeping `preroll_ms` of it.
@@ -277,15 +360,20 @@ impl UtteranceBuffer {
         }
 
         self.buffer.drain(..drop);
-        self.offset_ms += ms_for(drop, self.sample_rate);
+        self.offset_samples += drop as u64;
         self.speech_ms = 0;
         self.silence_ms = self.buffered_ms();
+        self.chunks.clear();
+        if keep > 0 {
+            self.chunks.push_back((keep, 0));
+        }
     }
 
     /// Drop the buffer entirely, advancing the clock past all of it.
     fn discard_all(&mut self) {
-        self.offset_ms += self.buffered_ms();
+        self.offset_samples += self.buffer.len() as u64;
         self.buffer.clear();
+        self.chunks.clear();
         self.speech_ms = 0;
         self.silence_ms = 0;
     }
@@ -562,6 +650,95 @@ mod tests {
             "a one-word answer was dropped: speech_ms reached {}",
             buffer.speech_ms()
         );
+    }
+
+    /// Speech with brief dips in it: the gaps between words and clauses that fluent speech has,
+    /// far too short for the gate to call a pause.
+    fn speech_with_dips(total_ms: i64, dips_at: &[i64], dip_ms: i64) -> Vec<f32> {
+        let mut audio = speech(total_ms);
+        for at in dips_at {
+            let end = samples(at + dip_ms).min(audio.len());
+            for sample in &mut audio[samples(*at)..end] {
+                *sample *= 0.02;
+            }
+        }
+        audio
+    }
+
+    /// The defect behind "so the margin story" vanishing from a real transcript: cut exactly at the
+    /// cap, a word straddling the cut is dropped from both halves. The cut belongs at the quietest
+    /// moment before the cap, and what follows it must begin the next buffer.
+    #[test]
+    fn a_length_cut_lands_between_words_rather_than_through_one() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        // A 120 ms dip at 6.9 s: inside the two seconds before the 8 s cap, and far too short for
+        // the gate to call a pause.
+        let out = feed(&mut buffer, &speech_with_dips(9_000, &[6_900], 120));
+
+        assert_eq!(out.len(), 1, "one cut in nine seconds of speech");
+        let cut_ms = out[0].duration_ms(RATE);
+        assert!(
+            (6_900..=7_020).contains(&cut_ms),
+            "cut at {cut_ms} ms, through a word, rather than in the dip at 6900..7020 ms"
+        );
+
+        // Nothing lost or repeated: what followed the cut is still held, and the clock is at it.
+        assert_eq!(buffer.offset_ms(), cut_ms);
+        assert_eq!(cut_ms + buffer.buffered_ms(), 9_000);
+    }
+
+    /// What follows a cut is the middle of somebody talking. If they stop straight after it, it is
+    /// the rest of their phrase, and it must be decoded rather than discarded as a quiet room.
+    #[test]
+    fn speech_kept_after_a_cut_is_decoded_when_the_speaker_stops() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let mut audio = speech_with_dips(8_000, &[6_900], 120);
+        audio.extend(silence(2_500));
+        let out = feed(&mut buffer, &audio);
+
+        assert_eq!(
+            out.len(),
+            2,
+            "the end of the phrase after the cut was dropped"
+        );
+        assert!(
+            out[1].duration_ms(RATE) >= 1_000,
+            "the second buffer holds only {} ms",
+            out[1].duration_ms(RATE)
+        );
+        assert_eq!(
+            out[1].offset_ms,
+            out[0].offset_ms + out[0].duration_ms(RATE),
+            "the two halves must abut"
+        );
+    }
+
+    /// Cuts land on arbitrary samples, so the clock is kept in samples. Rounding each cut to a
+    /// millisecond would drift a long meeting's timings by one per cut.
+    #[test]
+    fn the_clock_does_not_drift_across_many_cuts() {
+        let mut buffer = UtteranceBuffer::with_config(
+            RATE,
+            UtteranceConfig {
+                max_utterance_ms: 1_000,
+                cut_search_ms: 500,
+                ..Default::default()
+            },
+        );
+
+        // Frames of an awkward length, so no cut falls on a whole millisecond by accident.
+        let audio = speech(60_000);
+        let mut consumed = 0usize;
+        for frame in audio.chunks(1_237) {
+            if let Some(utterance) = buffer.push(frame) {
+                consumed += utterance.samples.len();
+            }
+        }
+
+        let expected_ms = (consumed as u64 * 1000 / RATE as u64) as i64;
+        assert_eq!(buffer.offset_ms(), expected_ms);
     }
 
     #[test]

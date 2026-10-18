@@ -520,6 +520,82 @@ mod tests {
         assert_eq!(der(&truth, &truth).rate(), 0.0);
     }
 
+    // ------------------------------------------------------------ against a real recording
+
+    /// A real run, scored two ways. The reference is a scripted two-voice conversation; the
+    /// hypothesis is what `base.en` and acoustic separation stored for it. The expected numbers come
+    /// from an independent scorer written for that measurement, so this pins the metrics to
+    /// something other than their own output.
+    #[test]
+    fn a_real_transcript_scores_the_same_as_an_independent_scorer() {
+        let reference = "Thanks for joining. Let's start with the release plan for next week. \
+            Sure. The database migration is the risky part, so I want it done before Friday. \
+            Agreed. Who is going to own the rollback script? I can take that. I will also write \
+            the runbook for the on call team. Great. Marketing wants the announcement on Thursday \
+            morning. That works, as long as the migration finishes on Wednesday night. Then let's \
+            make Wednesday the hard deadline and review it on Monday. Sounds good. I will send the \
+            notes after this call.";
+        let hypothesis = "Thanks for joining, let's start with the release plan for next week. \
+            Sure, the database migration is the risky part, so I want it done before Friday. \
+            Agreed, who is going to own the rollback script? I can take that. I will also write \
+            the runbook for the on-call team. Great, marketing wants the announcement on Thursday \
+            morning. That works, as long as the migration finishes on Wednesday night. Then let's \
+            make Wednesday the hard deadline and review it on Monday. Sounds good, I will send the \
+            notes off to this call.";
+
+        // "on call" -> "on-call" is one substitution and one deletion; "after" -> "off to" one
+        // substitution and one insertion.
+        let errors = wer(reference, hypothesis);
+        assert_eq!(
+            (
+                errors.substitutions,
+                errors.deletions,
+                errors.insertions,
+                errors.reference_words
+            ),
+            (2, 1, 1, 92)
+        );
+
+        let truth: Vec<SpeakerSpan> = [
+            ("A", 600, 4_287),
+            ("B", 5_387, 10_749),
+            ("A", 11_649, 14_504),
+            ("B", 15_804, 19_731),
+            ("A", 20_731, 23_989),
+            ("B", 25_089, 29_028),
+            ("A", 29_928, 33_102),
+            ("B", 34_402, 37_423),
+        ]
+        .iter()
+        .map(|(who, start, end)| SpeakerSpan::new(*who, *start, *end))
+        .collect();
+        let guess: Vec<SpeakerSpan> = [
+            ("Speaker 1", 0, 4_300),
+            ("Speaker 2", 5_100, 10_720),
+            ("Speaker 3", 11_600, 14_800),
+            ("Speaker 3", 15_300, 20_300),
+            ("Speaker 2", 20_600, 24_600),
+            ("Speaker 2", 24_800, 28_800),
+            ("Speaker 3", 29_900, 33_060),
+            ("Speaker 2", 33_900, 37_900),
+        ]
+        .iter()
+        .map(|(who, start, end)| SpeakerSpan::new(*who, *start, *end))
+        .collect();
+
+        let scored = der(&truth, &guess);
+        assert_eq!(
+            (
+                scored.confusion_ms,
+                scored.missed_ms,
+                scored.false_alarm_ms,
+                scored.speech_ms
+            ),
+            (10_890, 310, 4_290, 29_300)
+        );
+        assert!((scored.rate() - 0.529).abs() < 0.001, "{}", scored.rate());
+    }
+
     #[test]
     fn segments_convert_to_spans_dropping_unattributed_ones() {
         let mut attributed = notewise_transcription::Segment::new("hello", 0, 1_000);
