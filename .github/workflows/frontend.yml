@@ -120,6 +120,12 @@ jobs:
         run: cargo clippy --all-targets --features assistant -- -D warnings
         working-directory: apps/desktop/src-tauri
 
+      # Clippy compiles the shell's tests and runs none of them. They cover what the shell decides
+      # at launch — which backend to restore — and that is invisible to every lint.
+      - name: Tests
+        run: cargo test
+        working-directory: apps/desktop/src-tauri
+
   website:
     name: website
     runs-on: ubuntu-latest
