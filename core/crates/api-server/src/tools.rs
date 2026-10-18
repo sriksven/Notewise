@@ -925,6 +925,10 @@ async fn execute(state: &Shared, execution: ToolExecution) -> ApiResult<ToolExec
 
     let (server, allowlist) = {
         let db = state.db().await;
+        // Claimed before anything is read or sent, under the same lock. The row stays `confirmed`
+        // until the server answers, and without the claim a second request in that window — the
+        // "it never went out" button, another window — sent the same call again.
+        ToolExecutionRepository::new(&db).claim(id)?;
         let repo = McpServerRepository::new(&db);
         let server = repo.get(execution.server_id)?;
         let allowlist = Allowlist::from_pairs(repo.allowed_pairs()?);
@@ -938,7 +942,12 @@ async fn execute(state: &Shared, execution: ToolExecution) -> ApiResult<ToolExec
     }
 
     let secrets = secrets_for(&server, &KeychainStore::new()).unwrap_or_default();
-    let config = config_of(&server, secrets)?;
+    // Failed rather than returned: the row is claimed now, and an error here would leave it
+    // claimed and unfinished — refused for ever, though nothing was sent.
+    let config = match config_of(&server, secrets) {
+        Ok(config) => config,
+        Err(e) => return fail(state, id, e.to_string()).await,
+    };
 
     let arguments = match execution.arguments_value() {
         Ok(arguments) => arguments,
@@ -1715,6 +1724,57 @@ done
 
             let (_, listed) = call(&app, get("/v1/mcp/executions")).await;
             assert_eq!(listed[0]["status"], "proposed", "and the row is untouched");
+        }
+
+        /// A confirmed call already being sent must not be sent again. The row is `confirmed` for
+        /// as long as the server takes to answer, and the task list offers "it never went out —
+        /// send" for exactly that status.
+        #[tokio::test]
+        async fn a_call_being_sent_is_not_sent_a_second_time() {
+            let (app, state) =
+                app_with(&[r#"{"server":"shell","tool":"echo","arguments":{"text":"hello"}}"#]);
+            ready_server(&app).await;
+
+            let (_, proposal) = call(
+                &app,
+                post(
+                    "/v1/mcp/proposals",
+                    serde_json::json!({ "text": "say hello" }),
+                ),
+            )
+            .await;
+            let id: Id = proposal["execution"]["id"]
+                .as_str()
+                .expect("an id")
+                .parse()
+                .expect("a uuid");
+
+            // Where the first request stands while it waits on the server: confirmed, and taken.
+            {
+                let db = state.db().await;
+                let repo = ToolExecutionRepository::new(&db);
+                repo.confirm(id).expect("confirms");
+                repo.claim(id).expect("the first request takes it");
+            }
+
+            let (status, body) = call(
+                &app,
+                post(
+                    &format!("/v1/mcp/executions/{id}/execute"),
+                    serde_json::json!({}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+            let db = state.db().await;
+            let row = ToolExecutionRepository::new(&db).get(id).expect("reads");
+            assert_eq!(
+                row.status,
+                notewise_storage::ExecutionStatus::Confirmed,
+                "the second request sent nothing and recorded nothing"
+            );
+            assert_eq!(row.result, None);
         }
 
         #[tokio::test]
