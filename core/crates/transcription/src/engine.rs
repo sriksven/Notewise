@@ -232,7 +232,7 @@ impl WhisperEngine {
         }
 
         let duration_ms = utterance.duration_ms(AudioFormat::transcription().sample_rate.hz());
-        let audio = utterance.samples;
+        let audio = padded_for_decoding(utterance.samples);
         let offset_ms = utterance.offset_ms;
 
         let mut state = self.context.create_state().map_err(|e| {
@@ -350,6 +350,30 @@ impl TranscriptionEngine for WhisperEngine {
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         Err(Self::unavailable())
     }
+}
+
+/// Silence appended to every buffer before whisper.cpp sees it.
+///
+/// whisper.cpp does not decode the last second of what it is given. After each pass it seeks to
+/// the last timestamp it emitted and stops once less than a second remains, and it refuses any
+/// input shorter than a second outright. Both lose real words: the end of a phrase cut at the
+/// length cap ("closed early" vanished from the end of a 6.3 s buffer whose first pass stopped
+/// 0.9 s short), and a one-word answer flushed when a dictation stops, which came back as
+/// nothing at all. With this much silence after the audio, the second whisper.cpp skips is only
+/// ever silence. It is digital zero, as whisper.cpp's own padding to thirty seconds is, and
+/// segment times are clamped to the real audio, so nothing downstream sees it.
+const TAIL_PADDING_MS: u64 = 1_200;
+
+/// A buffer extended with [`TAIL_PADDING_MS`] of silence.
+// Called only from the feature-gated inference path; its tests are not gated.
+#[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+fn padded_for_decoding(mut samples: Vec<f32>) -> Vec<f32> {
+    let rate = u64::from(AudioFormat::transcription().sample_rate.hz());
+    samples.resize(
+        samples.len() + (rate * TAIL_PADDING_MS / 1000) as usize,
+        0.0,
+    );
+    samples
 }
 
 /// Shift a segment's bounds from whisper.cpp's buffer-relative centiseconds into the meeting's
@@ -721,6 +745,27 @@ mod tests {
         ] {
             assert!(is_non_speech_marker(marker), "{marker} should be filtered");
         }
+    }
+
+    /// whisper.cpp leaves the last second of its input undecoded and refuses inputs under a second,
+    /// so what it is handed must end in more than a second of silence — and nothing else may change.
+    #[test]
+    fn buffers_reach_whisper_with_more_than_a_second_of_silence_after_them() {
+        let speech = vec![0.25f32; 8_000]; // half a second
+        let padded = padded_for_decoding(speech.clone());
+
+        assert_eq!(
+            &padded[..speech.len()],
+            &speech[..],
+            "the audio itself is untouched"
+        );
+        let tail = &padded[speech.len()..];
+        assert!(
+            tail.len() > AudioFormat::transcription().sample_rate.hz() as usize,
+            "only {} samples of padding",
+            tail.len()
+        );
+        assert!(tail.iter().all(|s| *s == 0.0), "padding must be silence");
     }
 
     /// The measured case: an eight-second buffer whose last segment whisper.cpp ended at 8.6 s,
