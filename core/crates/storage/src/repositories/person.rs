@@ -157,14 +157,27 @@ impl<'a> PersonRepository<'a> {
         self.get(id)
     }
 
+    /// Remove a person. Their participation cascades; what they said stays, unattributed.
+    ///
+    /// `transcript_segments.speaker_id` references `people` with no `ON DELETE` action (v6), so a
+    /// person any segment pointed at could not be deleted at all — the statement failed its foreign
+    /// key. The free-text `speaker` label is untouched, so the transcript still reads the same; only
+    /// the link to an identity that no longer exists goes, which is what `ON DELETE SET NULL` would
+    /// have done. Both in one transaction, so a failed delete leaves the links where they were.
     pub fn delete(&self, id: Id) -> Result<()> {
-        let changed = self
-            .db
-            .conn()
-            .execute("DELETE FROM people WHERE id = ?1", rusqlite::params![id])?;
+        let conn = self.db.conn();
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "UPDATE transcript_segments SET speaker_id = NULL WHERE speaker_id = ?1",
+            rusqlite::params![id],
+        )?;
+        let changed = tx.execute("DELETE FROM people WHERE id = ?1", rusqlite::params![id])?;
         if changed == 0 {
             return Err(StorageError::not_found("Person", id));
         }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -530,6 +543,57 @@ mod tests {
             Some("host"),
             "a later sighting without a role must not erase a known one"
         );
+    }
+
+    /// `speaker_id` has no `ON DELETE` action, so a person a segment pointed at was undeletable —
+    /// the foreign key failed. What they said must survive them, unattributed.
+    #[test]
+    fn a_person_a_segment_points_at_can_still_be_deleted() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        let p = person(&db, "Priya");
+        let meeting = MeetingRepository::new(&db)
+            .create(NewMeeting {
+                project_id: None,
+                title: "Standup".into(),
+                source: MeetingSource::Import,
+                started_at: Utc::now(),
+            })
+            .unwrap();
+        let segment = MeetingRepository::new(&db)
+            .add_segment(crate::NewTranscriptSegment {
+                meeting_id: meeting.id,
+                speaker: Some("Priya".into()),
+                text: "ship it".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                confidence: None,
+            })
+            .unwrap();
+        // Only a merge writes this column today, which is how a workspace comes to hold one.
+        db.conn()
+            .execute(
+                "UPDATE transcript_segments SET speaker_id = ?2 WHERE id = ?1",
+                rusqlite::params![segment.id, p.id],
+            )
+            .unwrap();
+
+        repo.delete(p.id).expect("the person must be deletable");
+
+        let (speaker, speaker_id): (Option<String>, Option<Id>) = db
+            .conn()
+            .query_row(
+                "SELECT speaker, speaker_id FROM transcript_segments WHERE id = ?1",
+                rusqlite::params![segment.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            speaker.as_deref(),
+            Some("Priya"),
+            "the transcript reads the same"
+        );
+        assert_eq!(speaker_id, None, "only the link to the identity goes");
     }
 
     #[test]
