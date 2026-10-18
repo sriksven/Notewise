@@ -90,6 +90,22 @@ impl ApiError {
             // twice — and the message says which." A 500 told them to retry a path that does not
             // exist. Same reasoning as `Invalid` above: retrying this body fails identically.
             ApiError::Storage(StorageError::Merge(_)) => (StatusCode::BAD_REQUEST, "cannot_merge"),
+            // A schema rule the request broke. These were 500s — `POST /v1/notes` with a
+            // `project_id` that names nothing, a second person with the same email — so a client
+            // was told to retry something that fails identically every time.
+            //
+            // A duplicate is a conflict with what is stored. A reference to nothing is a request
+            // that cannot be carried out as written, which is what 422 says; it is not a 404,
+            // because the resource the request was addressed to exists.
+            ApiError::Storage(StorageError::Constraint { kind, .. }) => match kind {
+                notewise_storage::ConstraintKind::Unique => {
+                    (StatusCode::CONFLICT, "already_exists")
+                }
+                notewise_storage::ConstraintKind::ForeignKey => {
+                    (StatusCode::UNPROCESSABLE_ENTITY, "invalid_reference")
+                }
+                notewise_storage::ConstraintKind::Other => (StatusCode::BAD_REQUEST, "bad_request"),
+            },
             ApiError::Storage(_) => (StatusCode::INTERNAL_SERVER_ERROR, "storage_error"),
 
             ApiError::Graph(notewise_graph::GraphError::DepthTooLarge(_)) => {
@@ -173,6 +189,27 @@ mod tests {
         // anything in the 5xx range, so a product rule landing there fills the log with faults
         // that are not faults.
         assert!(!err.parts().0.is_server_error());
+    }
+
+    /// A broken schema rule is the request's fault: neither kind may surface as a server error.
+    #[test]
+    fn constraint_violations_are_client_errors() {
+        use notewise_storage::ConstraintKind;
+
+        let duplicate = ApiError::Storage(StorageError::Constraint {
+            kind: ConstraintKind::Unique,
+            message: "something with the same people.email already exists".into(),
+        });
+        assert_eq!(duplicate.parts(), (StatusCode::CONFLICT, "already_exists"));
+
+        let dangling = ApiError::Storage(StorageError::Constraint {
+            kind: ConstraintKind::ForeignKey,
+            message: "this refers to something that does not exist".into(),
+        });
+        assert_eq!(
+            dangling.parts(),
+            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_reference")
+        );
     }
 
     #[test]

@@ -38,6 +38,9 @@ impl McpError {
             // A missing record is the agent's mistake, not a server fault — reporting it as
             // invalid params lets the agent correct itself instead of retrying blindly.
             McpError::Storage(notewise_storage::StorageError::NotFound { .. }) => INVALID_PARAMS,
+            // The same for a schema rule the arguments broke — an id naming nothing, a duplicate.
+            // Retrying unchanged fails identically; correcting the arguments does not.
+            McpError::Storage(notewise_storage::StorageError::Constraint { .. }) => INVALID_PARAMS,
             McpError::Storage(_) | McpError::Graph(_) => INTERNAL_ERROR,
         }
     }
@@ -65,6 +68,15 @@ mod tests {
             INVALID_PARAMS,
             "an agent given this code can correct its id rather than retrying"
         );
+    }
+
+    #[test]
+    fn a_broken_schema_rule_is_the_agents_mistake_too() {
+        let err = McpError::Storage(StorageError::Constraint {
+            kind: notewise_storage::ConstraintKind::ForeignKey,
+            message: "this refers to something that does not exist".into(),
+        });
+        assert_eq!(err.code(), INVALID_PARAMS);
     }
 
     #[test]

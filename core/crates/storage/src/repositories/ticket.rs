@@ -403,7 +403,16 @@ mod tests {
         let err = repo
             .link_external(second.id, external)
             .expect_err("duplicate external link must be rejected");
-        assert!(matches!(err, StorageError::Sqlite(_)), "got {err:?}");
+        assert!(
+            matches!(
+                err,
+                StorageError::Constraint {
+                    kind: crate::ConstraintKind::Unique,
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]

@@ -3562,6 +3562,33 @@ mod tests {
         assert_eq!(json.as_array().unwrap().len(), 0);
     }
 
+    /// A reference to a project that does not exist is the request's fault. It reached the client
+    /// as a 500 `storage_error` carrying SQLite's "FOREIGN KEY constraint failed".
+    #[tokio::test]
+    async fn an_unknown_project_is_a_client_error_not_a_500() {
+        let app = app();
+        let unknown = Id::new();
+
+        for (uri, body) in [
+            (
+                "/v1/notes",
+                serde_json::json!({"title": "n", "project_id": unknown}),
+            ),
+            (
+                "/v1/meetings",
+                serde_json::json!({"title": "m", "project_id": unknown}),
+            ),
+            (
+                "/v1/tickets",
+                serde_json::json!({"title": "t", "project_id": unknown.to_string()}),
+            ),
+        ] {
+            let (status, json) = call(&app, post(uri, body)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}: {json}");
+            assert_eq!(json["code"], "invalid_reference", "{uri}: {json}");
+        }
+    }
+
     /// A board with a Done column must get its done tickets back after a reload. The bare call
     /// keeps meaning "open" for the clients that already rely on it.
     #[tokio::test]
