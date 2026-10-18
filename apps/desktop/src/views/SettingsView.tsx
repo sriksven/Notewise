@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, type BackendInfo, type ModelInfo, type SetupReadiness } from "../lib/api";
+import { backendBlocker } from "../lib/backends";
 import { size } from "../lib/format";
 import { useModelDownload } from "../lib/useModelDownload";
 import type { Mode, Theme } from "../lib/theme";
@@ -277,7 +278,7 @@ export function SettingsView({
               // Blocked only while something is genuinely missing. A provider whose key is
               // saved is as usable as a local one, and greying it out was the reason a key
               // could be added and then appear not to work.
-              const blocked = !backend.has_key || backend.requires_endpoint;
+              const blocked = backendBlocker(backend) !== null;
 
               return (
                 <li key={backend.kind}>
