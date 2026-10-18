@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::Row;
+use rusqlite::{OptionalExtension, Row};
 
 use crate::db::Database;
 use crate::error::{Result, StorageError};
@@ -34,12 +34,34 @@ impl<'a> PersonRepository<'a> {
         Self { db }
     }
 
+    /// Add a person.
+    ///
+    /// A blank email is no email. Stored as `""` it was a real value to the unique index, so the
+    /// second person created without an address collided with the first.
+    ///
+    /// An address already on file is refused, compared without case. The unique index compares
+    /// bytes, so `Dana@example.com` slipped past it beside `dana@example.com` — and
+    /// [`Self::find_by_email`], which ignores case, then had two people to choose between.
     pub fn create(&self, new: NewPerson) -> Result<Person> {
+        let email = new
+            .email
+            .map(|address| address.trim().to_string())
+            .filter(|address| !address.is_empty());
+
+        if let Some(address) = &email {
+            if let Some(existing) = self.find_by_email(address)? {
+                return Err(StorageError::Refused(format!(
+                    "{} already has the email {address}",
+                    existing.display_name
+                )));
+            }
+        }
+
         let now = Utc::now();
         let person = Person {
             id: Id::new(),
             display_name: new.display_name,
-            email: new.email,
+            email,
             has_voice_print: false,
             created_at: now,
             updated_at: now,
@@ -90,7 +112,7 @@ impl<'a> PersonRepository<'a> {
                 rusqlite::params![display_name],
                 map_person,
             )
-            .ok();
+            .optional()?;
 
         match existing {
             Some(person) => Ok(person),
@@ -111,7 +133,7 @@ impl<'a> PersonRepository<'a> {
                 rusqlite::params![email],
                 map_person,
             )
-            .ok())
+            .optional()?)
     }
 
     pub fn list(&self) -> Result<Vec<Person>> {
@@ -319,6 +341,49 @@ mod tests {
                 email: None,
             })
             .unwrap()
+    }
+
+    /// Two people without an address are two people, not a collision on `""`.
+    #[test]
+    fn a_blank_email_is_no_email() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        for name in ["First", "Second"] {
+            let made = repo
+                .create(NewPerson {
+                    display_name: name.into(),
+                    email: Some("  ".into()),
+                })
+                .expect("a blank email must not collide");
+            assert_eq!(made.email, None);
+        }
+    }
+
+    /// The index compares bytes and `find_by_email` does not, so a case variant has to be refused
+    /// here — otherwise one address belongs to two people and lookups pick one at random.
+    #[test]
+    fn an_email_already_on_file_is_refused_whatever_its_case() {
+        let db = db();
+        let repo = PersonRepository::new(&db);
+        repo.create(NewPerson {
+            display_name: "Dana".into(),
+            email: Some("dana@example.com".into()),
+        })
+        .expect("first");
+
+        for address in ["dana@example.com", "DANA@example.com", " dana@example.com "] {
+            let err = repo
+                .create(NewPerson {
+                    display_name: "Imposter".into(),
+                    email: Some(address.into()),
+                })
+                .expect_err("one address, one person");
+            assert!(
+                matches!(err, StorageError::Refused(_)),
+                "{address}: {err:?}"
+            );
+        }
+        assert_eq!(repo.list().unwrap().len(), 1);
     }
 
     #[test]
