@@ -24,8 +24,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use notewise_ai_router::{BackendKind, Router as AiRouter, RouterConfig};
-use notewise_api_server::{AppState, Server};
-use notewise_storage::Database;
+use notewise_api_server::{AppState, Server, BACKEND_KIND_KEY, BACKEND_MODEL_KEY};
+use notewise_storage::{Database, SettingsRepository};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(feature = "assistant")]
@@ -115,7 +115,7 @@ fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::E
 
     // Read before the database moves into the state. The table of features lives in the engine so
     // that adding a third hotkey does not mean editing the shell as well.
-    let settings = notewise_storage::SettingsRepository::new(&db);
+    let settings = SettingsRepository::new(&db);
     let hotkeys: Vec<(String, String)> = notewise_api_server::dictation::HOTKEYS
         .iter()
         .map(|(feature, setting, default)| {
@@ -127,6 +127,8 @@ fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::E
             ((*feature).to_string(), binding)
         })
         .collect();
+
+    let restore = stored_backend(&settings, std::env::var("NOTEWISE_BACKEND").is_ok());
 
     tracing::info!(
         db = %db_path.display(),
@@ -161,6 +163,25 @@ fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::E
             };
 
             runtime.block_on(async move {
+                // Before the window can ask anything of it. `switch_backend` is what the app calls
+                // when the user picks a backend, so a restored choice is built exactly as the
+                // original was — the key from the keychain, the stored routing rules applied — and
+                // a choice that can no longer be built (its key is gone) leaves the default running.
+                if let Some((kind, model)) = restore {
+                    match state.switch_backend(kind, model, None).await {
+                        Ok(()) => tracing::info!(
+                            backend = state.ai().model_id(),
+                            local = state.ai().is_local(),
+                            "restored the backend chosen in the app"
+                        ),
+                        Err(e) => tracing::warn!(
+                            backend = kind.as_str(),
+                            error = %e,
+                            "could not restore the backend chosen in the app; using the default"
+                        ),
+                    }
+                }
+
                 match server.bind_with_frontend(state, frontend).await {
                     Ok((addr, serving)) => {
                         if tx.send(Ok(addr)).is_err() {
@@ -301,6 +322,35 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
     )
 }
 
+/// The backend the user last chose in the app, if this launch should go back to it.
+///
+/// The engine writes the choice down whenever the user switches (`AppState::switch_backend`), and
+/// the CLI reads it back at startup — but this shell built its router from the environment alone,
+/// so the desktop app forgot the choice on every launch. That is the bug `switch_backend`'s own
+/// comment describes: someone who picked `llama3.1:8b` because `llama3.1` is not what their Ollama
+/// holds got "model not found" again the next time they opened the app, having fixed it once. A
+/// hosted provider chosen with a key typed into the app was dropped the same way, back to local.
+///
+/// `NOTEWISE_BACKEND` still wins, as it does for the CLI: it is set deliberately for one launch,
+/// and a stored preference silently overriding it would make the variable look broken.
+fn stored_backend(
+    settings: &SettingsRepository<'_>,
+    env_backend_set: bool,
+) -> Option<(BackendKind, Option<String>)> {
+    if env_backend_set {
+        return None;
+    }
+
+    let kind = settings
+        .get(BACKEND_KIND_KEY)
+        .ok()
+        .flatten()
+        .and_then(|kind| BackendKind::parse(kind.trim()))?;
+    let model = settings.get(BACKEND_MODEL_KEY).ok().flatten();
+
+    Some((kind, model))
+}
+
 /// Choose an AI backend from the environment.
 ///
 /// Mirrors the CLI's resolution so the desktop app and `notewise status` never disagree about
@@ -350,4 +400,63 @@ fn key_for(kind: BackendKind) -> Option<String> {
         _ => return None,
     };
     std::env::var(name).ok().filter(|k| !k.trim().is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace(stored: &[(&str, &str)]) -> Database {
+        let db = Database::open_in_memory().expect("an in-memory database");
+        let settings = SettingsRepository::new(&db);
+        for (key, value) in stored {
+            settings.set(key, value).expect("a stored setting");
+        }
+        db
+    }
+
+    #[test]
+    fn the_backend_chosen_in_the_app_is_restored() {
+        let db = workspace(&[
+            (BACKEND_KIND_KEY, "ollama"),
+            (BACKEND_MODEL_KEY, "llama3.1:8b"),
+        ]);
+
+        assert_eq!(
+            stored_backend(&SettingsRepository::new(&db), false),
+            Some((BackendKind::Ollama, Some("llama3.1:8b".to_string()))),
+            "the exact model the user picked, not the default it replaced"
+        );
+    }
+
+    #[test]
+    fn notewise_backend_wins_over_a_stored_choice() {
+        let db = workspace(&[(BACKEND_KIND_KEY, "anthropic")]);
+
+        assert_eq!(stored_backend(&SettingsRepository::new(&db), true), None);
+    }
+
+    #[test]
+    fn nothing_stored_or_nothing_usable_means_the_default() {
+        assert_eq!(
+            stored_backend(&SettingsRepository::new(&workspace(&[])), false),
+            None
+        );
+
+        let unknown = workspace(&[(BACKEND_KIND_KEY, "a-provider-from-a-later-version")]);
+        assert_eq!(
+            stored_backend(&SettingsRepository::new(&unknown), false),
+            None
+        );
+    }
+
+    #[test]
+    fn a_choice_without_a_stored_model_keeps_the_providers_default_model() {
+        let db = workspace(&[(BACKEND_KIND_KEY, "gemini")]);
+
+        assert_eq!(
+            stored_backend(&SettingsRepository::new(&db), false),
+            Some((BackendKind::Gemini, None))
+        );
+    }
 }
