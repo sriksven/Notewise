@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, type BackendInfo, type ModelInfo, type SetupReadiness } from "../lib/api";
+import { backendBlocker } from "../lib/backends";
 import { size } from "../lib/format";
 import { useModelDownload } from "../lib/useModelDownload";
 import type { Mode, Theme } from "../lib/theme";
@@ -47,6 +48,14 @@ interface SettingsViewProps {
   onAccentChange: (accent: string) => void;
   /** So a setting that is fixed elsewhere can send the user there rather than describing it. */
   onNavigate: (route: Route) => void;
+  /**
+   * Something here changed which model answers, or what the engine calls it.
+   *
+   * The top bar's model pill and its Local/Cloud badge read the window's own copy of `/health`,
+   * which nothing on this screen could update — so switching to a hosted provider here left the
+   * chrome saying "Local" until the window happened to refresh for some other reason.
+   */
+  onEngineChange: () => void;
 }
 
 export function SettingsView({
@@ -54,6 +63,7 @@ export function SettingsView({
   onModeChange,
   onAccentChange,
   onNavigate,
+  onEngineChange,
 }: SettingsViewProps) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [active, setActive] = useState<Active | null>(null);
@@ -116,6 +126,7 @@ export function SettingsView({
     setError(null);
     try {
       await api.switchBackend(kind, model);
+      onEngineChange();
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not switch backend.");
@@ -205,7 +216,7 @@ export function SettingsView({
             about the text. */}
         <AudioRetentionSettings />
 
-        <RoutingSettings />
+        <RoutingSettings onChanged={onEngineChange} />
 
         {/* After routing: that decides which model answers, this decides what it is asked. */}
         <SummaryTemplateSettings />
@@ -267,7 +278,7 @@ export function SettingsView({
               // Blocked only while something is genuinely missing. A provider whose key is
               // saved is as usable as a local one, and greying it out was the reason a key
               // could be added and then appear not to work.
-              const blocked = !backend.has_key || backend.requires_endpoint;
+              const blocked = backendBlocker(backend) !== null;
 
               return (
                 <li key={backend.kind}>
@@ -321,7 +332,15 @@ export function SettingsView({
                       active one. Choosing a provider was never enough: the tag has to match
                       what was pulled, exactly. */}
                   {backend.requires_api_key && (
-                    <ApiKeyRow backend={backend} onChanged={() => void load()} />
+                    // Saving a key also switches to that provider, and removing one can leave
+                    // the engine on another — either way the chrome has to hear about it.
+                    <ApiKeyRow
+                      backend={backend}
+                      onChanged={() => {
+                        onEngineChange();
+                        void load();
+                      }}
+                    />
                   )}
 
                   {isActive && available && (

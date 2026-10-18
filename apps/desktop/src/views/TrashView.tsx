@@ -14,7 +14,18 @@ import { relativeTime } from "../lib/format";
  * a user did not agree to, and this is their own machine — the only thing that destroys
  * anything is someone pressing the button that says so.
  */
-export function TrashView() {
+interface Props {
+  /**
+   * A meeting came back out of the trash.
+   *
+   * The library, home and the meeting column all read the window's own meeting list, which this
+   * screen cannot reach — so a restored meeting stayed missing from every one of them until the
+   * window was reloaded, which reads as the restore having failed.
+   */
+  onMeetingRestored?: () => void;
+}
+
+export function TrashView({ onMeetingRestored }: Props = {}) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,7 +170,10 @@ export function TrashView() {
                       void act(
                         meeting.id,
                         () => api.restoreMeeting(meeting.id),
-                        () => setMeetings((m) => m.filter((x) => x.id !== meeting.id)),
+                        () => {
+                          setMeetings((m) => m.filter((x) => x.id !== meeting.id));
+                          onMeetingRestored?.();
+                        },
                       )
                     }
                     onPurge={() =>

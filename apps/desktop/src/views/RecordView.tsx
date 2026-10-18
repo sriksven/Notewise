@@ -127,6 +127,18 @@ export function RecordView({
             onClick={onToggle}
             disabled={busy}
             aria-pressed={isRecording}
+            // Named, because its face is only an icon: the caption under it is a separate element,
+            // and without this a screen reader announced the page's main control as "button".
+            // Worded like the dock's, which does the same thing.
+            aria-label={
+              isRecording
+                ? "Stop recording"
+                : openMeeting
+                  ? "End this meeting"
+                  : canRecord
+                    ? "Start recording"
+                    : "Start a meeting (this engine cannot capture audio)"
+            }
             className={`flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-full
                         text-white transition disabled:opacity-60 ${
                           isRecording
@@ -209,7 +221,13 @@ export function RecordView({
               {health?.ai_model ?? "—"}
             </p>
 
-            <button type="button" onClick={onImport} className="btn-quiet w-full">
+            <button
+              type="button"
+              onClick={onImport}
+              // The warning at the top of this page already says why: no capture, no transcription.
+              disabled={!canRecord}
+              className="btn-quiet w-full"
+            >
               <Upload size={14} aria-hidden />
               Import an audio file instead
             </button>

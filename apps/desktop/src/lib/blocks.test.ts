@@ -5,6 +5,7 @@ import {
   blockAfter,
   canIndent,
   canOutdent,
+  canonical,
   depthOf,
   emptyDocument,
   imageParts,
@@ -315,6 +316,21 @@ describe("blockAfter", () => {
     const next = blockAfter(newBlock("todo", "done thing"));
     expect(next.checked).toBe(false);
   });
+
+  // Enter at the end of a nested item made the next one top level, so a sub-list could only be
+  // written by pressing Tab before every single item.
+  it("continues a nested list at the same depth", () => {
+    for (const type of ["bullet", "numbered", "todo"] as BlockType[]) {
+      const nested = { ...newBlock(type, "child"), depth: 2 };
+      expect(depthOf(blockAfter(nested))).toBe(2);
+      expect(blockAfter(nested).type).toBe(type);
+    }
+    // And the document round-trips with the new item where it was typed.
+    const parent = newBlock("bullet", "parent");
+    const child = { ...newBlock("bullet", "child"), depth: 1 };
+    const next = { ...blockAfter(child), text: "sibling" };
+    expect(serialize([parent, child, next])).toBe("- parent\n  - child\n  - sibling\n");
+  });
 });
 
 describe("helpers", () => {
@@ -537,5 +553,30 @@ describe("images", () => {
   // Brackets in alt text would terminate the `![...]` early.
   it("strips brackets from alt text", () => {
     expect(imageText("a [b] c", "/x.png")).toBe("![a b c](/x.png)");
+  });
+});
+
+describe("canonical", () => {
+  // The autosave compared the editor's output with the stored text, so any body this editor would
+  // write differently — a note made through the API, an agent's note, an empty new note — was
+  // "changed" the moment it was opened, and saved: its Markdown rewritten and its date bumped.
+  it("is what an untouched editor writes back, so opening a note is not an edit", () => {
+    for (const stored of ["", "line one\nline two", "* starred bullet", "trailing   \n", "# Title\n\n- a\n- b\n"]) {
+      expect(serialize(parse(stored))).toBe(canonical(stored));
+    }
+    // The comparison the autosave used to make, which reported a change for these.
+    expect(serialize(parse("line one\nline two"))).not.toBe("line one\nline two");
+    expect(serialize(parse(""))).not.toBe("");
+  });
+
+  it("still sees a real edit", () => {
+    const blocks = parse("line one\nline two");
+    blocks[0] = { ...blocks[0], text: "line one, edited" };
+    expect(serialize(blocks)).not.toBe(canonical("line one\nline two"));
+  });
+
+  it("leaves text the editor wrote unchanged", () => {
+    const written = serialize(parse("# Roadmap\n\n- Ship search\n- Ship tickets\n"));
+    expect(canonical(written)).toBe(written);
   });
 });

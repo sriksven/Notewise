@@ -30,7 +30,18 @@ interface Props {
  * remove control stays, and adding one is offered beside it — a decision the model missed is at
  * least as common as one it invented.
  */
-export function Decisions({ meetingId, refreshToken = 0 }: Props) {
+/**
+ * Keyed on the meeting, so nothing typed or loaded for one meeting survives into the next.
+ *
+ * The intelligence panel stays mounted while the library switches meetings under it. Without the
+ * key a half-typed decision stayed open on the next meeting and Enter added it there, and the last
+ * meeting's decisions stayed on screen until — or, if the request failed, instead of — this one's.
+ */
+export function Decisions(props: Props) {
+  return <DecisionsForMeeting key={props.meetingId} {...props} />;
+}
+
+function DecisionsForMeeting({ meetingId, refreshToken = 0 }: Props) {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

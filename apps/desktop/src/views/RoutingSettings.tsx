@@ -33,7 +33,15 @@ import {
  * doing, and how do I stop it". Composing an arbitrary rule stays an API call until there is
  * evidence anyone wants to.
  */
-export function RoutingSettings() {
+interface Props {
+  /**
+   * The policy in force changed. The engine names its model after the policy ("mock + 1 route"),
+   * so the window's copy of `/health` is stale the moment a rule is installed or removed.
+   */
+  onChanged?: () => void;
+}
+
+export function RoutingSettings({ onChanged }: Props = {}) {
   const [state, setState] = useState<RoutingRules | null>(null);
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [explain, setExplain] = useState<RoutingExplain | null>(null);
@@ -79,6 +87,7 @@ export function RoutingSettings() {
     setError(null);
     try {
       setState(await api.installDefaultRouting(backend));
+      onChanged?.();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "could not install the policy");
     } finally {
@@ -93,6 +102,7 @@ export function RoutingSettings() {
     try {
       const kept = state.rules.filter((r) => r.name !== name);
       setState(await api.saveRoutingRules(kept));
+      onChanged?.();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "could not save the policy");
     } finally {
@@ -114,7 +124,7 @@ export function RoutingSettings() {
       </p>
 
       {error && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[12.5px] text-amber-200">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-warn-line bg-warn p-3 text-[12.5px] text-warn-text">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{error}</span>
         </div>
@@ -153,7 +163,7 @@ export function RoutingSettings() {
                   {!active.includes(rule.name) && (
                     // Stored but not built. Almost always a missing API key, and a screen that
                     // showed it as working would be lying about what will happen.
-                    <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-200">
+                    <span className="ml-2 rounded bg-warn px-1.5 py-0.5 text-[10.5px] font-semibold text-warn-text">
                       not in force
                     </span>
                   )}

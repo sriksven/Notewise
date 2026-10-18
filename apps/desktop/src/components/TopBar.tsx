@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Globe, Mic, Settings2, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { api, type BackendInfo, type DeviceInfo, type Health, type LanguageOption } from "../lib/api";
+import { backendBlocker } from "../lib/backends";
 
 interface Props {
   health: Health | null;
@@ -250,19 +251,20 @@ export function TopBar({
               {backends.map((backend) => {
                 // A cloud backend with no key on the engine cannot be selected. Showing it
                 // greyed with the reason beats hiding it and leaving the user wondering why
-                // their provider is missing.
-                const blocked = backend.requires_api_key || backend.requires_endpoint;
+                // their provider is missing. Whether a key exists is `has_key`, not
+                // `requires_api_key` — see `backendBlocker`.
+                const blocker = backendBlocker(backend);
                 return (
                   <Item
                     key={backend.kind}
                     selected={backend.kind === activeKind}
-                    disabled={blocked}
+                    disabled={blocker !== null}
                     onClick={() => void switchTo(backend, close)}
                     title={backend.label}
                     subtitle={
-                      backend.requires_api_key
-                        ? "needs an API key in the engine's environment"
-                        : backend.requires_endpoint
+                      blocker === "needs_key"
+                        ? "needs an API key — add one in Settings"
+                        : blocker === "needs_endpoint"
                           ? "needs an endpoint URL — set it in Settings"
                           : backend.is_local
                             ? "runs on this machine"

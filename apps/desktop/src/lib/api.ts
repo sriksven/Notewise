@@ -189,6 +189,16 @@ export interface Summary {
   action_items: ActionItem[];
 }
 
+/** What a summary run reports: the stored row's id and text, and how much it extracted. */
+export interface SummarizeResult {
+  summary_id: string;
+  text: string;
+  model: string;
+  /** Counts, not the rows — read those from the meeting. */
+  decisions: number;
+  action_items: number;
+}
+
 export interface DeviceInfo {
   name: string;
   is_default: boolean;
@@ -402,6 +412,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
     );
   }
+
+  // Nothing to read. Two routes answer `204 No Content` — removing an API key and disconnecting
+  // a connector — and `response.json()` throws on an empty body, so both used to report failure
+  // after succeeding, and skip the refresh that would have shown the change.
+  if (response.status === 204) return undefined as T;
 
   return response.json() as Promise<T>;
 }
@@ -863,6 +878,14 @@ export const api = {
 
   meetings: (limit = 50) => request<Meeting[]>(`/v1/meetings?limit=${limit}`),
 
+  /**
+   * One meeting by id, trashed or not — `deleted_at` says which.
+   *
+   * For a meeting the newest-fifty list does not hold: one opened from a person, a search hit or
+   * a citation, or an address that names a meeting since deleted.
+   */
+  meeting: (id: string) => request<Meeting>(`/v1/meetings/${id}`),
+
   createMeeting: (title: string, source = "combined") =>
     request<Meeting>("/v1/meetings", {
       method: "POST",
@@ -1030,23 +1053,19 @@ export const api = {
     }),
 
   summarize: (id: string) =>
-    request<{
-      summary_id: string;
-      text: string;
-      model: string;
-      decisions: number;
-      action_items: number;
-    }>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
+    request<SummarizeResult>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
 
-  /** Summarize using a template's prompt instead of the backend's default instruction. */
+  /**
+   * Summarize using a template's prompt instead of the backend's default instruction.
+   *
+   * Same route, same answer as {@link summarize}. It was typed as `{ summary, decisions[],
+   * action_items[] }`, which the engine has never sent — harmless only because no caller read it.
+   */
   summarizeWithTemplate: (id: string, templateId: string) =>
-    request<{
-      summary: Summary;
-      decisions: unknown[];
-      action_items: unknown[];
-    }>(`/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`, {
-      method: "POST",
-    }),
+    request<SummarizeResult>(
+      `/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`,
+      { method: "POST" },
+    ),
 
   related: (id: string, depth = 2) =>
     request<RelatedNode[]>(`/v1/meetings/${id}/related?depth=${depth}`),
@@ -1393,7 +1412,13 @@ export const api = {
   stopRecording: () =>
     request<RecordingStopped>("/v1/recording", { method: "DELETE" }),
 
-  tickets: () => request<Ticket[]>("/v1/tickets"),
+  /**
+   * Every ticket, whatever its status.
+   *
+   * `?status=all` because the bare route answers open tickets only — the board has a Done column,
+   * and without it a ticket moved there vanished on the next load.
+   */
+  tickets: () => request<Ticket[]>("/v1/tickets?status=all"),
 
   createTicket: (input: {
     title: string;

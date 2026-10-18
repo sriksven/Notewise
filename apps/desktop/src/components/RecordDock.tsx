@@ -76,8 +76,16 @@ export function RecordDock({
   useEffect(() => {
     if (!menuOpen) return;
     const close = () => setMenuOpen(false);
+    // Escape too, as every other menu here does and as Help → Shortcuts promises.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [menuOpen]);
 
   const label = isRecording

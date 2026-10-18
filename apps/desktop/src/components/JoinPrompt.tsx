@@ -6,7 +6,22 @@ import { api, ApiError, type JoinOffer } from "../lib/api";
 interface Props {
   /** Whether this build can record at all. A prompt that cannot be taken up is worse than none. */
   canRecord: boolean;
-  /** Called with the meeting id once a recording has started. */
+  /**
+   * The input and language chosen in the top bar, or null for the defaults.
+   *
+   * Passed through so a recording started from here captures from the same microphone as one
+   * started from the record button. Without them it always used the system default — the wrong
+   * device for anyone who had picked their headset.
+   */
+  device: string | null;
+  language: string | null;
+  /**
+   * Called with the meeting id once a recording has started.
+   *
+   * The caller has to re-read the engine's state here: the recording was started behind the
+   * window's back, and until it does the app shows no recording indicator, does not poll the
+   * live transcript, and offers a record button that would start a second one.
+   */
   onStarted: (meetingId: string) => void;
 }
 
@@ -32,7 +47,7 @@ const POLL_MS = 10_000;
  * false positive would be audio of other people captured because software guessed a meeting began.
  * Those are not the same kind of mistake, and the asymmetry is what decides it.
  */
-export function JoinPrompt({ canRecord, onStarted }: Props) {
+export function JoinPrompt({ canRecord, device, language, onStarted }: Props) {
   const [offers, setOffers] = useState<JoinOffer[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +87,11 @@ export function JoinPrompt({ canRecord, onStarted }: Props) {
       // Two steps on purpose: the engine says what to call it, and the ordinary recording endpoint
       // starts it. One path into the microphone, with its device and model errors already handled.
       const accepted = await api.acceptJoinOffer(offer.id);
-      const started = await api.startRecording({ title: accepted.title });
+      const started = await api.startRecording({
+        title: accepted.title,
+        device: device ?? undefined,
+        language: language ?? undefined,
+      });
 
       setOffers((current) => current.filter((o) => o.id !== offer.id));
       if (started.meeting_id) onStarted(started.meeting_id);
