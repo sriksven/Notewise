@@ -20,7 +20,8 @@ import { api, ApiError, type Job, type JobRun } from "../lib/api";
  */
 export function JobsView() {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [runs, setRuns] = useState<Record<string, JobRun[]>>({});
+  /** Each opened job's history. `null` while it is being read, so "not run yet" means it. */
+  const [runs, setRuns] = useState<Record<string, JobRun[] | null>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,19 +91,25 @@ export function JobsView() {
     }
   }
 
+  const readRuns = async (id: string) => {
+    try {
+      const list = await api.jobRuns(id);
+      setRuns((current) => ({ ...current, [id]: list }));
+    } catch {
+      // An unreadable history should not take the schedule list down with it — but it must not
+      // read as "it has not run yet" either, which is a claim about the job.
+      setRuns((current) => ({ ...current, [id]: current[id] ?? [] }));
+    }
+  };
+
   async function showRuns(id: string) {
     if (open === id) {
       setOpen(null);
       return;
     }
     setOpen(id);
-    try {
-      setRuns((current) => ({ ...current, [id]: [] }));
-      const list = await api.jobRuns(id);
-      setRuns((current) => ({ ...current, [id]: list }));
-    } catch {
-      /* An unreadable history should not take the schedule list down with it. */
-    }
+    setRuns((current) => ({ ...current, [id]: null }));
+    await readRuns(id);
   }
 
   async function act(fn: () => Promise<unknown>) {
@@ -110,7 +117,9 @@ export function JobsView() {
     try {
       await fn();
       await load();
-      if (open) setRuns((c) => ({ ...c, [open]: [] }));
+      // Re-read the open history rather than blanking it. Blanking it showed "It has not run yet."
+      // under a job that had — straight after pressing Run now, the moment it matters most.
+      if (open) await readRuns(open);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "that did not work");
     }
@@ -252,7 +261,10 @@ export function JobsView() {
 
               {open === job.id && (
                 <ul className="mt-2 space-y-1.5 border-t border-hairline pt-2">
-                  {(runs[job.id] ?? []).length === 0 && (
+                  {runs[job.id] === null && (
+                    <li className="text-[12px] text-ink-faint">Loading…</li>
+                  )}
+                  {runs[job.id]?.length === 0 && (
                     <li className="text-[12px] text-ink-faint">It has not run yet.</li>
                   )}
                   {(runs[job.id] ?? []).map((run) => (
