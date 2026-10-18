@@ -121,19 +121,22 @@ impl<'a> EmailDraftRepository<'a> {
             rusqlite::params![id, DraftStatus::Discarded.as_str(), Utc::now()],
         )?;
         if changed == 0 {
-            // Either missing, or already sent — a sent email cannot be un-sent.
-            let current = self.get(id)?;
-            return Err(StorageError::Corrupt {
-                column: "email_drafts.status",
-                reason: format!(
-                    "cannot discard a draft in state '{}'",
-                    current.status.as_str()
-                ),
-            });
+            // Either missing, or already sent — a sent email cannot be un-sent. `get` reports the
+            // first; the second is a rule, not damage — see `transition`.
+            self.get(id)?;
+            return Err(StorageError::Refused(
+                "this email was already sent, so it cannot be discarded".into(),
+            ));
         }
         self.get(id)
     }
 
+    /// Move a draft along the state machine, or say why it cannot move.
+    ///
+    /// A refusal, not `Corrupt`. Nothing stored is wrong when a draft is approved twice — the state
+    /// machine is doing its job — but `Corrupt` reached the user as "invalid stored value in column
+    /// 'email_drafts.status'", which reads as a damaged database, and the API answered 422
+    /// `invalid_state` for what is a 409: the request conflicts with the draft's current state.
     fn transition(&self, id: Id, from: DraftStatus, to: DraftStatus) -> Result<EmailDraft> {
         let changed = self.db.conn().execute(
             "UPDATE email_drafts SET status = ?3, updated_at = ?4
@@ -143,15 +146,12 @@ impl<'a> EmailDraftRepository<'a> {
 
         if changed == 0 {
             let current = self.get(id)?;
-            return Err(StorageError::Corrupt {
-                column: "email_drafts.status",
-                reason: format!(
-                    "cannot move draft from '{}' to '{}': it is currently '{}'",
-                    from.as_str(),
-                    to.as_str(),
-                    current.status.as_str()
-                ),
-            });
+            return Err(StorageError::Refused(format!(
+                "this draft is {}; only a {} draft can become {}",
+                current.status.as_str(),
+                from.as_str(),
+                to.as_str()
+            )));
         }
         self.get(id)
     }
@@ -351,7 +351,7 @@ mod tests {
         let err = repo
             .mark_sent(d.id)
             .expect_err("sending without approval must fail");
-        assert!(matches!(err, StorageError::Corrupt { .. }), "got {err:?}");
+        assert!(matches!(err, StorageError::Refused(_)), "got {err:?}");
         assert_eq!(repo.get(d.id).unwrap().status, DraftStatus::Draft);
     }
 

@@ -42,6 +42,7 @@ pub mod indexing;
 pub mod jobs;
 pub mod join;
 pub mod memory;
+mod origin;
 pub mod recording;
 mod retrieval;
 mod routes;
@@ -283,7 +284,15 @@ impl Server {
 /// Public so tests and embedders (the desktop app runs this in-process) can drive the API
 /// without opening a socket.
 pub fn app(state: Arc<AppState>) -> AxumRouter {
-    routes::router(state)
+    from_this_machine(routes::router(state))
+}
+
+/// Refuse requests addressed to another host name, and writes sent by a web page.
+///
+/// Applied last, over the fallback as well as the API, because `Router::layer` only wraps what is
+/// already registered. See [`origin`] for the two attacks this closes.
+fn from_this_machine(router: AxumRouter) -> AxumRouter {
+    router.layer(axum::middleware::from_fn(origin::guard))
 }
 
 /// Build the route table and serve a frontend from `dir` alongside it.
@@ -308,7 +317,10 @@ pub fn app_with_frontend(state: Arc<AppState>, dir: impl AsRef<std::path::Path>)
         async move { serve_index(index).await }
     });
 
-    routes::router(state).fallback_service(tower_http::services::ServeDir::new(dir).fallback(spa))
+    from_this_machine(
+        routes::router(state)
+            .fallback_service(tower_http::services::ServeDir::new(dir).fallback(spa)),
+    )
 }
 
 /// Serve `index.html` with a 200, or say plainly that the frontend was never built.
@@ -612,6 +624,49 @@ mod tests {
             assert_eq!(status, StatusCode::OK);
             assert!(body.contains("\"status\""), "{body}");
             assert!(!body.contains("<!doctype"), "html shadowed the api: {body}");
+        }
+
+        /// The guard has to be on the routers the entry points actually serve — a layer defined and
+        /// never applied is the failure this pins. The frontend fallback included: a rebinding page
+        /// should not even load.
+        #[tokio::test]
+        async fn every_served_router_refuses_a_foreign_host() {
+            let dir = dist();
+            let state = || {
+                Arc::new(AppState::new(
+                    Database::open_in_memory().expect("db"),
+                    Router::from_config(RouterConfig::mock()).expect("router"),
+                ))
+            };
+
+            for (name, router, path) in [
+                ("app", app(state()), "/health"),
+                (
+                    "app_with_frontend",
+                    app_with_frontend(state(), dir.path()),
+                    "/health",
+                ),
+                (
+                    "app_with_frontend",
+                    app_with_frontend(state(), dir.path()),
+                    "/",
+                ),
+            ] {
+                let response = router
+                    .oneshot(
+                        Request::get(path)
+                            .header("host", "evil.example:47821")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .expect("response");
+                assert_eq!(
+                    response.status(),
+                    StatusCode::MISDIRECTED_REQUEST,
+                    "{name} {path}"
+                );
+            }
         }
 
         /// An unbuilt frontend is a real 404 with an actionable message, not a blank page.

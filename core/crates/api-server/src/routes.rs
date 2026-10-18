@@ -511,7 +511,7 @@ async fn set_api_key(
     Path(kind): Path<String>,
     Json(body): Json<ApiKeyBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    use notewise_connectors::{CredentialStore, KeychainStore, Secret};
+    use notewise_connectors::{CredentialStore, Secret};
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
@@ -528,7 +528,7 @@ async fn set_api_key(
         return Err(ApiError::BadRequest("the key must not be empty".into()));
     }
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .set(
             &crate::state::key_entry(kind),
             crate::state::API_KEY_FIELD,
@@ -553,12 +553,12 @@ async fn set_api_key(
 
 /// Forget a saved key. Removing one that is not there succeeds.
 async fn delete_api_key(Path(kind): Path<String>) -> ApiResult<axum::http::StatusCode> {
-    use notewise_connectors::{CredentialStore, KeychainStore};
+    use notewise_connectors::CredentialStore;
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .delete(&crate::state::key_entry(kind), crate::state::API_KEY_FIELD)
         .map_err(|e| ApiError::Internal(format!("could not remove the key: {e}")))?;
 
@@ -1760,7 +1760,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 // Whether a key is available, from the keychain or the environment. The key
                 // itself is never sent — only the fact that there is one, which is what the
                 // UI needs to tell "add a key" apart from "ready to use".
-                "has_key": !kind.requires_api_key() || crate::state::api_key_for(*kind).is_some(),
+                "has_key": !kind.requires_api_key() || crate::state::has_api_key(*kind),
             })
         })
         .collect();
@@ -2089,8 +2089,22 @@ impl CaptureKindArg {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread was about to ask the OS for a permission.
+    ///
+    /// Lets a test prove a request did not prompt on any machine — including one where the
+    /// permission is already granted, so the status alone could not show it.
+    static PROMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Report one capability. `prompt` opens a device and may raise an OS dialog.
 fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::PermissionReadiness {
+    #[cfg(test)]
+    if prompt {
+        PROMPTS.with(|count| count.set(count.get() + 1));
+    }
+
     #[cfg(feature = "record")]
     {
         use notewise_audio_capture::{CaptureKind, PermissionStatus};
@@ -2304,6 +2318,14 @@ async fn create_note(
     Json(body): Json<CreateNote>,
 ) -> ApiResult<Json<Note>> {
     let db = state.db().await;
+
+    // Checked before anything is written. The edge table has no foreign keys, so an unknown id
+    // was stored as a link to nothing — and that meeting id then listed the note as one of its
+    // own, while the caller was told the note had been filed against a meeting.
+    if let Some(meeting_id) = body.references_meeting {
+        MeetingRepository::new(&db).get(meeting_id)?;
+    }
+
     let note = NoteRepository::new(&db).create(NewNote {
         project_id: body.project_id,
         title: body.title,
@@ -2325,9 +2347,39 @@ async fn create_note(
     Ok(Json(note))
 }
 
-async fn list_tickets(State(state): State<Shared>) -> ApiResult<Json<Vec<Ticket>>> {
+#[derive(Debug, Default, Deserialize)]
+struct TicketListQuery {
+    /// `open` (the default: todo and in progress) or `all`.
+    ///
+    /// The default stays `open` so existing callers keep their meaning. A board with a Done column
+    /// asks for `all`; on `open` alone, a ticket moved to Done vanished on the next load.
+    #[serde(default)]
+    status: Option<String>,
+}
+
+async fn list_tickets(
+    State(state): State<Shared>,
+    Query(query): Query<TicketListQuery>,
+) -> ApiResult<Json<Vec<Ticket>>> {
+    // Refused rather than ignored: a typo answered with the open list looks exactly like a
+    // board whose done tickets were lost.
+    let all = match query.status.as_deref() {
+        None | Some("open") => false,
+        Some("all") => true,
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "unknown ticket filter '{other}'; expected open or all"
+            )))
+        }
+    };
+
     let db = state.db().await;
-    Ok(Json(TicketRepository::new(&db).list_open()?))
+    let repo = TicketRepository::new(&db);
+    Ok(Json(if all {
+        repo.list_all()?
+    } else {
+        repo.list_open()?
+    }))
 }
 
 // ---------------------------------------------------------------- search
@@ -3531,6 +3583,24 @@ mod tests {
             Some("llama3.1:8b"),
             "the exact model tag must be written down, not just the provider"
         );
+        drop(db);
+
+        // Choosing the provider alone — the top bar's "Ollama" — names no model. What the router
+        // reports then is the backend's default *guess*, and stored it would come back on the next
+        // launch as a choice that is never substituted, failing every feature on a machine that
+        // does not hold that exact tag. So the stored model goes rather than being replaced by it.
+        state
+            .switch_backend(BackendKind::Ollama, None, None)
+            .await
+            .expect("switch");
+        let db = state.db().await;
+        assert_eq!(
+            SettingsRepository::new(&db)
+                .get(crate::state::BACKEND_MODEL_KEY)
+                .unwrap(),
+            None,
+            "a default guess must not be remembered as the user's model"
+        );
     }
 
     /// The mock backend answers every request with fixed text. Offering it in a menu means a
@@ -3613,6 +3683,95 @@ mod tests {
         let (status, json) = call(&app(), get("/v1/tickets")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    /// A reference to a project that does not exist is the request's fault. It reached the client
+    /// as a 500 `storage_error` carrying SQLite's "FOREIGN KEY constraint failed".
+    #[tokio::test]
+    async fn an_unknown_project_is_a_client_error_not_a_500() {
+        let app = app();
+        let unknown = Id::new();
+
+        for (uri, body) in [
+            (
+                "/v1/notes",
+                serde_json::json!({"title": "n", "project_id": unknown}),
+            ),
+            (
+                "/v1/meetings",
+                serde_json::json!({"title": "m", "project_id": unknown}),
+            ),
+            (
+                "/v1/tickets",
+                serde_json::json!({"title": "t", "project_id": unknown.to_string()}),
+            ),
+        ] {
+            let (status, json) = call(&app, post(uri, body)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}: {json}");
+            assert_eq!(json["code"], "invalid_reference", "{uri}: {json}");
+        }
+    }
+
+    /// A note filed against a meeting that does not exist was created anyway, with its link stored
+    /// pointing nowhere — and `GET /v1/meetings/<that id>/notes` then listed it.
+    #[tokio::test]
+    async fn a_note_referencing_an_unknown_meeting_is_a_404_and_not_created() {
+        let app = app();
+        let unknown = Id::new();
+
+        let (status, json) = call(
+            &app,
+            post(
+                "/v1/notes",
+                serde_json::json!({"title": "orphan", "references_meeting": unknown}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+
+        let (_, notes) = call(&app, get("/v1/notes")).await;
+        assert!(notes.as_array().unwrap().is_empty(), "{notes}");
+        let (_, linked) = call(&app, get(&format!("/v1/meetings/{unknown}/notes"))).await;
+        assert!(linked.as_array().unwrap().is_empty(), "{linked}");
+    }
+
+    /// A board with a Done column must get its done tickets back after a reload. The bare call
+    /// keeps meaning "open" for the clients that already rely on it.
+    #[tokio::test]
+    async fn a_done_ticket_is_listed_when_all_are_asked_for() {
+        let app = app();
+        let (status, created) = call(
+            &app,
+            post("/v1/tickets", serde_json::json!({"title": "Ship it"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let id = created["id"].as_str().unwrap().to_string();
+
+        let patch = Request::builder()
+            .method("PATCH")
+            .uri(format!("/v1/tickets/{id}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"status":"done"}"#))
+            .unwrap();
+        let (status, json) = call(&app, patch).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, open) = call(&app, get("/v1/tickets")).await;
+        assert!(open.as_array().unwrap().is_empty(), "{open}");
+
+        let (status, all) = call(&app, get("/v1/tickets?status=all")).await;
+        assert_eq!(status, StatusCode::OK, "{all}");
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0]["status"], "done");
+
+        let (status, _) = call(&app, get("/v1/tickets?status=finished")).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a typo must not silently answer with the open list"
+        );
     }
 
     // ------------------------------------------------------------------ recording
@@ -3888,6 +4047,26 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{approved}");
         assert_eq!(approved["status"], "approved");
+
+        // A second approval conflicts with the draft's state. It was a 422 `invalid_state`
+        // reading "invalid stored value in column 'email_drafts.status'" — a damaged database, to
+        // anyone reading it.
+        let (status, again) = json(
+            &app,
+            Request::post(format!("/v1/emails/{draft_id}/approve"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{again}");
+        assert_eq!(again["code"], "refused", "{again}");
+        assert!(
+            !again["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid stored value"),
+            "{again}"
+        );
 
         let (status, discarded) = json(
             &app,
@@ -4237,10 +4416,26 @@ mod tests {
     }
 
     /// A GET must never raise a TCC dialog. The only defence in code is that the handler calls
-    /// the non-prompting probe, so pin the status that produces.
+    /// the non-prompting probe.
+    ///
+    /// This used to require the status to be `not_requested` or `unavailable`, which holds only
+    /// on a machine where nothing was ever decided. A test process launched from a terminal or an
+    /// editor inherits that app's microphone grant, honestly reports `granted`, and failed — while
+    /// a granted permission is exactly the case in which nothing can prompt. So it checks the
+    /// property itself, two ways: the handler never took the prompting path (on every machine),
+    /// and what it reported is what the non-prompting probe says (a prompt answered, or denied
+    /// headlessly as on CI, would have moved it).
     #[tokio::test]
     async fn setup_does_not_prompt_for_permissions() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // `#[tokio::test]` runs the handler on this thread, so its counter is this thread's.
+        let prompts_before = PROMPTS.with(std::cell::Cell::get);
+        let undisturbed = permission_readiness(CaptureKindArg::Microphone, false).status;
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "the probe this test compares against must itself be the non-prompting one"
+        );
 
         let (_, body) = json(
             &app_with_model_dir(dir.path()),
@@ -4248,12 +4443,17 @@ mod tests {
         )
         .await;
 
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "GET /v1/setup took the path that asks the OS for a permission"
+        );
         let status = body["steps"]["permissions"]["microphone"]["status"]
             .as_str()
             .unwrap();
-        assert!(
-            status == "not_requested" || status == "unavailable",
-            "a GET must not have asked the OS anything, got {status}"
+        assert_eq!(
+            status, undisturbed,
+            "a GET must report the permission as it found it, not as a prompt left it"
         );
     }
 

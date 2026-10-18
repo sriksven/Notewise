@@ -516,11 +516,14 @@ mod tests {
 pub fn draft_to_eml(draft: &crate::models::EmailDraft) -> String {
     let mut out = String::new();
 
-    let recipients: Vec<&str> = draft
+    // Through `header_value` like the subject, and for the same reason: a recipient is free text
+    // from whoever filled the draft in, and one carrying a CRLF wrote its own headers — a hidden
+    // `Bcc:` in a message the user is about to send was one string away.
+    let recipients: Vec<String> = draft
         .recipients
         .iter()
         .map(String::as_str)
-        .map(str::trim)
+        .map(header_value)
         .filter(|address| !address.is_empty())
         .collect();
 
@@ -652,6 +655,30 @@ mod eml_tests {
             "a subject smuggled a header in: {headers}"
         );
         assert!(headers.contains("Subject: Follow-up Bcc: everyone@example.com"));
+    }
+
+    /// Recipients are typed by whoever filled the draft in, so they get the subject's treatment: a
+    /// CRLF inside one must not start a header of its own.
+    #[test]
+    fn a_newline_in_a_recipient_cannot_add_a_header() {
+        let rendered = draft_to_eml(&draft(
+            "Follow-up",
+            "Body",
+            &["a@b.com\r\nBcc: everyone@example.com", "c@d.com"],
+        ));
+
+        let headers = rendered.split_once("\r\n\r\n").expect("a body").0;
+        assert!(
+            !headers
+                .lines()
+                .any(|line| line.to_lowercase().starts_with("bcc:")),
+            "a recipient smuggled a header in: {headers}"
+        );
+        assert_eq!(
+            headers.lines().filter(|l| l.starts_with("To: ")).count(),
+            1,
+            "{headers}"
+        );
     }
 
     /// A draft with nobody to send it to still opens; the client asks for a recipient.

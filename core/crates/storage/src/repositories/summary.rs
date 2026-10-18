@@ -495,16 +495,19 @@ impl SummaryRepository<'_> {
             updated_at: now,
         };
 
-        self.db.conn().execute(
-            "INSERT INTO summary_templates (id, name, prompt, is_builtin, created_at, updated_at)
+        self.db
+            .conn()
+            .execute(
+                "INSERT INTO summary_templates (id, name, prompt, is_builtin, created_at, updated_at)
              VALUES (?1, ?2, ?3, 0, ?4, ?4)",
-            rusqlite::params![
-                template.id,
-                template.name,
-                template.prompt,
-                template.created_at
-            ],
-        )?;
+                rusqlite::params![
+                    template.id,
+                    template.name,
+                    template.prompt,
+                    template.created_at
+                ],
+            )
+            .map_err(|e| name_taken(e, &template.name))?;
 
         Ok(template)
     }
@@ -514,10 +517,14 @@ impl SummaryRepository<'_> {
     /// Built-ins are editable. Only *deletion* is refused, because that is the operation that can
     /// leave a user with no way to summarise anything.
     pub fn update_template(&self, id: Id, name: &str, prompt: &str) -> Result<SummaryTemplate> {
-        let changed = self.db.conn().execute(
-            "UPDATE summary_templates SET name = ?2, prompt = ?3, updated_at = ?4 WHERE id = ?1",
-            rusqlite::params![id, name, prompt, Utc::now()],
-        )?;
+        let changed = self
+            .db
+            .conn()
+            .execute(
+                "UPDATE summary_templates SET name = ?2, prompt = ?3, updated_at = ?4 WHERE id = ?1",
+                rusqlite::params![id, name, prompt, Utc::now()],
+            )
+            .map_err(|e| name_taken(e, name))?;
         if changed == 0 {
             return Err(StorageError::not_found("SummaryTemplate", id));
         }
@@ -562,6 +569,22 @@ impl SummaryRepository<'_> {
             rusqlite::params![id],
         )?;
         Ok(())
+    }
+}
+
+/// A template name already in use, said in the user's terms.
+///
+/// The name is unique because it is what the picker shows; two called "Mine" would be a coin
+/// toss. Refused like a duplicate job or tool-server name, so the message names the clash rather
+/// than a table.
+fn name_taken(error: rusqlite::Error, name: &str) -> StorageError {
+    match error {
+        rusqlite::Error::SqliteFailure(f, _)
+            if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            StorageError::Refused(format!("a template named '{name}' already exists"))
+        }
+        other => other.into(),
     }
 }
 
@@ -623,14 +646,30 @@ mod template_tests {
         })
         .expect("first");
 
-        assert!(
-            repo.create_template(NewSummaryTemplate {
+        // Refused rather than a raw constraint failure: it reached the API as a 500 carrying
+        // "UNIQUE constraint failed: summary_templates.name".
+        let err = repo
+            .create_template(NewSummaryTemplate {
                 name: "Mine".into(),
                 prompt: "b".into(),
             })
-            .is_err(),
-            "a duplicate name makes the picker ambiguous"
+            .expect_err("a duplicate name makes the picker ambiguous");
+        assert!(
+            matches!(&err, StorageError::Refused(m) if m.contains("'Mine'")),
+            "{err:?}"
         );
+
+        // Renaming onto a taken name is the same collision by another route.
+        let other = repo
+            .create_template(NewSummaryTemplate {
+                name: "Other".into(),
+                prompt: "c".into(),
+            })
+            .expect("second");
+        let err = repo
+            .update_template(other.id, "Mine", "c")
+            .expect_err("renaming onto a taken name");
+        assert!(matches!(err, StorageError::Refused(_)), "{err:?}");
     }
 
     /// Deleting the last way of summarising anything would be recoverable only by reinstalling.
