@@ -2088,8 +2088,22 @@ impl CaptureKindArg {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread was about to ask the OS for a permission.
+    ///
+    /// Lets a test prove a request did not prompt on any machine — including one where the
+    /// permission is already granted, so the status alone could not show it.
+    static PROMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Report one capability. `prompt` opens a device and may raise an OS dialog.
 fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::PermissionReadiness {
+    #[cfg(test)]
+    if prompt {
+        PROMPTS.with(|count| count.set(count.get() + 1));
+    }
+
     #[cfg(feature = "record")]
     {
         use notewise_audio_capture::{CaptureKind, PermissionStatus};
@@ -4281,10 +4295,26 @@ mod tests {
     }
 
     /// A GET must never raise a TCC dialog. The only defence in code is that the handler calls
-    /// the non-prompting probe, so pin the status that produces.
+    /// the non-prompting probe.
+    ///
+    /// This used to require the status to be `not_requested` or `unavailable`, which holds only
+    /// on a machine where nothing was ever decided. A test process launched from a terminal or an
+    /// editor inherits that app's microphone grant, honestly reports `granted`, and failed — while
+    /// a granted permission is exactly the case in which nothing can prompt. So it checks the
+    /// property itself, two ways: the handler never took the prompting path (on every machine),
+    /// and what it reported is what the non-prompting probe says (a prompt answered, or denied
+    /// headlessly as on CI, would have moved it).
     #[tokio::test]
     async fn setup_does_not_prompt_for_permissions() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // `#[tokio::test]` runs the handler on this thread, so its counter is this thread's.
+        let prompts_before = PROMPTS.with(std::cell::Cell::get);
+        let undisturbed = permission_readiness(CaptureKindArg::Microphone, false).status;
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "the probe this test compares against must itself be the non-prompting one"
+        );
 
         let (_, body) = json(
             &app_with_model_dir(dir.path()),
@@ -4292,12 +4322,17 @@ mod tests {
         )
         .await;
 
+        assert_eq!(
+            PROMPTS.with(std::cell::Cell::get),
+            prompts_before,
+            "GET /v1/setup took the path that asks the OS for a permission"
+        );
         let status = body["steps"]["permissions"]["microphone"]["status"]
             .as_str()
             .unwrap();
-        assert!(
-            status == "not_requested" || status == "unavailable",
-            "a GET must not have asked the OS anything, got {status}"
+        assert_eq!(
+            status, undisturbed,
+            "a GET must report the permission as it found it, not as a prompt left it"
         );
     }
 
