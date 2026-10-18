@@ -3500,6 +3500,24 @@ mod tests {
             Some("llama3.1:8b"),
             "the exact model tag must be written down, not just the provider"
         );
+        drop(db);
+
+        // Choosing the provider alone — the top bar's "Ollama" — names no model. What the router
+        // reports then is the backend's default *guess*, and stored it would come back on the next
+        // launch as a choice that is never substituted, failing every feature on a machine that
+        // does not hold that exact tag. So the stored model goes rather than being replaced by it.
+        state
+            .switch_backend(BackendKind::Ollama, None, None)
+            .await
+            .expect("switch");
+        let db = state.db().await;
+        assert_eq!(
+            SettingsRepository::new(&db)
+                .get(crate::state::BACKEND_MODEL_KEY)
+                .unwrap(),
+            None,
+            "a default guess must not be remembered as the user's model"
+        );
     }
 
     /// The mock backend answers every request with fixed text. Offering it in a menu means a

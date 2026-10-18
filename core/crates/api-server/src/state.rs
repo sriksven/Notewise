@@ -284,6 +284,8 @@ impl AppState {
         if let Some(key) = api_key_for(kind) {
             config = config.with_api_key(key);
         }
+        // Kept to be persisted below: only a model somebody named is a choice worth remembering.
+        let chosen = model.clone();
         if let Some(model) = model {
             config = config.with_model(model);
         }
@@ -300,15 +302,19 @@ impl AppState {
         let router =
             Arc::new(AiRouter::from_config(config)?.with_stored_routes(&rules, api_key_for));
 
-        // The default backend's model, which is what a config round-trip needs. Deliberately not
-        // a description of the policy: this value is persisted below and read back to construct a
-        // backend, so it has to name a real model.
-        let model_id = router.model_id().to_string();
         *self.ai.write().expect("ai router lock poisoned") = router;
 
         // Remember it. Without this the choice lasts until the process exits, and the engine
         // comes back on its inferred default — which is how a user who picked `llama3.1:8b`
         // gets "model 'llama3.1' not found" on the next launch, having already fixed it once.
+        //
+        // The model is remembered only when one was named. With none, the router's `model_id()`
+        // is the backend's *default guess* — `llama3.1` for Ollama, before the daemon has been
+        // asked what it holds — and persisting that made the next launch pass it to `with_model`,
+        // which treats a model as the user's choice and never substitutes it. On a machine with
+        // only, say, `mistral` pulled, every feature then failed until a model was picked by
+        // hand. Choosing a provider without a model now clears the stored one, so the next launch
+        // resolves a model the same way this one did. (Reported by the llm agent.)
         //
         // Best effort: the switch itself has succeeded and the user is using the new backend.
         // Failing the request because the preference could not be written would undo a change
@@ -316,10 +322,13 @@ impl AppState {
         {
             let db = self.db().await;
             let settings = SettingsRepository::new(&db);
-            if let Err(e) = settings
+            let saved = settings
                 .set(BACKEND_KIND_KEY, kind.as_str())
-                .and_then(|()| settings.set(BACKEND_MODEL_KEY, &model_id))
-            {
+                .and_then(|()| match chosen.as_deref().map(str::trim) {
+                    Some(model) if !model.is_empty() => settings.set(BACKEND_MODEL_KEY, model),
+                    _ => settings.delete(BACKEND_MODEL_KEY),
+                });
+            if let Err(e) = saved {
                 tracing::warn!(error = %e, "could not persist the backend choice");
             }
         }
