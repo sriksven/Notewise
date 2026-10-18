@@ -249,7 +249,7 @@ pub struct Pipeline {
     /// Separate from `audio` above, which is a bounded in-memory buffer serving acoustic speaker
     /// separation and is dropped when it hits its budget. This one is unbounded and durable, and its
     /// budget is the retention policy rather than a byte count.
-    retain: Option<WavWriter>,
+    retain: Option<Box<dyn RetainedAudio>>,
     config: PipelineConfig,
 }
 
@@ -291,8 +291,45 @@ impl Pipeline {
     /// wants exactly that: retention is a preference, and a directory that cannot be written to
     /// should cost the recording its audio file and nothing else.
     pub fn retaining_audio(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
-        self.retain = Some(WavWriter::create(path, AudioFormat::transcription())?);
+        self.retain = Some(Box::new(WavWriter::create(
+            path,
+            AudioFormat::transcription(),
+        )?));
         Ok(())
+    }
+
+    /// Retain into any sink. The seam that lets a test make the disk fail.
+    #[cfg(test)]
+    fn retaining_into(&mut self, sink: Box<dyn RetainedAudio>) {
+        self.retain = Some(sink);
+    }
+
+    /// Stop keeping the audio after a write failed, and remove what was written.
+    ///
+    /// A full disk must cost the recording its audio file and nothing else: the transcript is what
+    /// the product is for, and it is being stored as it goes. What was written is deleted rather
+    /// than kept, because its header was never patched, nothing would point at it, and nothing
+    /// would ever sweep it.
+    fn abandon_retention(&mut self, error: &CaptureError) {
+        let Some(sink) = self.retain.take() else {
+            return;
+        };
+        let path = sink.path().to_path_buf();
+        drop(sink);
+        tracing::warn!(
+            error = %error,
+            path = %path.display(),
+            "could not keep writing the recording's audio; transcribing without it"
+        );
+        if let Err(e) = std::fs::remove_file(&path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(
+                    error = %e,
+                    path = %path.display(),
+                    "could not remove the partial audio file"
+                );
+            }
+        }
     }
 
     pub fn with_diarizer(mut self, diarizer: Box<dyn Diarizer + Send>) -> Self {
@@ -381,7 +418,9 @@ impl Pipeline {
             // Keep it on disk if the user asked for that. Before the diarizer's own buffer, so a
             // recording is retained in full even when acoustic separation gives up on its budget.
             if let Some(writer) = self.retain.as_mut() {
-                writer.write_frame(&frame.to_transcription_format().samples)?;
+                if let Err(e) = writer.write_frame(&frame.to_transcription_format().samples) {
+                    self.abandon_retention(&e);
+                }
             }
 
             // Convert once, here, so no engine has to care what the OS handed us.
@@ -507,6 +546,31 @@ impl Pipeline {
         }
 
         Ok((count, speakers.len()))
+    }
+}
+
+/// Where retained audio is written.
+///
+/// A trait only so a test can stand in a disk that fills up mid-recording; [`WavWriter`] is the
+/// one real implementation.
+trait RetainedAudio: std::fmt::Debug + Send {
+    fn write_frame(&mut self, samples: &[f32]) -> std::result::Result<(), CaptureError>;
+    /// Finish the file, returning its size.
+    fn finish(self: Box<Self>) -> std::result::Result<u64, CaptureError>;
+    fn path(&self) -> &std::path::Path;
+}
+
+impl RetainedAudio for WavWriter {
+    fn write_frame(&mut self, samples: &[f32]) -> std::result::Result<(), CaptureError> {
+        WavWriter::write_frame(self, samples)
+    }
+
+    fn finish(self: Box<Self>) -> std::result::Result<u64, CaptureError> {
+        WavWriter::finish(*self)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        WavWriter::path(self)
     }
 }
 
@@ -1112,6 +1176,64 @@ mod tests {
         assert!(
             samples.abs_diff(expected) < expected / 10,
             "expected about one second of audio, got {samples} samples"
+        );
+    }
+
+    /// A sink standing in for a disk that fills up mid-meeting.
+    #[derive(Debug)]
+    struct FillsUp {
+        path: std::path::PathBuf,
+        frames_left: usize,
+    }
+
+    impl RetainedAudio for FillsUp {
+        fn write_frame(&mut self, _samples: &[f32]) -> std::result::Result<(), CaptureError> {
+            if self.frames_left == 0 {
+                return Err(CaptureError::BadFormat(
+                    "could not write audio: No space left on device".into(),
+                ));
+            }
+            self.frames_left -= 1;
+            Ok(())
+        }
+
+        fn finish(self: Box<Self>) -> std::result::Result<u64, CaptureError> {
+            Ok(44)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+    }
+
+    /// Spec 11's first rule: a full disk mid-recording stops retention and keeps transcribing.
+    /// It used to fail the whole run, so an import with retention on lost its result, and the tail
+    /// the engine was still holding was never flushed.
+    #[tokio::test]
+    async fn a_full_disk_costs_the_audio_file_and_nothing_else() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("partial.wav");
+        std::fs::write(&path, b"RIFF").expect("partial file");
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = Pipeline::new(Box::new(MockEngine::new()));
+        pipeline.retaining_into(Box::new(FillsUp {
+            path: path.clone(),
+            frames_left: 3,
+        }));
+
+        let stats = pipeline
+            .run(&db, id, &mut tone(1_000), never_stop())
+            .await
+            .expect("a failed write must not fail the recording");
+
+        assert_eq!(stats.frames_processed, 10, "transcription carried on");
+        assert_eq!(MeetingRepository::new(&db).segments(id).unwrap().len(), 10);
+        assert!(stats.retained_audio.is_none(), "no file is claimed");
+        assert!(
+            !path.exists(),
+            "the partial file must not be left behind for nothing to clean up"
         );
     }
 
