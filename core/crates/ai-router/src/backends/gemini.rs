@@ -2,9 +2,9 @@
 //!
 //! Kept separate from [`OpenAiCompatBackend`](super::OpenAiCompatBackend) because Gemini does
 //! not speak the chat-completions shape: system text goes in `systemInstruction` rather than
-//! a message, the assistant role is `model` rather than `assistant`, and the key travels as a
-//! query parameter. Squeezing it into the compatible backend would mean branching on provider
-//! inside every method, which is worse than one small extra file.
+//! a message, the assistant role is `model` rather than `assistant`, and the key travels in
+//! Gemini's own `x-goog-api-key` header. Squeezing it into the compatible backend would mean
+//! branching on provider inside every method, which is worse than one small extra file.
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -82,8 +82,11 @@ impl GeminiBackend {
         let response = self
             .http
             .post(self.endpoint())
-            // Gemini authenticates by query parameter rather than a header.
-            .query(&[("key", &self.api_key)])
+            // A header, never the `?key=` query parameter Gemini also accepts. A URL is not a
+            // secret: reqwest writes it into every error it produces ("error sending request for
+            // url (…?key=AIza…)"), and those errors are shown to the user and logged at error
+            // level — so a dropped connection used to put the key in both.
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .await
@@ -488,5 +491,51 @@ mod tests {
             .collect();
 
         assert_eq!(roles, vec!["user", "model", "user"]);
+    }
+
+    const KEY: &str = "AIzaSyTESTKEYTESTKEYTESTKEYTESTKEY123";
+
+    /// reqwest puts the request URL in its error text, and that text is shown to the user and
+    /// logged. A key in the query string went with it.
+    #[tokio::test]
+    async fn a_connection_failure_does_not_put_the_key_in_the_error() {
+        let backend = GeminiBackend::new(KEY)
+            .expect("valid key")
+            .with_base_url("http://127.0.0.1:1/v1beta/models");
+
+        let err = backend
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect_err("nothing listens on port 1");
+
+        assert!(matches!(err, AiError::Transport { .. }), "{err:?}");
+        assert!(!err.to_string().contains(KEY), "the key leaked: {err}");
+        assert!(!format!("{err:?}").contains(KEY), "the key leaked: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn the_key_travels_in_the_header_gemini_documents() {
+        let stub = crate::stub::Stub::start(|_| {
+            crate::stub::Reply::json(
+                200,
+                json!({ "candidates": [{ "content": { "parts": [{ "text": "ok" }] }, "finishReason": "STOP" }] }),
+            )
+        });
+        let backend = GeminiBackend::new(KEY)
+            .expect("valid key")
+            .with_base_url(format!("{}/v1beta/models", stub.url));
+
+        backend
+            .summarize(&TranscriptInput::new("t", "x"))
+            .await
+            .expect("the stub answers");
+
+        let sent = &stub.requests()[0];
+        assert!(!sent.target.contains(KEY), "{}", sent.target);
+        assert_eq!(sent.header("x-goog-api-key"), Some(KEY));
+        assert_eq!(
+            sent.path(),
+            "/v1beta/models/gemini-2.0-flash:generateContent"
+        );
     }
 }

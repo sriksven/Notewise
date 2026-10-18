@@ -18,10 +18,20 @@ pub(crate) struct Recorded {
     pub method: String,
     /// Path and query, exactly as sent.
     pub target: String,
+    /// Names lowercased, so a lookup does not depend on how a client capitalised them.
+    pub headers: Vec<(String, String)>,
     pub body: String,
 }
 
 impl Recorded {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
     /// The path without its query string.
     pub fn path(&self) -> &str {
         self.target.split('?').next().unwrap_or(&self.target)
@@ -97,6 +107,7 @@ fn read_request(stream: &mut TcpStream) -> Option<Recorded> {
     let method = parts.next()?.to_string();
     let target = parts.next()?.to_string();
 
+    let mut headers = Vec::new();
     let mut length = 0usize;
     loop {
         let mut header = String::new();
@@ -106,9 +117,12 @@ fn read_request(stream: &mut TcpStream) -> Option<Recorded> {
             break;
         }
         if let Some((name, value)) = header.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse().unwrap_or(0);
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            if name == "content-length" {
+                length = value.parse().unwrap_or(0);
             }
+            headers.push((name, value));
         }
     }
 
@@ -118,6 +132,7 @@ fn read_request(stream: &mut TcpStream) -> Option<Recorded> {
     Some(Recorded {
         method,
         target,
+        headers,
         body: String::from_utf8_lossy(&body).into_owned(),
     })
 }
