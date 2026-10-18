@@ -687,6 +687,9 @@ export default function App() {
             {inWorkspace && (
               <>
                 <WorkspaceHeader
+                  // Keyed on the meeting: a "Move to trash?" confirm opened on one meeting stayed
+                  // armed after switching to another, one press from deleting the wrong meeting.
+                  key={selectedId ?? "none"}
                   meeting={selectedMeeting}
                   onRename={renameMeeting}
                   segments={segments}
