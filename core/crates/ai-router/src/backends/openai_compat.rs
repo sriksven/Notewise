@@ -84,13 +84,7 @@ impl Preset {
             Preset::LmStudio | Preset::Unsloth | Preset::OllamaCompat => true,
             Preset::Groq | Preset::OpenRouter => false,
             // A custom endpoint is local only if it points at this machine.
-            Preset::Custom { base_url, .. } => {
-                let url = base_url.to_ascii_lowercase();
-                url.contains("://localhost")
-                    || url.contains("://127.0.0.1")
-                    || url.contains("://[::1]")
-                    || url.contains("://0.0.0.0")
-            }
+            Preset::Custom { base_url, .. } => points_at_this_machine(base_url),
         }
     }
 
@@ -108,6 +102,38 @@ impl Preset {
             "ollama-compat" => Preset::OllamaCompat,
             _ => return None,
         })
+    }
+}
+
+/// Whether a URL's *host* is this machine.
+///
+/// This answer switches redaction off and shows the "stays on this machine" badge, so it is
+/// decided on the parsed host rather than on what the text contains. A substring test for
+/// `://localhost` called `http://localhost.example.com` and `http://localhost@example.com` local —
+/// the second connects to example.com with "localhost" as a user name — and sent unmasked
+/// transcripts to both. A URL that will not parse is not local: unsure has to mean remote.
+fn points_at_this_machine(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+
+    if host == "localhost" || host.ends_with(".localhost") {
+        // RFC 6761: `localhost` and every name under it resolve to loopback.
+        return true;
+    }
+
+    // IPv6 hosts come back bracketed.
+    match host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(ip) => ip.is_loopback() || ip.is_unspecified(),
+        Err(_) => false,
     }
 }
 
@@ -443,6 +469,42 @@ mod tests {
             };
             assert!(preset.is_local(), "{url} should be local");
             assert!(!preset.requires_api_key());
+        }
+    }
+
+    /// "Local" turns redaction off, so these must not pass for this machine. Each did, because
+    /// the check looked for `://localhost` anywhere in the text.
+    #[test]
+    fn a_remote_host_that_merely_mentions_localhost_is_not_local() {
+        for url in [
+            "http://localhost.attacker.example/v1",
+            "http://localhost@attacker.example/v1",
+            "https://127.0.0.1.attacker.example/v1",
+            "not a url at all",
+        ] {
+            let preset = Preset::Custom {
+                name: "vendor".into(),
+                base_url: url.into(),
+            };
+            assert!(!preset.is_local(), "{url} was treated as this machine");
+            assert!(preset.requires_api_key(), "{url}");
+        }
+    }
+
+    #[test]
+    fn every_loopback_form_is_local() {
+        for url in [
+            "http://127.0.0.2:8080/v1",
+            "http://localhost./v1",
+            "http://llm.localhost:9000/v1",
+            "http://0.0.0.0:1234/v1",
+            "http://[::1]:8000/v1",
+        ] {
+            let preset = Preset::Custom {
+                name: "self-hosted".into(),
+                base_url: url.into(),
+            };
+            assert!(preset.is_local(), "{url} should be local");
         }
     }
 
