@@ -234,12 +234,13 @@ export default function App() {
     };
 
     void load();
-    if (transcriptId !== recordingId) return;
-
-    const id = setInterval(load, 1000);
+    // Polled only while this meeting records — but cancelled either way. Returning nothing for a
+    // meeting that is not recording left its request free to land after the next meeting's, and
+    // put one meeting's transcript under another's title.
+    const id = transcriptId === recordingId ? setInterval(load, 1000) : null;
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (id !== null) clearInterval(id);
     };
   }, [transcriptId, recordingId, report]);
 
