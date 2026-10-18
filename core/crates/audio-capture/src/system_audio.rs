@@ -34,7 +34,14 @@ use screencapturekit::prelude::*;
 use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
 
 use crate::format::{AudioFormat, SampleRate};
+use crate::pacing::PacedStream;
 use crate::{AudioFrame, AudioSource, CaptureConfig, CaptureError, Result};
+
+/// How late system audio may be before its gap is filled with silence. See [`PacedStream`].
+///
+/// Comfortably above a callback's time in flight, and small enough that audio resuming after a
+/// silence is stamped within a fraction of a second of when it was said.
+const SILENCE_ALLOWANCE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Live system audio.
 pub struct SystemAudioSource {
@@ -45,11 +52,12 @@ pub struct SystemAudioSource {
     format: AudioFormat,
     stopped: Arc<AtomicBool>,
 
-    /// Samples received but not yet returned as a whole frame.
-    pending: Vec<f32>,
+    /// Received audio, re-cut into frames that keep time with the wall clock — filled with
+    /// silence where ScreenCaptureKit delivered nothing because nothing was playing.
+    paced: PacedStream,
+    /// Time zero for this source's timestamps. See [`SystemAudioSource::with_clock_origin`].
+    origin: std::time::Instant,
     samples_per_frame: usize,
-    /// Total samples emitted, for timestamps.
-    emitted: u64,
 }
 
 // `SCStream` is not `Debug`, and the queued audio must not end up in a log line.
@@ -57,7 +65,7 @@ impl std::fmt::Debug for SystemAudioSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SystemAudioSource")
             .field("format", &self.format)
-            .field("pending_samples", &self.pending.len())
+            .field("pending_samples", &self.paced.pending_len())
             .field("stopped", &self.stopped.load(Ordering::Relaxed))
             .finish()
     }
@@ -147,28 +155,33 @@ impl SystemAudioSource {
             receiver: audio_rx,
             format,
             stopped: Arc::new(AtomicBool::new(false)),
-            pending: Vec::new(),
+            paced: PacedStream::new(format.sample_rate.hz(), SILENCE_ALLOWANCE),
+            origin: std::time::Instant::now(),
             samples_per_frame,
-            emitted: 0,
         })
+    }
+
+    /// Count this source's time from `origin` rather than from when it opened.
+    ///
+    /// A call is recorded as two channels, and the microphone opens first. Starting this clock
+    /// when the tap opened — a few hundred milliseconds later — would put everything the far end
+    /// said that much early against the microphone and against the meeting's start. From the
+    /// microphone's origin, the time before the tap opened is silence on this channel, which is
+    /// what it was.
+    pub fn with_clock_origin(mut self, origin: std::time::Instant) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// Drain whatever the capture callback has queued.
     fn drain(&mut self) {
         while let Ok(chunk) = self.receiver.try_recv() {
-            self.pending.extend(chunk);
+            self.paced.push(&chunk);
         }
     }
 
-    fn take_frame(&mut self) -> AudioFrame {
-        let take = self.samples_per_frame.min(self.pending.len());
-        let samples: Vec<f32> = self.pending.drain(..take).collect();
-
-        let timestamp_ms =
-            (self.emitted as i64 * 1000) / self.format.sample_rate.hz().max(1) as i64;
-        self.emitted += samples.len() as u64;
-
-        AudioFrame::new(samples, self.format, timestamp_ms)
+    fn frame_at(&self, samples: Vec<f32>, at: u64) -> AudioFrame {
+        AudioFrame::new(samples, self.format, self.paced.ms_at(at))
     }
 }
 
@@ -178,31 +191,27 @@ impl AudioSource for SystemAudioSource {
     }
 
     fn next_frame(&mut self) -> Result<Option<AudioFrame>> {
-        // Bounded so a caller polling for a stop signal is never held for long. A silent
-        // machine produces no callbacks at all, so this deadline is the normal path rather
-        // than an error case — unlike a microphone, which always delivers room tone.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-
+        // A silent machine produces no callbacks at all, unlike a microphone, which always
+        // delivers room tone. This used to wait half a second for them and then hand back an
+        // empty frame — which stalled the microphone it is read alongside, and stopped this
+        // channel's clock while real time moved on. The paced stream fills that gap with silence
+        // once it is overdue, so a read waits about a frame, as a microphone's does.
         loop {
             self.drain();
 
-            if self.pending.len() >= self.samples_per_frame {
-                return Ok(Some(self.take_frame()));
-            }
-
             if self.stopped.load(Ordering::Relaxed) {
-                // Return the tail rather than discarding it.
-                return Ok(if self.pending.is_empty() {
-                    None
-                } else {
-                    Some(self.take_frame())
-                });
+                // Return the tail rather than discarding it — real audio only, then the end.
+                return Ok(self
+                    .paced
+                    .rest(self.samples_per_frame)
+                    .map(|(samples, at)| self.frame_at(samples, at)));
             }
 
-            if std::time::Instant::now() >= deadline {
-                // Nothing is playing. Emit what there is — possibly an empty frame — so the
-                // clock advances and this channel stays aligned with the microphone.
-                return Ok(Some(self.take_frame()));
+            if let Some((samples, at)) = self
+                .paced
+                .frame(self.origin.elapsed(), self.samples_per_frame)
+            {
+                return Ok(Some(self.frame_at(samples, at)));
             }
 
             std::thread::sleep(std::time::Duration::from_millis(10));

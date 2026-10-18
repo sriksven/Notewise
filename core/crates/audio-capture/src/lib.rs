@@ -36,6 +36,12 @@ mod format;
 #[cfg(feature = "os-capture")]
 mod microphone;
 mod mixer;
+// Only the macOS system tap needs pacing today; its tests run everywhere.
+#[cfg_attr(
+    not(all(feature = "os-capture", target_os = "macos")),
+    allow(dead_code)
+)]
+mod pacing;
 mod permissions;
 mod source;
 #[cfg(all(feature = "os-capture", target_os = "macos"))]
