@@ -46,7 +46,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use notewise_audio_capture::{
-    AudioFormat, AudioSource, CaptureError, MixedSource, Mixer, WavWriter,
+    AudioFormat, AudioFrame, AudioSource, CaptureError, MixedSource, Mixer, WavWriter,
 };
 use notewise_diarization::{AudioDiarizer, DiarizationError, Diarizer, SingleSpeakerDiarizer};
 use notewise_graph::{EdgeKind, Graph, GraphError, NodeKind, NodeRef};
@@ -146,6 +146,93 @@ fn retain_within(audio: &mut Vec<f32>, samples: &[f32], retain_ms: i64) -> bool 
 
     audio.extend_from_slice(samples);
     true
+}
+
+/// How much audio a stopped live source may still hand over.
+///
+/// A backstop, not a budget. A live source told to stop returns what it had already captured and
+/// then `None` — normally a fraction of a second. This bounds one that ignores
+/// [`AudioSource::stop`], which would otherwise keep a stopped recording running for ever.
+const MAX_TAIL_MS: i64 = 10 * 60 * 1000;
+
+/// Reads a source frame by frame, keeping what a live device had captured when the stop came.
+///
+/// # Why a stop is not just the end of the loop
+///
+/// A live source buffers. By the time a stop is requested, the microphone has delivered audio the
+/// pipeline has not read yet — at least the frame it is still filling, and everything that arrived
+/// while the previous frame was being transcribed. That is the last thing anyone said before
+/// pressing stop. Leaving the loop on the stop signal dropped it: the sources have always handed
+/// their tail over once told to stop, but nothing told them until they were dropped, by which time
+/// nobody was reading.
+///
+/// So on the first stop request a live source is stopped and then read until it reports `None`. A
+/// file or a synthetic source has nothing "already captured" — the rest of it simply has not been
+/// reached — so it ends at once, as it always did.
+///
+/// One implementation for [`Pipeline`], [`ChannelPipeline`] and dictation, which all read a live
+/// source until somebody says stop.
+#[derive(Debug, Default)]
+pub struct CaptureReader {
+    stopping: bool,
+    tail_ms: i64,
+}
+
+impl CaptureReader {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether a stop has been seen.
+    pub fn is_stopping(&self) -> bool {
+        self.stopping
+    }
+
+    /// The next frame to process, or `None` once the source has nothing more to give.
+    ///
+    /// `stop` is whether a stop has been requested. The first time it is true a live source is told
+    /// to stop capturing; after that it is ignored, and the source's remaining frames are returned.
+    pub fn next_frame(
+        &mut self,
+        source: &mut dyn AudioSource,
+        stop: bool,
+    ) -> std::result::Result<Option<AudioFrame>, CaptureError> {
+        if stop && !self.stopping {
+            tracing::debug!("stop requested");
+            if !source.is_realtime() {
+                return Ok(None);
+            }
+            self.stopping = true;
+            if let Err(e) = source.stop() {
+                // The tail is still worth reading: a device that would not stop cleanly has not
+                // lost what it already delivered, and dropping the source releases it regardless.
+                tracing::warn!(error = %e, "the capture source did not stop cleanly");
+            }
+        }
+
+        let frame = source.next_frame()?;
+        if !self.stopping {
+            return Ok(frame);
+        }
+
+        match frame {
+            // An empty frame from a stopped source has nothing left to give. Counting it as more
+            // tail would spin for ever on a source that answers empty rather than `None`.
+            Some(frame) if frame.is_empty() => Ok(None),
+            Some(_) if self.tail_ms >= MAX_TAIL_MS => {
+                tracing::warn!(
+                    tail_ms = self.tail_ms,
+                    "the capture source kept producing audio after it was stopped; ending here"
+                );
+                Ok(None)
+            }
+            Some(frame) => {
+                self.tail_ms += frame.duration_ms();
+                Ok(Some(frame))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 /// Runs one recording from audio to stored transcript.
@@ -278,14 +365,13 @@ impl Pipeline {
     ) -> Result<RecordingStats> {
         let mut stats = RecordingStats::default();
         let required = self.engine.required_format();
+        let mut reader = CaptureReader::new();
 
         loop {
-            if should_stop() {
-                tracing::debug!("stop requested");
-                break;
-            }
-
-            let Some(frame) = source.next_frame()? else {
+            // A stop does not end the loop by itself: a live source still holds the last thing
+            // said, and the reader keeps reading until that is in. See `CaptureReader`.
+            let stop = should_stop();
+            let Some(frame) = reader.next_frame(source, stop)? else {
                 break;
             };
 
@@ -492,6 +578,8 @@ pub struct ChannelInput {
     /// Set when retention hit its budget. The partial buffer is dropped and the acoustic pass
     /// skipped — see [`ChannelInput::retain`].
     audio_truncated: bool,
+    /// Keeps this channel's tail when the recording is stopped. See [`CaptureReader`].
+    reader: CaptureReader,
     exhausted: bool,
     audio_ms: i64,
     segments: usize,
@@ -543,6 +631,7 @@ impl ChannelInput {
             diarizer: None,
             audio: Vec::new(),
             audio_truncated: false,
+            reader: CaptureReader::new(),
             exhausted: false,
             audio_ms: 0,
             segments: 0,
@@ -706,10 +795,10 @@ impl ChannelPipeline {
         let mut stats = RecordingStats::default();
 
         loop {
-            if should_stop() {
-                tracing::debug!("stop requested");
-                break;
-            }
+            // Asked once per turn, so every channel hears the same answer. A stop does not end the
+            // loop by itself: each live channel still holds the last thing said on it, and its
+            // reader keeps going until that is in. See `CaptureReader`.
+            let stop = should_stop();
 
             // One frame from each live channel per turn. Channels are read in the same order
             // every time so a fast source cannot starve a slow one.
@@ -720,7 +809,7 @@ impl ChannelPipeline {
                     continue;
                 }
 
-                let Some(frame) = input.source.next_frame()? else {
+                let Some(frame) = input.reader.next_frame(input.source.as_mut(), stop)? else {
                     input.exhausted = true;
                     continue;
                 };
@@ -2134,5 +2223,191 @@ mod tests {
         assert!(!retain_within(&mut audio, &[0.0; 16], 0));
         assert!(!retain_within(&mut audio, &[0.0; 16], -1));
         assert!(audio.is_empty());
+    }
+
+    // ------------------------------------------------------------------ stopping a live source
+
+    /// A stand-in for a live device.
+    ///
+    /// It never runs out on its own, and once stopped it still holds `tail` frames it captured and
+    /// nobody has read — what a real microphone has buffered at the moment stop is pressed.
+    #[derive(Debug)]
+    struct LiveDevice {
+        tone: SyntheticSource,
+        tail: usize,
+        stopped: bool,
+        stops: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl LiveDevice {
+        fn new(tail: usize) -> Self {
+            Self {
+                tone: tone(600_000),
+                tail,
+                stopped: false,
+                stops: Default::default(),
+            }
+        }
+    }
+
+    impl AudioSource for LiveDevice {
+        fn format(&self) -> AudioFormat {
+            AudioFormat::transcription()
+        }
+
+        fn next_frame(&mut self) -> notewise_audio_capture::Result<Option<AudioFrame>> {
+            if self.stopped {
+                if self.tail == 0 {
+                    return Ok(None);
+                }
+                self.tail -= 1;
+            }
+            self.tone.next_frame()
+        }
+
+        fn stop(&mut self) -> notewise_audio_capture::Result<()> {
+            self.stopped = true;
+            self.stops.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// The last thing said before stop is pressed is still in the device's buffers. It used to be
+    /// dropped: the loop ended on the stop signal, and nothing read the source again.
+    #[tokio::test]
+    async fn stopping_keeps_what_a_live_source_had_already_captured() {
+        let db = db();
+        let id = meeting(&db);
+        let mut device = LiveDevice::new(3);
+        let stops = std::sync::Arc::clone(&device.stops);
+
+        let mut checks = 0;
+        let stats = Pipeline::new(Box::new(MockEngine::new()))
+            .run(&db, id, &mut device, move || {
+                checks += 1;
+                checks > 5
+            })
+            .await
+            .expect("pipeline");
+
+        assert_eq!(
+            stats.frames_processed,
+            5 + 3,
+            "the audio the device had buffered when stop came was thrown away"
+        );
+        assert_eq!(
+            MeetingRepository::new(&db).segments(id).unwrap().len(),
+            8,
+            "the tail must reach the transcript"
+        );
+        assert_eq!(
+            stops.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the device must be told to stop, once"
+        );
+    }
+
+    /// The same for a call: each channel keeps its own tail, however long it is.
+    #[tokio::test]
+    async fn stopping_a_channel_recording_keeps_each_channels_tail() {
+        let db = db();
+        let id = meeting(&db);
+
+        let mut pipeline = ChannelPipeline::new(vec![
+            ChannelInput::new(
+                Channel::Microphone,
+                Box::new(LiveDevice::new(2)),
+                Box::new(MockEngine::new()),
+            ),
+            ChannelInput::new(
+                Channel::System,
+                Box::new(LiveDevice::new(4)),
+                Box::new(MockEngine::new()),
+            ),
+        ])
+        .unwrap();
+
+        let mut turns = 0;
+        let stats = pipeline
+            .run(&db, id, move || {
+                turns += 1;
+                turns > 3
+            })
+            .await
+            .unwrap();
+
+        // Three turns of both channels, then each channel's own tail.
+        assert_eq!(stats.frames_processed, 3 * 2 + 2 + 4);
+
+        let stored = MeetingRepository::new(&db).segments(id).unwrap();
+        let on = |label: &str| {
+            stored
+                .iter()
+                .filter(|s| s.speaker.as_deref() == Some(label))
+                .count()
+        };
+        assert_eq!(on("You"), 3 + 2, "the microphone's tail was dropped");
+        assert_eq!(on("Others"), 3 + 4, "the system tap's tail was dropped");
+    }
+
+    /// A source that answers forever whatever it is told.
+    #[derive(Debug)]
+    struct Deaf {
+        frame: Vec<f32>,
+    }
+
+    impl AudioSource for Deaf {
+        fn format(&self) -> AudioFormat {
+            AudioFormat::transcription()
+        }
+
+        fn next_frame(&mut self) -> notewise_audio_capture::Result<Option<AudioFrame>> {
+            Ok(Some(AudioFrame::new(
+                self.frame.clone(),
+                AudioFormat::transcription(),
+                0,
+            )))
+        }
+    }
+
+    /// One that ignores `stop` must not keep a stopped recording running for ever.
+    #[test]
+    fn a_source_that_ignores_stop_is_cut_off() {
+        let minute = AudioFormat::transcription().sample_rate.hz() as usize * 60;
+        let mut deaf = Deaf {
+            frame: vec![0.0; minute],
+        };
+        let mut reader = CaptureReader::new();
+
+        let mut frames = 0i64;
+        while reader.next_frame(&mut deaf, true).unwrap().is_some() {
+            frames += 1;
+            assert!(frames < 1_000, "the tail never ended");
+        }
+        assert_eq!(frames, MAX_TAIL_MS / 60_000);
+    }
+
+    /// An empty frame from a stopped source is the end of it, not more tail.
+    #[test]
+    fn an_empty_frame_after_stop_ends_the_tail() {
+        let mut quiet = Deaf { frame: Vec::new() };
+        let mut reader = CaptureReader::new();
+
+        assert!(reader.next_frame(&mut quiet, true).unwrap().is_none());
+        assert!(reader.is_stopping());
+    }
+
+    /// Before any stop, a reader is a plain pass-through — including for a source that is not live.
+    #[test]
+    fn a_reader_passes_frames_through_until_stopped() {
+        let mut source = tone(300);
+        let mut reader = CaptureReader::new();
+
+        let mut frames = 0;
+        while reader.next_frame(&mut source, false).unwrap().is_some() {
+            frames += 1;
+        }
+        assert_eq!(frames, 3);
+        assert!(!reader.is_stopping());
     }
 }
