@@ -387,6 +387,18 @@ export function serialize(blocks: Block[]): string {
 }
 
 /**
+ * A stored body as the editor would write it back untouched.
+ *
+ * What an autosave has to compare against. `serialize(parse(text))` is not always `text` — see the
+ * round-trip note at the top of this file — so comparing the editor's output with the stored text
+ * reported a change on any note not written by this editor, and merely opening one saved it:
+ * rewriting its Markdown and moving its "last edited" to now without a keystroke.
+ */
+export function canonical(markdown: string): string {
+  return serialize(parse(markdown));
+}
+
+/**
  * Whether the block at `index` may be nested one level deeper.
  *
  * Only a list item can nest, and only under a list item that is already at least as deep. The

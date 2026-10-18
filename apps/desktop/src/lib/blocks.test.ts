@@ -5,6 +5,7 @@ import {
   blockAfter,
   canIndent,
   canOutdent,
+  canonical,
   depthOf,
   emptyDocument,
   imageParts,
@@ -537,5 +538,30 @@ describe("images", () => {
   // Brackets in alt text would terminate the `![...]` early.
   it("strips brackets from alt text", () => {
     expect(imageText("a [b] c", "/x.png")).toBe("![a b c](/x.png)");
+  });
+});
+
+describe("canonical", () => {
+  // The autosave compared the editor's output with the stored text, so any body this editor would
+  // write differently — a note made through the API, an agent's note, an empty new note — was
+  // "changed" the moment it was opened, and saved: its Markdown rewritten and its date bumped.
+  it("is what an untouched editor writes back, so opening a note is not an edit", () => {
+    for (const stored of ["", "line one\nline two", "* starred bullet", "trailing   \n", "# Title\n\n- a\n- b\n"]) {
+      expect(serialize(parse(stored))).toBe(canonical(stored));
+    }
+    // The comparison the autosave used to make, which reported a change for these.
+    expect(serialize(parse("line one\nline two"))).not.toBe("line one\nline two");
+    expect(serialize(parse(""))).not.toBe("");
+  });
+
+  it("still sees a real edit", () => {
+    const blocks = parse("line one\nline two");
+    blocks[0] = { ...blocks[0], text: "line one, edited" };
+    expect(serialize(blocks)).not.toBe(canonical("line one\nline two"));
+  });
+
+  it("leaves text the editor wrote unchanged", () => {
+    const written = serialize(parse("# Roadmap\n\n- Ship search\n- Ship tickets\n"));
+    expect(canonical(written)).toBe(written);
   });
 });
