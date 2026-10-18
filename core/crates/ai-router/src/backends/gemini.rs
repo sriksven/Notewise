@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 use crate::error::{AiError, Result};
 use crate::prompts::{self, transcript_prompt};
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
-    TranscriptInput,
+    tidy_action_items, tidy_decisions, ChatRequest, ChatResponse, ExtractedActionItem,
+    ExtractedDecision, Role, SummaryOutput, TranscriptInput,
 };
 use crate::AiBackend;
 
@@ -228,7 +228,9 @@ impl AiBackend for GeminiBackend {
             ))
             .await?;
 
-        Ok(Self::parse_json::<DecisionsWrapper>(&raw)?.decisions)
+        Ok(tidy_decisions(
+            Self::parse_json::<DecisionsWrapper>(&raw)?.decisions,
+        ))
     }
 
     async fn extract_action_items(
@@ -244,7 +246,9 @@ impl AiBackend for GeminiBackend {
             ))
             .await?;
 
-        Ok(Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items)
+        Ok(tidy_action_items(
+            Self::parse_json::<ActionItemsWrapper>(&raw)?.action_items,
+        ))
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {

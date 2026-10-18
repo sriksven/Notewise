@@ -83,6 +83,70 @@ pub struct ExtractedActionItem {
     pub due_hint: Option<String>,
 }
 
+impl ExtractedActionItem {
+    /// The task with its deadline still attached, for a store that has no field for a hint.
+    ///
+    /// The stored action item has `due_at`, a timestamp, and turning "by Friday" into one needs
+    /// the meeting's date, its timezone and a rule for *which* Friday — so the hint was simply
+    /// not stored, and every deadline a model extracted was lost between this crate and the
+    /// database. Kept in the text it survives as it was said, and nothing is guessed. Not
+    /// repeated when the text already carries it ("Book the room for the week of March 10th").
+    pub fn text_with_due_hint(&self) -> String {
+        match self.due_hint.as_deref().map(str::trim) {
+            Some(hint)
+                if !hint.is_empty() && !self.text.to_lowercase().contains(&hint.to_lowercase()) =>
+            {
+                format!("{} (due {hint})", self.text)
+            }
+            _ => self.text.clone(),
+        }
+    }
+}
+
+/// A field a model filled with a word for "nobody", which is not a name.
+///
+/// Models asked for `null` write `""`, `"none"`, `"N/A"` or `"unassigned"` about as often. Stored
+/// as an owner, "unassigned" is an assignment to a person called Unassigned.
+fn absent(value: &Option<String>) -> bool {
+    value.as_deref().map(str::trim).is_none_or(|v| {
+        matches!(
+            v.to_ascii_lowercase().as_str(),
+            "" | "null" | "none" | "n/a" | "na" | "unknown" | "unassigned" | "nobody" | "tbd"
+        )
+    })
+}
+
+/// Normalise what a model extracted: trim, drop empty items, and turn "none"-words into `None`.
+///
+/// Every backend runs its parsed reply through this, so what reaches storage does not depend on
+/// which provider wrote it.
+pub(crate) fn tidy_action_items(items: Vec<ExtractedActionItem>) -> Vec<ExtractedActionItem> {
+    items
+        .into_iter()
+        .filter(|item| !item.text.trim().is_empty())
+        .map(|item| ExtractedActionItem {
+            text: item.text.trim().to_string(),
+            owner: (!absent(&item.owner))
+                .then(|| item.owner.unwrap_or_default().trim().to_string()),
+            due_hint: (!absent(&item.due_hint))
+                .then(|| item.due_hint.unwrap_or_default().trim().to_string()),
+        })
+        .collect()
+}
+
+/// [`tidy_action_items`] for decisions.
+pub(crate) fn tidy_decisions(items: Vec<ExtractedDecision>) -> Vec<ExtractedDecision> {
+    items
+        .into_iter()
+        .filter(|item| !item.text.trim().is_empty())
+        .map(|item| ExtractedDecision {
+            text: item.text.trim().to_string(),
+            reasoning: (!absent(&item.reasoning))
+                .then(|| item.reasoning.unwrap_or_default().trim().to_string()),
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -166,6 +230,72 @@ mod tests {
             ChatMessage::assistant("hello"),
         ])
         .is_valid());
+    }
+
+    fn item(text: &str, owner: Option<&str>, due: Option<&str>) -> ExtractedActionItem {
+        ExtractedActionItem {
+            text: text.into(),
+            owner: owner.map(Into::into),
+            due_hint: due.map(Into::into),
+        }
+    }
+
+    /// The deadline a model extracted has to survive into storage, which has no field for it.
+    #[test]
+    fn a_due_hint_is_kept_in_the_text_as_it_was_said() {
+        assert_eq!(
+            item("Write the migration plan", Some("Sam"), Some("by Friday")).text_with_due_hint(),
+            "Write the migration plan (due by Friday)"
+        );
+        assert_eq!(
+            item(
+                "Book the room for the week of March 10th",
+                None,
+                Some("week of March 10th")
+            )
+            .text_with_due_hint(),
+            "Book the room for the week of March 10th",
+            "a deadline already in the text is not repeated"
+        );
+        assert_eq!(
+            item("Look at the flaky test", None, None).text_with_due_hint(),
+            "Look at the flaky test"
+        );
+    }
+
+    /// "unassigned" stored as an owner is an assignment to somebody called Unassigned.
+    #[test]
+    fn words_for_nobody_become_none_and_empty_items_are_dropped() {
+        let tidied = tidy_action_items(vec![
+            item("  Look at the flaky test ", Some("unassigned"), Some("")),
+            item("Write the plan", Some(" Sam "), Some("N/A")),
+            item("   ", Some("Sam"), None),
+        ]);
+        assert_eq!(
+            tidied,
+            vec![
+                item("Look at the flaky test", None, None),
+                item("Write the plan", Some("Sam"), None),
+            ]
+        );
+
+        let decisions = tidy_decisions(vec![
+            ExtractedDecision {
+                text: "Ship Friday".into(),
+                reasoning: Some("none".into()),
+            },
+            ExtractedDecision {
+                text: "".into(),
+                reasoning: None,
+            },
+        ]);
+        assert_eq!(
+            decisions,
+            vec![ExtractedDecision {
+                text: "Ship Friday".into(),
+                reasoning: None
+            }]
+        );
     }
 
     #[test]

@@ -1568,7 +1568,9 @@ async fn summarize_meeting(
         repo.add_action_item(notewise_storage::NewActionItem {
             meeting_id,
             summary_id: Some(stored.id),
-            text: item.text.clone(),
+            // The deadline as it was said. `due_at` needs a date nobody stated, so the hint
+            // rides in the text rather than being dropped — see `text_with_due_hint`.
+            text: item.text_with_due_hint(),
             owner: item.owner.clone(),
             owner_person_id: None,
             due_at: None,
@@ -2866,6 +2868,88 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0]["distance"], 1);
         assert_eq!(summaries[0]["via"], "derived_from");
+    }
+
+    /// Extracts one action item with a deadline, the way every real model does.
+    #[derive(Debug)]
+    struct WithDeadline;
+
+    #[async_trait::async_trait]
+    impl AiBackend for WithDeadline {
+        fn model_id(&self) -> &str {
+            "with-deadline"
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+        async fn summarize(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<notewise_ai_router::SummaryOutput> {
+            Ok(notewise_ai_router::SummaryOutput {
+                text: "We agreed to ship.".into(),
+                model: "with-deadline".into(),
+            })
+        }
+        async fn extract_decisions(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedDecision>> {
+            Ok(Vec::new())
+        }
+        async fn extract_action_items(
+            &self,
+            _: &TranscriptInput,
+        ) -> notewise_ai_router::Result<Vec<notewise_ai_router::ExtractedActionItem>> {
+            Ok(vec![notewise_ai_router::ExtractedActionItem {
+                text: "Write the migration plan".into(),
+                owner: Some("Sam".into()),
+                due_hint: Some("by Friday".into()),
+            }])
+        }
+        async fn chat(
+            &self,
+            _: &ChatRequest,
+        ) -> notewise_ai_router::Result<notewise_ai_router::ChatResponse> {
+            Err(notewise_ai_router::AiError::InvalidRequest("unused".into()))
+        }
+    }
+
+    /// The deadline was extracted and then dropped on the way to storage, so every action item
+    /// came out of a summary with no date at all.
+    #[tokio::test]
+    async fn an_extracted_deadline_survives_into_the_stored_action_item() {
+        let app = router(Arc::new(AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::with_backend(Box::new(WithDeadline)),
+        )));
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{"text": "Sam: I'll write the plan by Friday.", "start_ms": 0, "end_ms": 3000}]),
+            ),
+        )
+        .await;
+
+        let (status, json) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/summarize"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let (_, summary) = call(&app, get(&format!("/v1/meetings/{id}/summary"))).await;
+        let item = &summary["summary"]["action_items"][0];
+        assert_eq!(
+            item["text"], "Write the migration plan (due by Friday)",
+            "{summary}"
+        );
+        assert_eq!(item["owner"], "Sam");
     }
 
     #[tokio::test]

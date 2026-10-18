@@ -14,8 +14,8 @@ use crate::error::{AiError, Result};
 use crate::prompts::{self, transcript_prompt};
 use crate::tags;
 use crate::types::{
-    ChatRequest, ChatResponse, ExtractedActionItem, ExtractedDecision, Role, SummaryOutput,
-    TranscriptInput,
+    tidy_action_items, tidy_decisions, ChatRequest, ChatResponse, ExtractedActionItem,
+    ExtractedDecision, Role, SummaryOutput, TranscriptInput,
 };
 use crate::AiBackend;
 
@@ -231,7 +231,7 @@ impl AiBackend for OllamaBackend {
                 backend: BACKEND,
                 reason: format!("model did not return the expected decision shape: {e}"),
             })?;
-        Ok(wrapper.decisions)
+        Ok(tidy_decisions(wrapper.decisions))
     }
 
     async fn extract_action_items(
@@ -252,7 +252,7 @@ impl AiBackend for OllamaBackend {
                 backend: BACKEND,
                 reason: format!("model did not return the expected action item shape: {e}"),
             })?;
-        Ok(wrapper.action_items)
+        Ok(tidy_action_items(wrapper.action_items))
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
