@@ -44,6 +44,15 @@ describe("request", () => {
     expect(failure).toMatchObject({ message: "no ticket t1", code: "not_found", status: 404 });
   });
 
+  // The board has a Done column. The bare route lists open tickets only, so a ticket moved to Done
+  // disappeared on the next load and the column was always empty.
+  it("asks for tickets of every status", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json([]));
+    globalThis.fetch = fetchMock as typeof fetch;
+    await api.tickets();
+    expect(fetchMock.mock.calls[0][0]).toBe("/v1/tickets?status=all");
+  });
+
   it("names an unreachable engine rather than saying 'Failed to fetch'", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError("Failed to fetch");

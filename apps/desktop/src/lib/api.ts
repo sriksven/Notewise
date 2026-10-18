@@ -1398,7 +1398,13 @@ export const api = {
   stopRecording: () =>
     request<RecordingStopped>("/v1/recording", { method: "DELETE" }),
 
-  tickets: () => request<Ticket[]>("/v1/tickets"),
+  /**
+   * Every ticket, whatever its status.
+   *
+   * `?status=all` because the bare route answers open tickets only — the board has a Done column,
+   * and without it a ticket moved there vanished on the next load.
+   */
+  tickets: () => request<Ticket[]>("/v1/tickets?status=all"),
 
   createTicket: (input: {
     title: string;
