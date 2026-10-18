@@ -220,9 +220,10 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         schema_version,
         ai_local: state.ai().is_local(),
         // The policy-aware label, not `model_id()`. A user with routing configured is not using
-        // one model, and this field is read by a human. `model_id()` stays the default's model
-        // because it is what gets persisted and read back to build a backend.
-        ai_model: state.ai().model_label(),
+        // one model, and this field is read by a human. Resolved, because before anything had
+        // asked the daemon the label was our preference — `llama3.1` on a machine holding only
+        // `llama3.1:8b` — and the top bar named a model that was not installed.
+        ai_model: state.ai().resolved_model_label().await,
         // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
         // reports that it cannot record even in a build that otherwise could.
         can_record: recording::SUPPORTED && state.db_path().is_some(),
@@ -448,7 +449,7 @@ async fn switch_backend(
     let ai = state.ai();
     Ok(Json(serde_json::json!({
         "kind": kind.as_str(),
-        "model": ai.model_id(),
+        "model": ai.resolved_model_id().await,
         "is_local": ai.is_local(),
     })))
 }
@@ -1771,7 +1772,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
             // it the only way to name what is running is to guess from `is_local`, which
             // matches several entries and picks the wrong one.
             "kind": state.ai().kind().as_str(),
-            "model": state.ai().model_id(),
+            "model": state.ai().resolved_model_id().await,
             "is_local": state.ai().is_local(),
         },
     })))

@@ -784,11 +784,19 @@ async fn put_rules(
             .map_err(|e| ApiError::Internal(format!("could not save the rules: {e}")))?;
     }
 
-    // Rebuild the live router so the change applies without a restart. Reusing the current kind
-    // and model means this is a policy change and never a silent backend change.
+    // Rebuild the live router so the change applies without a restart. Reusing the current kind,
+    // and the model and endpoint it was *configured* with, means this is a policy change and
+    // never a silent backend change. It used to pass `model_id()` and no endpoint: a custom
+    // OpenAI-compatible backend then could not be rebuilt at all (the rules were saved and the
+    // request failed), an Ollama on another machine became localhost, and Ollama's own
+    // preference was turned into a model the user had "chosen".
     let ai = state.ai();
     state
-        .switch_backend(ai.kind(), Some(ai.model_id().to_string()), None)
+        .switch_backend(
+            ai.kind(),
+            ai.configured_model().map(str::to_string),
+            ai.configured_endpoint().map(str::to_string),
+        )
         .await?;
 
     Ok(Json(RulesResponse {
