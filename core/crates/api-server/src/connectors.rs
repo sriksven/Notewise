@@ -14,8 +14,8 @@ use axum::extract::{Path, State};
 use axum::Json;
 use notewise_connectors::{
     build_registry, generate_signing_secret, ConnectorRegistry, CredentialStore, GoogleBridge,
-    KeychainStore, MicrosoftGraph, Secret, VaultSink, WebhookSink, GOOGLE_SHARED_KEY,
-    REFRESH_TOKEN_KEY, SIGNING_KEY,
+    MicrosoftGraph, Secret, VaultSink, WebhookSink, GOOGLE_SHARED_KEY, REFRESH_TOKEN_KEY,
+    SIGNING_KEY,
 };
 
 /// The scope name for calendar access.
@@ -363,7 +363,7 @@ pub async fn connect_connector(
     Path(id): Path<String>,
     Json(request): Json<ConnectRequest>,
 ) -> ApiResult<Json<ConnectResponse>> {
-    let credentials = KeychainStore::new();
+    let credentials = crate::state::Keychain::new();
     // Held across synchronous calls only. `Database` is `Send` but not `Sync`, so an `.await`
     // inside this scope would make the future non-`Send` and axum would reject the route.
     let db = state.db().await;
@@ -381,7 +381,7 @@ pub async fn disconnect_connector(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult<axum::http::StatusCode> {
-    let credentials = KeychainStore::new();
+    let credentials = crate::state::Keychain::new();
     let db = state.db().await;
 
     apply_disconnect(&db, &credentials, &id)?;
@@ -1162,7 +1162,7 @@ pub async fn start_microsoft_signin(
         Some(id) if !id.is_empty() => id.to_string(),
         _ => {
             // Reuse one already stored, so reconnecting does not mean retyping it.
-            KeychainStore::new()
+            crate::state::Keychain::new()
                 .get(MicrosoftGraph::ID, notewise_connectors::CLIENT_ID_KEY)
                 .map_err(|e| ApiError::Internal(format!("cannot read the client id: {e}")))?
                 .map(|secret| secret.expose().to_string())
@@ -1237,7 +1237,7 @@ async fn complete_microsoft_signin(
         .await
         .map_err(|e| e.to_string())?;
 
-    let credentials = KeychainStore::new();
+    let credentials = crate::state::Keychain::new();
     credentials
         .set(MicrosoftGraph::ID, REFRESH_TOKEN_KEY, &refresh)
         .map_err(|e| format!("cannot store the token: {e}"))?;

@@ -510,7 +510,7 @@ async fn set_api_key(
     Path(kind): Path<String>,
     Json(body): Json<ApiKeyBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    use notewise_connectors::{CredentialStore, KeychainStore, Secret};
+    use notewise_connectors::{CredentialStore, Secret};
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
@@ -527,7 +527,7 @@ async fn set_api_key(
         return Err(ApiError::BadRequest("the key must not be empty".into()));
     }
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .set(
             &crate::state::key_entry(kind),
             crate::state::API_KEY_FIELD,
@@ -552,12 +552,12 @@ async fn set_api_key(
 
 /// Forget a saved key. Removing one that is not there succeeds.
 async fn delete_api_key(Path(kind): Path<String>) -> ApiResult<axum::http::StatusCode> {
-    use notewise_connectors::{CredentialStore, KeychainStore};
+    use notewise_connectors::CredentialStore;
 
     let kind = BackendKind::parse(kind.trim())
         .ok_or_else(|| ApiError::BadRequest(format!("unknown backend '{kind}'")))?;
 
-    KeychainStore::new()
+    crate::state::Keychain::new()
         .delete(&crate::state::key_entry(kind), crate::state::API_KEY_FIELD)
         .map_err(|e| ApiError::Internal(format!("could not remove the key: {e}")))?;
 
@@ -1759,7 +1759,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 // Whether a key is available, from the keychain or the environment. The key
                 // itself is never sent — only the fact that there is one, which is what the
                 // UI needs to tell "add a key" apart from "ready to use".
-                "has_key": !kind.requires_api_key() || crate::state::api_key_for(*kind).is_some(),
+                "has_key": !kind.requires_api_key() || crate::state::has_api_key(*kind),
             })
         })
         .collect();
