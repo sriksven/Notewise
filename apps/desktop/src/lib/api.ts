@@ -403,6 +403,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  // Nothing to read. Two routes answer `204 No Content` — removing an API key and disconnecting
+  // a connector — and `response.json()` throws on an empty body, so both used to report failure
+  // after succeeding, and skip the refresh that would have shown the change.
+  if (response.status === 204) return undefined as T;
+
   return response.json() as Promise<T>;
 }
 

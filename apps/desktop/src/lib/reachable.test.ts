@@ -89,7 +89,12 @@ describe("the interface can reach the engine", () => {
   // Excluded from the haystack: this file names every method in `KNOWN_UNREACHABLE` as a string, and
   // a test that reads itself as evidence proves nothing. Three drift tests in this repository have
   // been written that way and passed for that reason.
-  const elsewhere = files.filter(([path]) => path !== API && path !== SELF);
+  //
+  // Every other test file too. `api.test.ts` calls the client directly, and a method whose only
+  // caller is a unit test is exactly the unreachable capability this test exists to catch.
+  const elsewhere = files.filter(
+    ([path]) => path !== API && path !== SELF && !/\.test\.tsx?$/.test(path),
+  );
   const callers = elsewhere.map(([, text]) => text).join("\n");
 
   const reaches = (name: string) =>
