@@ -1,7 +1,7 @@
 # Browser extension
 
 > **Status: implemented, unverified against live meeting pages.** The platform-independent logic is
-> tested (`npm test`, 39 tests). The DOM selectors are not, and cannot be — see
+> tested (`npm test`, 43 tests). The DOM selectors are not, and cannot be — see
 > [What is not tested](#what-is-not-tested).
 
 Two jobs, and they send different things.
@@ -156,7 +156,10 @@ it is asked.
 
 **The clock.** The engine wants milliseconds since recording start; the page knows
 `performance.now()`. Those origins are unrelated and the offset is unrecoverable afterwards, so it is
-fixed once when tracking starts.
+fixed once when tracking starts — from the recording's `started_at`, which the engine reports, and
+not from the moment tracking happened to begin. Those differ by up to a poll interval normally, and
+by however far into the call the meeting tab was opened or reloaded; every turn would otherwise land
+that much early, on whoever was speaking then.
 
 **A poll is not an event.** No platform offers a "speaker changed" callback, so this samples every
 250 ms. Turn edges are therefore only as precise as the sampling interval, which is why the engine

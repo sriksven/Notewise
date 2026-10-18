@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SpeakerTracker, MIN_TURN_MS } from "../src/tracker.js";
+import { SpeakerTracker, MIN_TURN_MS, elapsedSince } from "../src/tracker.js";
 import {
   activeRecording,
   findEngine,
@@ -207,6 +207,8 @@ test("no recording means no meeting id, and a dead engine is not an error", asyn
   assert.deepEqual(await activeRecording(recording), {
     meetingId: "abc",
     origin: "http://127.0.0.1:47821",
+    // This fake has no meeting to read a start time from; tracking starts regardless.
+    startedAt: null,
   });
 
   // The desktop app is not running. A meeting page must not fill the console over that.
@@ -229,6 +231,7 @@ test("the engine is found wherever in the window it landed", async () => {
   assert.deepEqual(await activeRecording(onThirdPort), {
     meetingId: "m9",
     origin: "http://127.0.0.1:47823",
+    startedAt: null,
   });
 });
 
@@ -267,6 +270,80 @@ test("a recording engine wins over an idle one", async () => {
   const found = await activeRecording(both);
   assert.equal(found.meetingId, "live");
   assert.equal(found.origin, "http://127.0.0.1:47822", "names belong to whoever has the audio");
+});
+
+test("the recording's start comes back with it, from the engine's meeting", async () => {
+  const requested = [];
+  const engine = async (url) => {
+    requested.push(url);
+    if (!url.startsWith("http://127.0.0.1:47822/")) throw new Error("ECONNREFUSED");
+    if (url.endsWith("/health")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: "m 1" }),
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ id: "m 1", started_at: "2026-10-17T19:00:00.123456Z" }),
+    };
+  };
+
+  assert.deepEqual(await activeRecording(engine), {
+    meetingId: "m 1",
+    origin: "http://127.0.0.1:47822",
+    startedAt: "2026-10-17T19:00:00.123456Z",
+  });
+  assert.ok(
+    requested.includes("http://127.0.0.1:47822/v1/meetings/m%201"),
+    "read from the recording engine, with the id escaped",
+  );
+});
+
+test("a start time that cannot be read costs precision, not the session", async () => {
+  const noMeeting = async (url) => {
+    if (url.endsWith("/health")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "ok", schema_version: 6, recording_meeting_id: "m1" }),
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  const found = await activeRecording(noMeeting);
+  assert.equal(found.meetingId, "m1");
+  assert.equal(found.startedAt, null);
+});
+
+test("a tab that starts tracking late still puts turns on the recording clock", () => {
+  // The recording began 90 s ago: the tab was opened late, or reloaded mid-meeting. The page's own
+  // clock is somewhere unrelated, as performance.now() always is.
+  const wallNow = Date.parse("2026-10-17T19:01:30Z");
+  const offset = elapsedSince("2026-10-17T19:00:00Z", wallNow);
+  assert.equal(offset, 90_000);
+
+  const clock = fakeClock(5_000);
+  const tracker = new SpeakerTracker(clock.now, offset);
+  tracker.observe([person("p1", "Priya", { speaking: true })]);
+  clock.advance(2_000);
+  tracker.observe([person("p1", "Priya")]);
+
+  const [turn] = tracker.drain().turns;
+  assert.equal(turn.start_ms, 90_000, "not 0: Priya spoke 90 s into the recording");
+  assert.equal(turn.end_ms, 92_000);
+});
+
+test("an unreadable or future start time falls back to no offset", () => {
+  const now = Date.parse("2026-10-17T19:00:00Z");
+  assert.equal(elapsedSince(null, now), 0);
+  assert.equal(elapsedSince(undefined, now), 0);
+  assert.equal(elapsedSince("not a date", now), 0);
+  assert.equal(
+    elapsedSince("2026-10-17T19:00:05Z", now),
+    0,
+    "a clock set backwards is not negative time",
+  );
 });
 
 test("the probed window matches what the manifest asks permission for", async () => {

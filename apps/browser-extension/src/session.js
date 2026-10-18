@@ -25,7 +25,7 @@
  */
 
 import { activeMeeting, platformFor } from "./platforms.js";
-import { SpeakerTracker, INTERVAL_MS } from "./tracker.js";
+import { SpeakerTracker, INTERVAL_MS, elapsedSince } from "./tracker.js";
 import { engineViaWorker } from "./relay.js";
 import { JoinAnnouncer, RETRY_MS } from "./join.js";
 
@@ -91,8 +91,11 @@ function stop(reason) {
   console.info(`[notewise] stopped tracking speakers: ${reason}`);
 }
 
-function start(meetingId, origin) {
-  const tracker = new SpeakerTracker();
+function start(meetingId, origin, startedAt) {
+  // On the recording's clock, not this page's: tracking starts when a poll first sees the recording,
+  // or when the tab is opened or reloaded mid-meeting, and the engine measures turns from the
+  // recording's start. Without the offset, every turn lands early by however late tracking began.
+  const tracker = new SpeakerTracker(undefined, elapsedSince(startedAt));
 
   const timer = setInterval(() => {
     if (!session) return;
@@ -138,11 +141,11 @@ async function poll() {
   const meetingId = found?.meetingId ?? null;
 
   if (meetingId && !session) {
-    start(meetingId, found.origin);
+    start(meetingId, found.origin, found.startedAt);
   } else if (session && meetingId !== session.meetingId) {
     // Either recording stopped, or a different meeting started.
     stop(meetingId ? "the recording moved to another meeting" : "the recording stopped");
-    if (meetingId) start(meetingId, found.origin);
+    if (meetingId) start(meetingId, found.origin, found.startedAt);
   }
 }
 

@@ -97,17 +97,51 @@ export async function findEngine(fetchImpl = fetch) {
 }
 
 /**
+ * When the recording began, as the engine wrote it down: the zero of the clock speaker events are
+ * measured on. `null` when it cannot be read, which costs precision rather than the session.
+ */
+async function recordingStartedAt(engineOrigin, meetingId, fetchImpl) {
+  try {
+    const response = await withTimeout(
+      (signal) =>
+        fetchImpl(`${engineOrigin}/v1/meetings/${encodeURIComponent(meetingId)}`, {
+          method: "GET",
+          headers: { accept: "application/json" },
+          signal,
+        }),
+      PROBE_TIMEOUT_MS,
+    );
+    if (!response.ok) return null;
+
+    const meeting = await response.json();
+    return typeof meeting?.started_at === "string" ? meeting.started_at : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Is the desktop app running, and is it recording?
  *
- * Returns `{ meetingId, origin }`, or null. Speaker events are only useful against a meeting that
- * exists, so this is what decides whether to start tracking at all. The origin comes back with it
- * so a caller does not have to search again for every batch.
+ * Returns `{ meetingId, origin, startedAt }`, or null. Speaker events are only useful against a
+ * meeting that exists, so this is what decides whether to start tracking at all. The origin comes
+ * back with it so a caller does not have to search again for every batch.
+ *
+ * `startedAt` is the recording's start, which the page needs because the engine measures turns
+ * from it and the page cannot know it: tracking starts when a poll first sees the recording — up to
+ * a poll interval late — or whenever the meeting tab is opened or reloaded, which can be an hour
+ * in. Without it every turn lands that much early, on whoever was speaking then.
  */
 export async function activeRecording(fetchImpl = fetch) {
   const engine = await findEngine(fetchImpl);
   if (!engine || !engine.recordingMeetingId) return null;
 
-  return { meetingId: engine.recordingMeetingId, origin: origin(engine.port) };
+  const at = origin(engine.port);
+  return {
+    meetingId: engine.recordingMeetingId,
+    origin: at,
+    startedAt: await recordingStartedAt(at, engine.recordingMeetingId, fetchImpl),
+  };
 }
 
 /**
