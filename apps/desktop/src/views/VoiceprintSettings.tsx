@@ -68,9 +68,11 @@ export function VoiceprintSettings() {
         Recognise people by voice
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-        Lets Notewise name the same colleague across meetings, including in-person ones where no
-        meeting app can be asked who was speaking. It stores a numeric fingerprint of each
-        voice — never audio, and nothing that can be played back.
+        Not in this build yet: nothing records or matches voices across meetings so far. When it
+        does, it will let Notewise name the same colleague across meetings, including in-person
+        ones where no meeting app can be asked who was speaking, by keeping a numeric fingerprint
+        of each voice — never audio, and nothing that can be played back. The switch records your
+        answer now, so nothing is kept until you have said yes.
       </p>
 
       <div className="card overflow-hidden">

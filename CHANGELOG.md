@@ -13,15 +13,16 @@ The first tagged build.
 ### Meetings
 
 - Record from a microphone, or import an audio file with a file picker.
-- Transcription runs on this machine, via Whisper or NVIDIA Parakeet. Models are downloaded from
-  inside the app, with resumable progress.
-- Speakers can be separated by voice for recordings where nothing knows who was talking, and named
-  once so the name sticks. In a call, the browser extension reads who is speaking from the meeting
-  platform, which is exact — and sends no audio to do it.
+- Transcription runs on this machine, via Whisper. Models are downloaded from inside the app, with
+  resumable progress. NVIDIA Parakeet is available from the command line, not yet from the app.
+- Speakers can be separated by voice for recordings where nothing knows who was talking, and named;
+  the name holds for that meeting, and recognising a voice in a later meeting is not built yet. In a
+  call, the browser extension reads who is speaking from the meeting platform, which is exact — and
+  sends no audio to do it.
 - Transcripts are editable. A word the transcriber got wrong can be corrected in place, and a
   meeting can be renamed.
 - Audio can be kept after transcription — off by default — which is what makes click-to-play on a
-  transcript line possible.
+  transcript line possible. A recording that also captures system audio does not keep it yet.
 
 ### What a meeting means
 
