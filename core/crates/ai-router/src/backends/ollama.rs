@@ -37,6 +37,22 @@ fn is_model_missing(status: u16, body: &str) -> bool {
     status == 404 && body.to_ascii_lowercase().contains("not found")
 }
 
+/// The installed tag to send for `model`, or `None` when nothing installed will do.
+///
+/// Pure for the same reason [`is_model_missing`] is. A name a human chose resolves only within
+/// its own family — substituting another model would attribute output to a choice they did not
+/// make. Our own default may fall back to any chat model: a machine with only `mistral` should
+/// summarize the meeting rather than report that our preference is missing.
+fn choose_tag(model: &str, chosen: bool, installed: &[String]) -> Option<String> {
+    if let Some(tag) = tags::resolve_tag(model, installed) {
+        return Some(tag);
+    }
+    if chosen {
+        return None;
+    }
+    tags::first_acceptable(installed, |tag| !is_embedding_model(tag))
+}
+
 #[derive(Debug, Clone)]
 pub struct OllamaBackend {
     /// The model asked for: either the user's choice or [`DEFAULT_MODEL`].
@@ -48,10 +64,11 @@ pub struct OllamaBackend {
     /// did not make. Our own default may fall back to whatever the daemon holds, because
     /// "llama3.1 is missing" is not a useful thing to tell someone who never asked for it.
     chosen: bool,
-    /// The tag actually sent, resolved once against the daemon's model list.
+    /// The tag actually sent, once the daemon has confirmed it holds it.
     ///
     /// Shared across clones rather than per-clone, so the resolution costs one `/api/tags`
-    /// per backend rather than one per caller that happened to clone it.
+    /// per backend rather than one per caller that happened to clone it. Empty until a daemon
+    /// answers — see [`OllamaBackend::resolve`] for why a guess is never stored here.
     resolved: Arc<tokio::sync::OnceCell<String>>,
     endpoint: String,
     http: reqwest::Client,
@@ -289,13 +306,31 @@ impl AiBackend for OllamaBackend {
         self.resolve().await
     }
 
-    /// Ask the daemon for its model list.
+    /// Whether a request sent now could be answered: the daemon is up *and* holds a model this
+    /// backend would send.
     ///
-    /// `/api/tags` is a cheap GET that loads no model. The configured endpoint points at
-    /// `/api/chat`, so the base is recovered by trimming that suffix rather than by storing a
-    /// second URL that could drift out of sync with the first.
+    /// A reachable daemon is not enough. One holding only `nomic-embed-text`, or not the model
+    /// the user chose, passes a reachability check and then fails every summary — and this
+    /// answer is what setup reports as "the AI backend is ready" and what a routing rule reads
+    /// as "the local model is healthy". Both questions are about whether work can be done here.
+    ///
+    /// Costs what the model picker already costs: `/api/tags`, which loads no model, and
+    /// `/api/show` per tag. A passing probe also settles the tag, so the model reported from
+    /// then on is the one that will answer.
     async fn probe(&self) -> Result<()> {
-        self.tags().await.map(|_| ())
+        let installed = self.installed_models().await?;
+        match choose_tag(&self.model, self.chosen, &installed) {
+            Some(tag) => {
+                // Already set means some request settled it first, to the same answer.
+                let _ = self.resolved.set(tag);
+                Ok(())
+            }
+            None => Err(AiError::ModelNotInstalled {
+                backend: BACKEND,
+                model: self.model.clone(),
+                installed,
+            }),
+        }
     }
 
     async fn installed_models(&self) -> Result<Vec<String>> {
@@ -319,41 +354,43 @@ impl AiBackend for OllamaBackend {
 }
 
 impl OllamaBackend {
-    /// The tag to send, resolved once against what the daemon actually holds.
+    /// The tag to send, resolved against what the daemon actually holds.
     ///
     /// Costs one `/api/tags` on the first request of a process and nothing afterwards. That
     /// is the whole price of never shipping a default that names a model the user does not
     /// have — the daemon was already being asked this question to build the model picker.
+    ///
+    /// Only an answer the daemon *confirmed* is remembered. This used to cache whatever the
+    /// first request produced, including the fallback for a daemon that was not up yet — so an
+    /// engine started at login a moment before Ollama sent the bare `llama3.1` for the rest of
+    /// its life, and on a machine holding `llama3.1:8b` every summary failed with "model not
+    /// found" until the app was restarted. A fallback is now used for the one request it was
+    /// computed for and the daemon is asked again on the next.
     async fn resolve(&self) -> String {
-        self.resolved
-            .get_or_init(|| self.resolve_uncached())
+        match self
+            .resolved
+            .get_or_try_init(|| self.resolve_uncached())
             .await
-            .clone()
+        {
+            Ok(tag) => tag.clone(),
+            Err(fallback) => fallback,
+        }
     }
 
-    async fn resolve_uncached(&self) -> String {
+    /// `Ok` is a tag the daemon holds, safe to remember. `Err` is the name to send this once —
+    /// the daemon could not be asked, or holds nothing that fits — and must not be remembered,
+    /// because the answer changes the moment the daemon starts or the user pulls a model.
+    async fn resolve_uncached(&self) -> std::result::Result<String, String> {
         let Ok(installed) = self.installed_models().await else {
             // The daemon is unreachable or unwell. Sending the preferred name produces a
             // transport error that names the daemon, which is the accurate complaint;
             // inventing a model here would replace it with a misleading one.
-            return self.model.clone();
+            return Err(self.model.clone());
         };
 
-        if let Some(tag) = tags::resolve_tag(&self.model, &installed) {
-            return tag;
-        }
-
-        if self.chosen {
-            // Their choice, and it is not installed. Sending it unchanged gets
-            // `ModelNotInstalled`, which names what *is* installed — a better answer than
-            // silently running a model they did not pick.
-            return self.model.clone();
-        }
-
-        // Nobody chose this and the preferred family is absent. A machine with only `mistral`
-        // should summarize the meeting rather than report that our preference is missing.
-        tags::first_acceptable(&installed, |model| !is_embedding_model(model))
-            .unwrap_or_else(|| self.model.clone())
+        // Nothing usable: their choice, absent (sending it unchanged gets `ModelNotInstalled`,
+        // which names what *is* installed), or our default on a daemon with no chat model.
+        choose_tag(&self.model, self.chosen, &installed).ok_or_else(|| self.model.clone())
     }
 
     /// The daemon's base URL, recovered from the configured chat endpoint.
@@ -652,6 +689,160 @@ mod tests {
             .await
             .expect_err("nothing listens on port 1");
         assert!(matches!(err, AiError::Transport { .. }), "got {err:?}");
+    }
+
+    // ------------------------------------------------------------ against a stub daemon
+
+    use crate::stub::{Recorded, Reply, Stub};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A daemon holding exactly `models`, whose model list fails `down_for` times first — the
+    /// shape of an Ollama that is still starting when the engine sends its first request.
+    ///
+    /// Chat answers only for a tag it holds, and 404s anything else with Ollama's own wording,
+    /// so a test sees exactly what a real daemon would make of the name that was sent.
+    fn daemon(models: &'static [&'static str], down_for: usize) -> Stub {
+        let listed = AtomicUsize::new(0);
+        Stub::start(move |request: &Recorded| {
+            let asked = request.json()["model"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let capability = if is_embedding_model(&asked) {
+                "embedding"
+            } else {
+                "completion"
+            };
+            let listing: Vec<Value> = models.iter().map(|m| json!({ "name": m })).collect();
+            match request.path() {
+                "/api/tags" if listed.fetch_add(1, Ordering::SeqCst) < down_for => {
+                    Reply::json(503, json!({ "error": "starting" }))
+                }
+                "/api/tags" => Reply::json(200, json!({ "models": listing })),
+                "/api/show" => Reply::json(200, json!({ "capabilities": [capability] })),
+                "/api/chat" if models.contains(&asked.as_str()) => Reply::json(
+                    200,
+                    json!({
+                        "model": asked,
+                        "message": { "role": "assistant", "content": format!("answered by {asked}") },
+                        "done": true,
+                    }),
+                ),
+                "/api/chat" => Reply::json(
+                    404,
+                    json!({ "error": format!("model '{asked}' not found") }),
+                ),
+                _ => Reply::json(404, json!({ "error": "no such endpoint" })),
+            }
+        })
+    }
+
+    fn pointed_at(daemon: &Stub) -> OllamaBackend {
+        OllamaBackend::new().with_endpoint(format!("{}/api/chat", daemon.url))
+    }
+
+    /// The defect: the first request's fallback was cached for the life of the process, so an
+    /// engine that started a moment before Ollama sent the bare `llama3.1` forever — and on a
+    /// machine holding only `llama3.1:8b`, every summary after that was "model not found".
+    #[tokio::test]
+    async fn a_daemon_that_was_not_up_yet_is_asked_again_on_the_next_request() {
+        let daemon = daemon(&["llama3.1:8b"], 1);
+        let backend = pointed_at(&daemon);
+        let input = TranscriptInput::new("Standup", "we agreed to ship");
+
+        assert!(
+            backend.summarize(&input).await.is_err(),
+            "the first request could not know the tag yet"
+        );
+
+        let summary = backend
+            .summarize(&input)
+            .await
+            .expect("the daemon is up now, so the default must resolve");
+        assert_eq!(summary.model, "llama3.1:8b");
+        assert_eq!(summary.text, "answered by llama3.1:8b");
+        assert_eq!(backend.model_id(), "llama3.1:8b");
+    }
+
+    /// Once confirmed, the tag is not re-listed on every request.
+    #[tokio::test]
+    async fn a_confirmed_tag_is_listed_once_not_per_request() {
+        let daemon = daemon(&["llama3.1:8b"], 0);
+        let backend = pointed_at(&daemon);
+        let input = TranscriptInput::new("Standup", "we agreed to ship");
+
+        backend.summarize(&input).await.expect("first");
+        backend.summarize(&input).await.expect("second");
+
+        let listings = daemon
+            .requests()
+            .iter()
+            .filter(|r| r.method == "GET" && r.path() == "/api/tags")
+            .count();
+        assert_eq!(listings, 1, "{:?}", daemon.requests());
+    }
+
+    /// Setup's "the AI backend is ready", and a routing rule's "the local model is healthy", are
+    /// both read from this. A daemon that answers but can run nothing is neither.
+    #[tokio::test]
+    async fn a_daemon_with_no_chat_model_is_not_ready() {
+        let daemon = daemon(&["nomic-embed-text:latest"], 0);
+        match pointed_at(&daemon).probe().await {
+            Err(AiError::ModelNotInstalled { installed, .. }) => {
+                assert!(
+                    installed.is_empty(),
+                    "an embedder is not a chat model: {installed:?}"
+                )
+            }
+            other => panic!("expected ModelNotInstalled, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_chosen_model_that_is_not_installed_is_not_ready() {
+        let daemon = daemon(&["llama3.1:8b"], 0);
+        let backend = pointed_at(&daemon).with_model("mistral:7b");
+        assert!(
+            matches!(
+                backend.probe().await,
+                Err(AiError::ModelNotInstalled { .. })
+            ),
+            "a reachable daemon without the chosen model cannot do the work"
+        );
+    }
+
+    /// The model named in the UI before anything has been summarised must be the one that will
+    /// answer, not the preference it was resolved from.
+    #[tokio::test]
+    async fn a_passing_probe_settles_the_reported_model() {
+        let daemon = daemon(&["llama3.1:8b", "nomic-embed-text:latest"], 0);
+        let backend = pointed_at(&daemon);
+        assert_eq!(backend.model_id(), "llama3.1");
+
+        backend.probe().await.expect("a chat model is installed");
+        assert_eq!(backend.model_id(), "llama3.1:8b");
+    }
+
+    #[test]
+    fn only_our_own_default_may_fall_back_to_another_family() {
+        let have = vec![
+            "mistral:7b".to_string(),
+            "nomic-embed-text:latest".to_string(),
+        ];
+        assert_eq!(
+            choose_tag("llama3.1", false, &have).as_deref(),
+            Some("mistral:7b")
+        );
+        assert_eq!(
+            choose_tag("llama3.1", true, &have),
+            None,
+            "a model somebody chose is never swapped for a different one"
+        );
+        assert_eq!(
+            choose_tag("llama3.1", false, &["nomic-embed-text:latest".to_string()]),
+            None,
+            "an embedder cannot stand in for a chat model"
+        );
     }
 
     #[tokio::test]

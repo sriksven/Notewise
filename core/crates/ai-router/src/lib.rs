@@ -46,6 +46,8 @@ pub mod memory;
 mod policy;
 mod redact;
 mod router;
+#[cfg(test)]
+mod stub;
 mod tags;
 mod types;
 
