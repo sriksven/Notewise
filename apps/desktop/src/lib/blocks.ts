@@ -496,7 +496,10 @@ export function shortcutFor(text: string): { type: BlockType; rest: string } | n
  */
 export function blockAfter(block: Block): Block {
   if (isListItem(block.type) && block.text.trim() !== "") {
-    return newBlock(block.type);
+    // At the same depth. A new item at the top level made a sub-list something only Tab before
+    // every item could write. Only carried when nested, like `parse` does.
+    const depth = depthOf(block);
+    return depth > 0 ? { ...newBlock(block.type), depth } : newBlock(block.type);
   }
   return newBlock("paragraph");
 }

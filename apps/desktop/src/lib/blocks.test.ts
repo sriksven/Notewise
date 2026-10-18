@@ -316,6 +316,21 @@ describe("blockAfter", () => {
     const next = blockAfter(newBlock("todo", "done thing"));
     expect(next.checked).toBe(false);
   });
+
+  // Enter at the end of a nested item made the next one top level, so a sub-list could only be
+  // written by pressing Tab before every single item.
+  it("continues a nested list at the same depth", () => {
+    for (const type of ["bullet", "numbered", "todo"] as BlockType[]) {
+      const nested = { ...newBlock(type, "child"), depth: 2 };
+      expect(depthOf(blockAfter(nested))).toBe(2);
+      expect(blockAfter(nested).type).toBe(type);
+    }
+    // And the document round-trips with the new item where it was typed.
+    const parent = newBlock("bullet", "parent");
+    const child = { ...newBlock("bullet", "child"), depth: 1 };
+    const next = { ...blockAfter(child), text: "sibling" };
+    expect(serialize([parent, child, next])).toBe("- parent\n  - child\n  - sibling\n");
+  });
 });
 
 describe("helpers", () => {
