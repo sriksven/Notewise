@@ -30,7 +30,18 @@ function isDone(item: ActionItem): boolean {
  * round trip before the checkbox moves — makes ticking off five items feel broken on a
  * machine that is also transcribing audio.
  */
-export function ActionItems({ meetingId, refreshToken = 0 }: Props) {
+/**
+ * Keyed on the meeting, so nothing typed or loaded for one meeting survives into the next.
+ *
+ * The intelligence panel stays mounted while the library switches meetings under it. Without the
+ * key a half-typed item stayed open on the next meeting and Enter added it there, and the last
+ * meeting's items stayed on screen until — or, if the request failed, instead of — this one's.
+ */
+export function ActionItems(props: Props) {
+  return <ActionItemsForMeeting key={props.meetingId} {...props} />;
+}
+
+function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
   const [items, setItems] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
