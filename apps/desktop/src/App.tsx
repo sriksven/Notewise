@@ -758,7 +758,7 @@ export default function App() {
               <PeopleView personId={route.id} onNavigate={navigate} />
             )}
             {route.name === "ask" && <AskView onNavigate={navigate} />}
-            {route.name === "trash" && <TrashView />}
+            {route.name === "trash" && <TrashView onMeetingRestored={() => void refresh()} />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
             {route.name === "jobs" && <JobsView />}
             {route.name === "connectors" && <ConnectorsView />}
