@@ -20,6 +20,7 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::format::{AudioFormat, SampleRate};
+use crate::opening::{await_open, Opening, FIND_TIMEOUT, OPEN_TIMEOUT};
 use crate::{AudioFrame, AudioSource, CaptureConfig, CaptureError, Result};
 
 /// An available input device.
@@ -89,11 +90,25 @@ impl MicrophoneSource {
         let worker = std::thread::Builder::new()
             .name("notewise-microphone".into())
             .spawn(move || {
+                // Finding the device is reported separately from opening it, because the two
+                // are bounded separately: the first Core Audio call in a process can take
+                // seconds just to list devices. See `opening`.
+                let (device, supported, name) = match find_device(wanted_device) {
+                    Ok(found) => found,
+                    Err(e) => {
+                        let _ = ready_tx.send(Opening::Failed(e));
+                        return;
+                    }
+                };
+                if ready_tx.send(Opening::Found).is_err() {
+                    return; // caller gave up
+                }
+
                 // The stream is built here and never leaves this thread, which is what makes
                 // the !Send type usable at all.
-                match build_stream(wanted_device, audio_tx) {
-                    Ok((stream, format, name)) => {
-                        if ready_tx.send(Ok((format, name))).is_err() {
+                match build_stream(&device, &supported, audio_tx) {
+                    Ok((stream, format)) => {
+                        if ready_tx.send(Opening::Opened((format, name))).is_err() {
                             return; // caller gave up
                         }
                         // Keep the stream alive until asked to stop. Dropping it stops capture.
@@ -103,7 +118,7 @@ impl MicrophoneSource {
                         drop(stream);
                     }
                     Err(e) => {
-                        let _ = ready_tx.send(Err(e));
+                        let _ = ready_tx.send(Opening::Failed(e));
                     }
                 }
             })
@@ -111,9 +126,7 @@ impl MicrophoneSource {
 
         // Wait for the device to open so a permission denial or missing device surfaces
         // here rather than as silence once a meeting has started.
-        let (format, device_name) = ready_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| CaptureError::BadFormat("audio device did not open in time".into()))??;
+        let (format, device_name) = await_open(&ready_rx, FIND_TIMEOUT, OPEN_TIMEOUT)?;
 
         let per_channel =
             (format.sample_rate.hz() as u64 * config.frame_ms.max(1) as u64 / 1000) as usize;
@@ -214,11 +227,10 @@ impl Drop for MicrophoneSource {
     }
 }
 
-/// Build the input stream on the calling thread.
-fn build_stream(
+/// Find the input device to open, and the configuration it offers.
+fn find_device(
     wanted: Option<String>,
-    sender: std::sync::mpsc::Sender<Vec<f32>>,
-) -> Result<(cpal::Stream, AudioFormat, String)> {
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig, String)> {
     let host = cpal::default_host();
 
     let device = match &wanted {
@@ -237,6 +249,15 @@ fn build_stream(
         .default_input_config()
         .map_err(|e| CaptureError::BadFormat(format!("reading device config: {e}")))?;
 
+    Ok((device, supported, name))
+}
+
+/// Build and start the input stream on the calling thread.
+fn build_stream(
+    device: &cpal::Device,
+    supported: &cpal::SupportedStreamConfig,
+    sender: std::sync::mpsc::Sender<Vec<f32>>,
+) -> Result<(cpal::Stream, AudioFormat)> {
     let format = AudioFormat::new(
         SampleRate::from_hz(supported.sample_rate().0),
         supported.channels(),
@@ -303,7 +324,7 @@ fn build_stream(
         .play()
         .map_err(|e| CaptureError::BadFormat(format!("starting the stream: {e}")))?;
 
-    Ok((stream, format, name))
+    Ok((stream, format))
 }
 
 #[cfg(test)]
