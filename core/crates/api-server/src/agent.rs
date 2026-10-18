@@ -276,19 +276,67 @@ pub fn parse_action(raw: &str) -> Action {
 /// things like `I'll use the {search} tool` and *then* emit the real JSON. So every brace is a
 /// candidate, and a candidate is only accepted if it parses and actually contains the key
 /// being looked for. `{search}` fails both tests and the scan moves on.
+///
+/// A third: models put real line breaks inside string values. A `write_note` body is markdown,
+/// and `llama3.1:8b` writes it with literal newlines between the bullets — which JSON forbids, so
+/// the strict parse rejected the one action the whole run exists to reach. Observed on the last
+/// step of a real run, which then ended "Ran out of steps" with the write-up discarded. So a
+/// candidate that fails strictly is tried once more with its control characters escaped.
 fn object_with(raw: &str, key: &str) -> Option<serde_json::Value> {
     for (start, _) in raw.match_indices('{') {
         let Some(span) = balanced_span(raw, start) else {
             // Nothing from here closes, so nothing later can either.
             break;
         };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(span) {
+        let parsed = serde_json::from_str::<serde_json::Value>(span)
+            .or_else(|_| serde_json::from_str(&escape_controls_in_strings(span)));
+        if let Ok(value) = parsed {
             if value.get(key).is_some() {
                 return Some(value);
             }
         }
     }
     None
+}
+
+/// `span` with raw newlines, carriage returns and tabs *inside string literals* escaped.
+///
+/// Only inside strings: between tokens they are ordinary whitespace and must stay as they are.
+fn escape_controls_in_strings(span: &str) -> String {
+    let mut out = String::with_capacity(span.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in span.chars() {
+        if in_string {
+            match ch {
+                _ if escaped => {
+                    escaped = false;
+                    out.push(ch);
+                }
+                '\\' => {
+                    escaped = true;
+                    out.push(ch);
+                }
+                '"' => {
+                    in_string = false;
+                    out.push(ch);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        } else {
+            if ch == '"' {
+                in_string = true;
+            }
+            out.push(ch);
+        }
+    }
+
+    out
 }
 
 /// The balanced `{...}` beginning at `start`, or `None` if it never closes.
@@ -851,6 +899,30 @@ mod tests {
                 title: "The {curly} report".into(),
                 body: "a } b".into()
             }
+        );
+    }
+
+    /// The shape llama3.1:8b produced on the last step of a real run: a markdown body with real
+    /// line breaks inside the string. Strict JSON rejects it, and the run ended with no note.
+    #[test]
+    fn a_note_body_with_real_line_breaks_still_parses() {
+        let raw = "{\n  \"action\": \"write_note\",\n  \"title\": \"Deadlines\",\n  \"body\": \
+                   \"- Friday: migration plan (Sam)\n- next Wednesday:\tFAQ (Dana)\"\n}";
+        assert_eq!(
+            parse_action(raw),
+            Action::WriteNote {
+                title: "Deadlines".into(),
+                body: "- Friday: migration plan (Sam)\n- next Wednesday:\tFAQ (Dana)".into()
+            }
+        );
+    }
+
+    /// Whitespace between tokens is not inside a string and must be left alone.
+    #[test]
+    fn escaping_touches_only_the_insides_of_strings() {
+        assert_eq!(
+            escape_controls_in_strings("{\n\"a\": \"x\ny\",\t\"b\": \"q\\\"\n\"}"),
+            "{\n\"a\": \"x\\ny\",\t\"b\": \"q\\\"\\n\"}"
         );
     }
 
