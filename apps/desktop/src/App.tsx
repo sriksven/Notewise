@@ -72,7 +72,7 @@ function meetingsStillOpen(meetings: Meeting[]): string | null {
 export default function App() {
   // The address is the state. Which meeting is open and which tab is showing live in the
   // URL, so Back works, a window reload lands where it was, and a meeting can be linked to.
-  const { route, navigate } = useRoute();
+  const { route, navigate, replace } = useRoute();
   const [panelOpen, setPanelOpen] = useState(true);
   const theme = useTheme();
 
@@ -131,7 +131,15 @@ export default function App() {
   const isRecording = recordingId !== null;
   /** The meeting the record button acts on — capturing, or merely still open. */
   const activeMeetingId = recordingId ?? openMeetingId;
-  const selectedMeeting = meetings.find((m) => m.id === selectedId) ?? null;
+  /**
+   * The open meeting when the newest-fifty list does not hold it — fetched by id.
+   *
+   * Without it, a meeting opened from a person, a search hit or a citation that was older than the
+   * list showed "No meeting selected" over its own transcript, with no title, rename or delete.
+   */
+  const [unlisted, setUnlisted] = useState<Meeting | null>(null);
+  const listed = meetings.find((m) => m.id === selectedId) ?? null;
+  const selectedMeeting = listed ?? (unlisted?.id === selectedId ? unlisted : null);
   const summaryState = useSummary(selectedId);
 
   const report = useCallback((e: unknown) => {
@@ -189,6 +197,44 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
+  // Resolve a meeting the list does not hold, and leave an address that names one that is gone.
+  //
+  // `replace`, not `navigate`, which is what the router keeps it for: pressing Back after deleting
+  // a meeting landed on its page — "No meeting selected" over the trashed meeting's transcript,
+  // with live controls that edited it — and a link to a meeting that never existed showed the same
+  // controls under a "not found" banner.
+  const listedId = listed?.id ?? null;
+  useEffect(() => {
+    if (!selectedId || listedId) return;
+
+    let cancelled = false;
+    api
+      .meeting(selectedId)
+      .then((meeting) => {
+        if (cancelled) return;
+        if (meeting.deleted_at) {
+          setNotice(`“${meeting.title}” is in the trash. Restore it to open it.`);
+          replace({ name: "trash" });
+          return;
+        }
+        setUnlisted(meeting);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // 404 for an id that names nothing, 400 for one that is not an id at all.
+        if (e instanceof ApiError && (e.status === 404 || e.status === 400)) {
+          setError(null);
+          setNotice("That meeting no longer exists.");
+          replace({ name: "library" });
+        } else {
+          report(e);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, listedId, replace, report]);
+
   // Drain the notification queue for as long as the app is open. The engine has queued desktop
   // notifications since the comms layer landed and nothing has ever shown one — it cannot, having
   // no way to raise an OS notification. See `lib/notifications`.
@@ -229,7 +275,10 @@ export default function App() {
         setSegments(next);
         setSpeakers(roster.speakers);
       } catch (e) {
-        if (!cancelled) report(e);
+        // A meeting that is not there is handled by the effect that resolves it, which moves
+        // the window off the page; a banner saying so as well would outlive the page it was for.
+        const missing = e instanceof ApiError && (e.status === 404 || e.status === 400);
+        if (!cancelled && !missing) report(e);
       }
     };
 

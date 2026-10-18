@@ -878,6 +878,14 @@ export const api = {
 
   meetings: (limit = 50) => request<Meeting[]>(`/v1/meetings?limit=${limit}`),
 
+  /**
+   * One meeting by id, trashed or not — `deleted_at` says which.
+   *
+   * For a meeting the newest-fifty list does not hold: one opened from a person, a search hit or
+   * a citation, or an address that names a meeting since deleted.
+   */
+  meeting: (id: string) => request<Meeting>(`/v1/meetings/${id}`),
+
   createMeeting: (title: string, source = "combined") =>
     request<Meeting>("/v1/meetings", {
       method: "POST",
