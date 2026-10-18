@@ -205,8 +205,10 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
                     disabled={promoting === item.id}
                     title="Track this as a ticket. The action item stays — it is the record that this meeting produced the work."
                     aria-label={`Make a ticket from: ${item.text}`}
+                    // Shown on keyboard focus as well as hover, like the delete beside it — a control
+                    // Tab can land on and nobody can see is a trap.
                     className="mt-[1px] shrink-0 text-ink-faint opacity-0 transition
-                               hover:text-ink group-hover:opacity-100
+                               hover:text-ink group-hover:opacity-100 focus-visible:opacity-100
                                disabled:opacity-50"
                   >
                     <TicketCheck size={13} aria-hidden />
