@@ -43,7 +43,7 @@ function capabilities(health: Health | null): Array<{
     done: true,
     note: "writes a note; changes nothing else",
   },
-  { label: "Recoverable delete", done: true, note: "notes only" },
+  { label: "Recoverable delete", done: true, note: "notes and meetings, through the trash" },
   {
     label: "System audio capture",
     done: false,
@@ -136,10 +136,9 @@ export function AboutView({ health }: Props) {
               and a button that always reports "up to date" is worse than the sentence that
               says why there is nothing to check. */}
           <p className="text-[12px] leading-relaxed text-ink-muted">
-            There is no release channel yet, so nothing checks for updates and nothing installs
-            them. This build was compiled from source on this machine; pulling and rebuilding is
-            the upgrade path. The database migrates itself forward and refuses to open a file
-            written by a newer build than the one running.
+            Nothing checks for updates and nothing installs them. Upgrading means downloading a
+            newer release, or pulling and rebuilding from source. The database migrates itself
+            forward and refuses to open a file written by a newer build than the one running.
           </p>
         </section>
 

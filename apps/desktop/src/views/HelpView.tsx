@@ -154,8 +154,9 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
           active.
         </p>
         <p>
-          API keys are kept in the OS keychain. No endpoint returns one, and no key is ever sent
-          over HTTP — the engine reads them from its own environment.
+          API keys are kept in the OS keychain, and no endpoint returns one. A key pasted in
+          Settings goes once, over loopback, to the engine on this machine; a key in the engine's
+          environment is read from there and never sent anywhere but its provider.
         </p>
       </Topic>
 
@@ -181,14 +182,14 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
       <Topic title="Deleting things">
         <p>
-          Deleting a note moves it to the{" "}
+          Deleting a note or a meeting moves it to the{" "}
           <Link onClick={() => onNavigate({ name: "trash" })}>Trash</Link>, where it stays until
           you empty it. Nothing expires on a timer.
         </p>
         <p>
-          Meetings cannot be deleted from this window. That is deliberate for now — a meeting
-          owns its transcript and everything derived from it, and a one-click delete of all of
-          that has no undo.
+          A meeting takes its transcript, summaries, decisions and action items with it, and
+          restoring it brings all of them back. Deleting it for good from the Trash is the one
+          step with no undo.
         </p>
       </Topic>
     </>
