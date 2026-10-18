@@ -59,6 +59,36 @@ fn latest_question(messages: &[Turn]) -> Option<&str> {
         .map(|m| m.content.as_str())
 }
 
+/// What retrieval searches for: the latest question, or — when it only makes sense through the
+/// one before it — both.
+///
+/// Searching on the latest question alone is right when it changes the subject ("and what about
+/// headcount?"), and is why earlier turns are not pooled. It fails a follow-up that points back:
+/// "Who owns that?" has one search term, "owns", which matches nothing, so after "What did we
+/// decide about the search cluster?" the answer was "Nothing in this workspace matches that
+/// question" — measured on `llama3.1:8b`, against a meeting that said who owns it. A short
+/// question that refers back with a pronoun is searched together with the question it refers to.
+fn retrieval_query(messages: &[Turn]) -> Option<String> {
+    let mut asked = messages.iter().rev().filter(|m| m.role != "assistant");
+    let latest = asked.next()?.content.as_str();
+
+    let refers_back = retrieval::terms(latest).len() <= 2
+        && latest
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| REFERRING_WORDS.contains(&word.to_lowercase().as_str()));
+
+    Some(match asked.next() {
+        Some(previous) if refers_back => format!("{} {latest}", previous.content),
+        _ => latest.to_string(),
+    })
+}
+
+/// Words that point at something said earlier rather than naming it.
+const REFERRING_WORDS: &[&str] = &[
+    "it", "its", "that", "this", "those", "these", "they", "them", "their", "he", "him", "his",
+    "she", "her", "there",
+];
+
 fn to_router_messages(messages: Vec<Turn>) -> Vec<ChatMessage> {
     messages
         .into_iter()
@@ -94,9 +124,8 @@ async fn chat_about_note(
         return Err(ApiError::BadRequest("messages must not be empty".into()));
     }
 
-    let question = latest_question(&body.messages)
-        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
-        .to_string();
+    let question = retrieval_query(&body.messages)
+        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?;
 
     let wide = body.scope.as_deref() == Some("workspace");
 
@@ -159,9 +188,8 @@ async fn ask_workspace(
         return Err(ApiError::BadRequest("messages must not be empty".into()));
     }
 
-    let question = latest_question(&body.messages)
-        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?
-        .to_string();
+    let question = retrieval_query(&body.messages)
+        .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?;
 
     let retrieved = retrieval::gather_hybrid(&state, &question).await?;
     let considered = retrieved.len();
@@ -665,6 +693,75 @@ mod tests {
             citations[0]["n"], 2,
             "numbered as in the text: {citations:?}"
         );
+    }
+
+    /// "Who owns that?" searches for "owns" alone, which matches nothing; measured, it was
+    /// answered "Nothing in this workspace matches" right after a question it follows on from.
+    #[tokio::test]
+    async fn a_follow_up_that_points_back_is_searched_with_what_it_points_at() {
+        let (app, state) = app();
+        seed_meeting(
+            &state,
+            "Infrastructure sync",
+            "We decided to move the search cluster to OpenSearch, and Raj will own that migration.",
+        )
+        .await;
+        seed_meeting(&state, "Hiring", "we approved two backend headcount").await;
+
+        let (status, body) = post_json(
+            &app,
+            "/v1/ask",
+            serde_json::json!({"messages": [
+                {"role": "user", "content": "What did we decide about the search cluster?"},
+                {"role": "assistant", "content": "To move it to OpenSearch [1]."},
+                {"role": "user", "content": "Who owns that?"}
+            ]}),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["grounded"], true, "{body}");
+        let citations = body["citations"].as_array().expect("citations");
+        assert!(
+            citations
+                .iter()
+                .any(|c| c["title"] == "Infrastructure sync"),
+            "{citations:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_short_question_that_refers_back_takes_the_previous_one_along() {
+        let turn = |role: &str, content: &str| Turn {
+            role: role.into(),
+            content: content.into(),
+        };
+        let thread = |last: &str| {
+            vec![
+                turn("user", "What did we decide about pricing?"),
+                turn("assistant", "Three tiers."),
+                turn("user", last),
+            ]
+        };
+
+        assert_eq!(
+            retrieval_query(&thread("And who owns it?")).as_deref(),
+            Some("What did we decide about pricing? And who owns it?")
+        );
+        // A change of subject stands alone, which is why earlier turns are not pooled.
+        assert_eq!(
+            retrieval_query(&thread("and what about headcount?")).as_deref(),
+            Some("and what about headcount?")
+        );
+        // A full question that happens to contain "it" stands alone too.
+        assert_eq!(
+            retrieval_query(&thread(
+                "Did the hiring plan for it include two backend engineers?"
+            ))
+            .as_deref(),
+            Some("Did the hiring plan for it include two backend engineers?")
+        );
+        assert!(retrieval_query(&[turn("assistant", "hello")]).is_none());
     }
 
     /// Retrieval must follow the conversation. A follow-up question should find material for
