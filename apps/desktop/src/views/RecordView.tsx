@@ -221,7 +221,13 @@ export function RecordView({
               {health?.ai_model ?? "—"}
             </p>
 
-            <button type="button" onClick={onImport} className="btn-quiet w-full">
+            <button
+              type="button"
+              onClick={onImport}
+              // The warning at the top of this page already says why: no capture, no transcription.
+              disabled={!canRecord}
+              className="btn-quiet w-full"
+            >
               <Upload size={14} aria-hidden />
               Import an audio file instead
             </button>

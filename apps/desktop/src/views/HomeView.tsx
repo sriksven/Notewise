@@ -137,7 +137,10 @@ export function HomeView({
           <button
             type="button"
             onClick={onImport}
-            disabled={isRecording}
+            // Importing transcribes, which needs the same build features as recording — the
+            // engine answers 501 otherwise, after the user has picked a file. The dock's menu
+            // already gates on this; home and the library did not.
+            disabled={isRecording || !canRecord}
             className="card flex items-center gap-3 px-4 py-4 text-left transition
                        hover:bg-overlay disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -147,7 +150,9 @@ export function HomeView({
             <span className="min-w-0">
               <span className="block text-[13.5px] font-medium text-ink">Import audio</span>
               <span className="block truncate text-[12px] text-ink-muted">
-                Transcribe a recording you already have
+                {canRecord
+                  ? "Transcribe a recording you already have"
+                  : "Needs a build that can transcribe"}
               </span>
             </span>
           </button>
