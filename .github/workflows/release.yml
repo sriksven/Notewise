@@ -379,7 +379,14 @@ jobs:
           # The tag build could not have got this far without the pin, so it is never empty here.
           sed -i "s/@CERTIFICATE_SHA1@/$(tr 'A-F' 'a-f' <<< "$MACOS_CERTIFICATE_SHA1")/" notes.md
 
+          # A tag with a hyphen — v0.1.0-rc.1 — is a release candidate. It is published as a
+          # pre-release, so it is downloadable the way any release is but never what the Releases
+          # page calls Latest, and the final tag takes that place when it comes.
+          prerelease=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
+
           gh release create "${GITHUB_REF_NAME}" \
             --title "Notewise ${GITHUB_REF_NAME}" \
             --notes-file notes.md \
+            "${prerelease[@]}" \
             artifacts/*
