@@ -2303,6 +2303,14 @@ async fn create_note(
     Json(body): Json<CreateNote>,
 ) -> ApiResult<Json<Note>> {
     let db = state.db().await;
+
+    // Checked before anything is written. The edge table has no foreign keys, so an unknown id
+    // was stored as a link to nothing — and that meeting id then listed the note as one of its
+    // own, while the caller was told the note had been filed against a meeting.
+    if let Some(meeting_id) = body.references_meeting {
+        MeetingRepository::new(&db).get(meeting_id)?;
+    }
+
     let note = NoteRepository::new(&db).create(NewNote {
         project_id: body.project_id,
         title: body.title,
@@ -3587,6 +3595,29 @@ mod tests {
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}: {json}");
             assert_eq!(json["code"], "invalid_reference", "{uri}: {json}");
         }
+    }
+
+    /// A note filed against a meeting that does not exist was created anyway, with its link stored
+    /// pointing nowhere — and `GET /v1/meetings/<that id>/notes` then listed it.
+    #[tokio::test]
+    async fn a_note_referencing_an_unknown_meeting_is_a_404_and_not_created() {
+        let app = app();
+        let unknown = Id::new();
+
+        let (status, json) = call(
+            &app,
+            post(
+                "/v1/notes",
+                serde_json::json!({"title": "orphan", "references_meeting": unknown}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+
+        let (_, notes) = call(&app, get("/v1/notes")).await;
+        assert!(notes.as_array().unwrap().is_empty(), "{notes}");
+        let (_, linked) = call(&app, get(&format!("/v1/meetings/{unknown}/notes"))).await;
+        assert!(linked.as_array().unwrap().is_empty(), "{linked}");
     }
 
     /// A board with a Done column must get its done tickets back after a reload. The bare call

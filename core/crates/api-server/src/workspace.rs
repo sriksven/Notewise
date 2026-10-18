@@ -406,6 +406,13 @@ async fn create_ticket(
     let meeting_id = req.meeting_id.as_deref().map(parse_id).transpose()?;
 
     let db = state.db().await;
+
+    // Before the ticket is written: an unknown meeting id was stored as an edge to nothing, so the
+    // ticket was filed and its link silently pointed nowhere.
+    if let Some(meeting_id) = meeting_id {
+        MeetingRepository::new(&db).get(meeting_id)?;
+    }
+
     let ticket = TicketRepository::new(&db).create(NewTicket {
         project_id,
         title: req.title,
@@ -533,6 +540,9 @@ async fn create_action_item(
     }
 
     let db = state.db().await;
+    // A 404 naming the meeting, as every other route under `/v1/meetings/:id` gives, rather than
+    // the foreign-key failure the insert would otherwise report.
+    MeetingRepository::new(&db).get(meeting_id)?;
     let item = SummaryRepository::new(&db).add_action_item(NewActionItem {
         owner: req.owner,
         due_at: req.due_at,
@@ -667,6 +677,7 @@ async fn create_decision(
     }
 
     let db = state.db().await;
+    MeetingRepository::new(&db).get(meeting_id)?;
     let decision = SummaryRepository::new(&db).add_decision(NewDecision {
         meeting_id,
         summary_id: None,
@@ -803,6 +814,10 @@ async fn add_participant(
     let meeting_id = parse_id(&id)?;
     let db = state.db().await;
     let people = PersonRepository::new(&db);
+
+    // First, so an unknown meeting does not find-or-create a person for nothing on the way to
+    // failing.
+    MeetingRepository::new(&db).get(meeting_id)?;
 
     let person = match (req.person_id.as_deref(), req.display_name.as_deref()) {
         (Some(raw), _) => people.get(parse_id(raw)?)?,
@@ -1996,6 +2011,41 @@ mod tests {
             0,
             "every edge had an end that was deleted"
         );
+    }
+
+    /// Writes addressed to a meeting that does not exist are a 404, and leave nothing behind. They
+    /// were a 500 (the foreign key), or for a ticket a 200 with its link stored pointing nowhere.
+    #[tokio::test]
+    async fn writes_against_an_unknown_meeting_are_404_and_write_nothing() {
+        let (app, state) = app();
+        let unknown = Id::new();
+
+        for (uri, body) in [
+            (
+                format!("/v1/meetings/{unknown}/action-items"),
+                serde_json::json!({"text": "x"}),
+            ),
+            (
+                format!("/v1/meetings/{unknown}/decisions"),
+                serde_json::json!({"text": "x"}),
+            ),
+            (
+                format!("/v1/meetings/{unknown}/participants"),
+                serde_json::json!({"display_name": "Nobody"}),
+            ),
+            (
+                "/v1/tickets".to_string(),
+                serde_json::json!({"title": "x", "meeting_id": unknown.to_string()}),
+            ),
+        ] {
+            let (status, body) = call(&app, json_request("POST", &uri, body)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}: {body}");
+        }
+
+        let db = state.db().await;
+        assert!(PersonRepository::new(&db).list().unwrap().is_empty());
+        assert!(TicketRepository::new(&db).list_all().unwrap().is_empty());
+        assert_eq!(Graph::new(&db).edge_count().unwrap(), 0);
     }
 
     /// A purged meeting's action items go by cascade; the `became_ticket` edge of one that was
