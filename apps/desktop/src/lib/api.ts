@@ -189,6 +189,16 @@ export interface Summary {
   action_items: ActionItem[];
 }
 
+/** What a summary run reports: the stored row's id and text, and how much it extracted. */
+export interface SummarizeResult {
+  summary_id: string;
+  text: string;
+  model: string;
+  /** Counts, not the rows — read those from the meeting. */
+  decisions: number;
+  action_items: number;
+}
+
 export interface DeviceInfo {
   name: string;
   is_default: boolean;
@@ -1035,23 +1045,19 @@ export const api = {
     }),
 
   summarize: (id: string) =>
-    request<{
-      summary_id: string;
-      text: string;
-      model: string;
-      decisions: number;
-      action_items: number;
-    }>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
+    request<SummarizeResult>(`/v1/meetings/${id}/summarize`, { method: "POST" }),
 
-  /** Summarize using a template's prompt instead of the backend's default instruction. */
+  /**
+   * Summarize using a template's prompt instead of the backend's default instruction.
+   *
+   * Same route, same answer as {@link summarize}. It was typed as `{ summary, decisions[],
+   * action_items[] }`, which the engine has never sent — harmless only because no caller read it.
+   */
   summarizeWithTemplate: (id: string, templateId: string) =>
-    request<{
-      summary: Summary;
-      decisions: unknown[];
-      action_items: unknown[];
-    }>(`/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`, {
-      method: "POST",
-    }),
+    request<SummarizeResult>(
+      `/v1/meetings/${id}/summarize?template=${encodeURIComponent(templateId)}`,
+      { method: "POST" },
+    ),
 
   related: (id: string, depth = 2) =>
     request<RelatedNode[]>(`/v1/meetings/${id}/related?depth=${depth}`),
