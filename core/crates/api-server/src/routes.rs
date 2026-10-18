@@ -1597,13 +1597,27 @@ struct QuestionsBody {
     /// Meeting position to treat as "now", in milliseconds. Defaults to the last segment.
     #[serde(default)]
     now_ms: Option<i64>,
+    /// What this client has already been shown, exactly as the previous response returned it.
+    #[serde(default)]
+    asked: Vec<String>,
+    /// When this client's last suggestion was made, exactly as the previous response returned it.
+    #[serde(default)]
+    last_suggestion_ms: Option<i64>,
 }
 
 /// Suggest questions worth asking about a live meeting.
 ///
 /// Stateless per request: the caller owns the cooldown and dedupe state, because a desktop
-/// app and a browser tab watching the same meeting should not silence each other. The
-/// windowing and gating logic is reused from `ClarifierSession` so both agree on policy.
+/// app and a browser tab watching the same meeting should not silence each other. It owns it
+/// by carrying it — `asked` and `last_suggestion_ms` come back in every response and go out
+/// in the next request — and the policy itself is `ClarifierSession`'s, applied here.
+///
+/// The state used to be accepted nowhere, so every request built an empty session: no
+/// cooldown, and no memory of what had been asked. The desktop app, which polls every thirty
+/// seconds and expected the engine to gate, got a model call and a new rewording of the same
+/// question on every poll. A client that sends nothing still gets that behaviour; one that
+/// carries the state gets the ninety-second spacing and never sees a statement asked about
+/// twice.
 async fn clarifying_questions(
     State(state): State<Shared>,
     Path(id): Path<String>,
@@ -1632,22 +1646,39 @@ async fn clarifying_questions(
     }; // lock released before the model call
 
     let now_ms = body.now_ms.unwrap_or(latest_ms);
-    let session = ClarifierSession::new(ClarifierConfig::default());
+    let mut session = ClarifierSession::resume(
+        ClarifierConfig::default(),
+        body.asked,
+        body.last_suggestion_ms,
+    );
 
     // Checked before spending a model call, not after.
     if !session.should_suggest(&utterances, now_ms) {
-        return Ok(Json(serde_json::json!({
+        let mut declined = serde_json::json!({
             "questions": [],
-            "reason": "not enough recent transcript to ask about",
-        })));
+            "asked": session.asked(),
+            "last_suggestion_ms": session.last_suggestion_ms(),
+        });
+        // No `reason` for the cooldown: a client shows `reason` in place of its "listening"
+        // line, and swapping that sentence on every other poll is exactly the restlessness the
+        // cooldown exists to prevent. It is still reported, for anyone diagnosing a quiet panel.
+        if session.cooling_down(now_ms) {
+            declined["cooling_down"] = true.into();
+        } else {
+            declined["reason"] = "not enough recent transcript to ask about".into();
+        }
+        return Ok(Json(declined));
     }
 
-    let window = session.window_text(&utterances, now_ms);
-    let questions = suggest_questions(&*state.ai(), &window, now_ms).await?;
+    let window = session.window(&utterances, now_ms);
+    let suggested = suggest_questions(&*state.ai(), window).await?;
+    let questions = session.accept(suggested, now_ms);
 
     Ok(Json(serde_json::json!({
         "questions": questions,
         "window_ms": session.config().window_ms,
+        "asked": session.asked(),
+        "last_suggestion_ms": session.last_suggestion_ms(),
     })))
 }
 
@@ -3176,6 +3207,80 @@ mod tests {
             json.get("reason").is_none(),
             "should not have been declined: {json}"
         );
+    }
+
+    /// The cooldown only exists if the client's state survives between requests.
+    ///
+    /// Every request used to build a fresh session, so the desktop app — polling every thirty
+    /// seconds and trusting the engine to gate — made a model call on every poll. The state now
+    /// comes back in each response and goes out with the next request, and while it is inside
+    /// the cooldown no model is asked.
+    #[tokio::test]
+    async fn the_cooldown_holds_when_the_client_carries_its_session() {
+        let app = app();
+        let id = create_test_meeting(&app).await;
+        call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/transcript"),
+                serde_json::json!([{
+                    "text": "Someone needs to pull the usage report from the admin console and \
+                             send it to their account manager before the contract renews at \
+                             the end of November, or we lose the leverage we have on the seat \
+                             count this year.",
+                    "start_ms": 0, "end_ms": 20000, "speaker": "Marcus"
+                }]),
+            ),
+        )
+        .await;
+
+        let (_, first) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert!(first.get("reason").is_none(), "should have run: {first}");
+        assert_eq!(first["last_suggestion_ms"], 20000, "{first}");
+        assert!(first["asked"].is_array(), "{first}");
+
+        // Thirty seconds later, carrying the session back as the app does.
+        let (status, second) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({
+                    "now_ms": 50000,
+                    "asked": first["asked"],
+                    "last_suggestion_ms": first["last_suggestion_ms"],
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(second["cooling_down"], true, "{second}");
+        assert!(second["questions"].as_array().unwrap().is_empty());
+        // Quiet, not refused: a client shows `reason` in place of its "listening" line.
+        assert!(second.get("reason").is_none(), "{second}");
+        assert_eq!(second["last_suggestion_ms"], 20000, "the state round-trips");
+
+        // Past the cooldown, it runs again.
+        let (_, third) = call(
+            &app,
+            post(
+                &format!("/v1/meetings/{id}/questions"),
+                serde_json::json!({
+                    "now_ms": 115000,
+                    "asked": second["asked"],
+                    "last_suggestion_ms": second["last_suggestion_ms"],
+                }),
+            ),
+        )
+        .await;
+        assert!(third.get("cooling_down").is_none(), "{third}");
+        assert_eq!(third["last_suggestion_ms"], 115000, "{third}");
     }
 
     #[tokio::test]
