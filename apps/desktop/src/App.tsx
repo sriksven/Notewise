@@ -34,6 +34,7 @@ import {
   api,
   ApiError,
   type ClarifyingQuestion,
+  type QuestionSession,
   type Health,
   type Meeting,
   type Segment,
@@ -85,6 +86,14 @@ export default function App() {
   /** The distinct voices in the open meeting, so they can be named. */
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
+  /**
+   * What the engine needs back with the next question poll for the same meeting.
+   *
+   * The endpoint is stateless, so its cooldown and its "already asked about this" memory live
+   * here. Not sending it back makes every poll a first look, which is how the panel used to fill
+   * with near-duplicates. A ref rather than state: it changes on every poll and draws nothing.
+   */
+  const questionSession = useRef<QuestionSession | undefined>(undefined);
   /**
    * Why the engine had nothing to suggest, in its own words.
    *
@@ -319,17 +328,25 @@ export default function App() {
 
   // Ask for clarifying questions while recording.
   //
-  // Polled rather than pushed, and the engine gates on its own cooldown, so an over-eager
-  // interval here cannot become an over-eager panel. Failures are swallowed: a suggestion
-  // that did not arrive is not worth an error banner during someone's meeting.
+  // Polled rather than pushed, and the engine gates on its own cooldown — given back the session
+  // it returned last time — so an over-eager interval here cannot become an over-eager panel.
+  // Failures are swallowed: a suggestion that did not arrive is not worth an error banner during
+  // someone's meeting.
   useEffect(() => {
     if (!recordingId) return;
 
+    // A new meeting starts with no history; the last one's would suppress its first questions.
+    questionSession.current = undefined;
     let cancelled = false;
     const ask = async () => {
       try {
-        const result = await api.questions(recordingId);
+        const result = await api.questions(recordingId, questionSession.current);
         if (cancelled) return;
+        // Defaults keep an engine from before the session existed working as it did.
+        questionSession.current = {
+          asked: result.asked ?? [],
+          last_suggestion_ms: result.last_suggestion_ms ?? null,
+        };
         setQuestionsReason(result.reason ?? null);
         if (result.questions.length === 0) return;
 
