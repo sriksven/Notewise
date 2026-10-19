@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Notewise — meeting intelligence that never leaves your machine</title>
+    <title>Notewise: meeting intelligence that never leaves your machine</title>
     <meta
       name="description"
       content="Record, transcribe and understand your meetings entirely on your own hardware. Open source, local-first, no account required. Download for Mac."
@@ -20,7 +20,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>◐</text></svg>" />
 
     <!-- Before first paint, so the animated starting states never flash as finished ones. Without
-         this class — reduced motion, or no script at all — every scene is simply laid out flat. -->
+         this class (reduced motion, or no script at all) every scene is simply laid out flat. -->
     <script>
       if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
         document.documentElement.classList.add("motion");
@@ -71,11 +71,12 @@
     <main>
       <!-- ═════════════════════════════════════════════  hero
            Pinned for two screens. The copy lifts away and the app window tilts up from the floor
-           into place — main.ts scrubs both against scroll. -->
+           into place. main.ts scrubs both against scroll. -->
       <section id="top" class="scene scene--hero" data-scene="hero">
         <div class="scene-sticky hero-stage">
           <div class="hero-bg" aria-hidden="true">
             <div class="hero-floor"></div>
+            <canvas class="hero-particles" data-particles></canvas>
             <div class="orb orb--a" data-parallax="0.25"></div>
             <div class="orb orb--b" data-parallax="0.4"></div>
           </div>
@@ -89,7 +90,7 @@
             </h1>
 
             <p class="fade-in mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-ink-muted" style="--fade-delay: 520ms">
-              Record a meeting and get a transcript, a summary, the decisions and who owes what —
+              Record a meeting and get a transcript, a summary, the decisions and who owes what,
               computed on your own hardware. No account, no upload, no subscription.
             </p>
 
@@ -114,7 +115,7 @@
                 <span class="h-2.5 w-2.5 rounded-full bg-[#28c840]"></span>
                 <span class="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
                   <span class="h-1.5 w-1.5 rounded-full bg-record animate-pulse-ring"></span>
-                  recording · 12:04
+                  recording · <span data-live-timer>12:04</span>
                 </span>
               </div>
 
@@ -125,12 +126,12 @@
                   <ul class="mt-2 space-y-1 text-[12.5px]">
                     <li class="rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-ink">Pricing review</li>
                     <li class="px-2.5 py-1.5 text-ink-muted">Design sync</li>
-                    <li class="px-2.5 py-1.5 text-ink-muted">1:1 — Sam</li>
+                    <li class="px-2.5 py-1.5 text-ink-muted">1:1 with Sam</li>
                   </ul>
                   <p class="mt-5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-ink-faint">This week</p>
                   <ul class="mt-2 space-y-1 text-[12.5px] text-ink-muted">
                     <li class="px-2.5 py-1.5">Weekly planning</li>
-                    <li class="px-2.5 py-1.5">Customer call — Acme</li>
+                    <li class="px-2.5 py-1.5">Customer call: Acme</li>
                   </ul>
                 </aside>
 
@@ -141,18 +142,18 @@
                   </div>
                   <div class="mini-wave mt-4" aria-hidden="true"></div>
                   <div class="mt-5 space-y-3.5 font-mono text-[12px] leading-relaxed sm:text-[12.5px]">
-                    <p><span class="text-accent">Dana</span> <span class="text-ink-faint">00:12</span><br />We settled on three pricing tiers.</p>
-                    <p><span class="text-record/90">Alex</span> <span class="text-ink-faint">00:19</span><br />Enterprise stays on a custom quote.</p>
-                    <p><span class="text-accent">Dana</span> <span class="text-ink-faint">00:27</span><br />Sam owns the page rewrite, due Friday.</p>
+                    <p data-live-line><span class="text-accent">Dana</span> <span class="text-ink-faint">00:12</span><br /><span data-live-text>We settled on three pricing tiers.</span></p>
+                    <p data-live-line><span class="text-record/90">Alex</span> <span class="text-ink-faint">00:19</span><br /><span data-live-text>Enterprise stays on a custom quote.</span></p>
+                    <p data-live-line><span class="text-accent">Dana</span> <span class="text-ink-faint">00:27</span><br /><span data-live-text>Sam owns the page rewrite, due Friday.</span></p>
                   </div>
                 </div>
 
                 <div class="hidden border-l border-hairline bg-raised p-5 lg:block">
                   <p class="eyebrow mb-3">Extracted</p>
                   <ul class="space-y-3 text-[12.5px]">
-                    <li class="flex gap-2"><span class="text-accent">✓</span> Decision — three pricing tiers</li>
-                    <li class="flex gap-2"><span class="text-accent">✓</span> Action — Sam: page rewrite, Friday</li>
-                    <li class="flex gap-2"><span class="text-ink-faint">?</span> Worth asking — what is the enterprise floor?</li>
+                    <li class="flex gap-2" data-live-item><span class="text-accent">✓</span> Decision: three pricing tiers</li>
+                    <li class="flex gap-2" data-live-item><span class="text-accent">✓</span> Action: Sam rewrites the page by Friday</li>
+                    <li class="flex gap-2" data-live-item><span class="text-ink-faint">?</span> Worth asking: what is the enterprise floor?</li>
                   </ul>
                 </div>
               </div>
@@ -165,15 +166,14 @@
         </div>
       </section>
 
-      <!-- ═════════════════════════════════════════════  manifesto
-           Each word lights as it is scrolled past. -->
-      <section id="manifesto" class="scene scene--words" data-scene="words">
-        <div class="scene-sticky flex items-center">
+      <!-- ═════════════════════════════════════════════  manifesto -->
+      <section id="manifesto" class="py-28 sm:py-36">
+        <div>
           <div class="container-page">
-            <p class="eyebrow">Why it exists</p>
-            <p class="scrub-text mt-6" data-words>
+            <p class="eyebrow" data-scramble>Why it exists</p>
+            <p class="manifesto-text mt-6">
               Most meeting tools record you, summarise you, and <em>upload you.</em> Notewise does
-              the whole thing on <em>your own hardware</em> — and nothing leaves your machine
+              the whole thing on <em>your own hardware</em>, and nothing leaves your machine
               <em>unless you send it.</em>
             </p>
           </div>
@@ -187,7 +187,7 @@
         <div class="scene-sticky">
           <div class="container-page grid h-full content-center items-center gap-8 pt-16 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16">
             <div>
-              <p class="eyebrow pipe-eyebrow">How it works</p>
+              <p class="eyebrow pipe-eyebrow" data-scramble>How it works</p>
               <h2 class="mt-3 text-[clamp(1.9rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
                 Audio in.<br class="hidden lg:block" /> Understanding out.
               </h2>
@@ -204,7 +204,7 @@
                 </li>
                 <li class="step" data-step="2">
                   <p class="step-title"><span class="font-mono text-[12px] text-accent">03</span> Understand</p>
-                  <div class="step-body"><p>A model you choose — Ollama on your machine, or your own key — pulls out decisions and commitments, each linked to the moment it was said.</p></div>
+                  <div class="step-body"><p>A model you choose (Ollama on your machine, or your own key) pulls out decisions and commitments, each linked to the moment it was said.</p></div>
                 </li>
                 <li class="step" data-step="3">
                   <p class="step-title"><span class="font-mono text-[12px] text-accent">04</span> Ask</p>
@@ -214,7 +214,7 @@
             </div>
 
             <div class="stage card">
-              <!-- 01 — sound -->
+              <!-- 01: sound -->
               <div class="stage-layer" data-layer="0">
                 <div class="flex h-full flex-col items-center justify-center gap-6">
                   <span class="mic">
@@ -225,7 +225,7 @@
                 </div>
               </div>
 
-              <!-- 02 — words -->
+              <!-- 02: words -->
               <div class="stage-layer" data-layer="1">
                 <div class="flex h-full flex-col justify-center gap-4 p-5 font-mono text-[11px] leading-relaxed sm:p-9 sm:text-[13.5px]">
                   <p class="item text-ink-faint" style="--d: 0">whisper · large-v3-turbo · on-device</p>
@@ -236,7 +236,7 @@
                 </div>
               </div>
 
-              <!-- 03 — meaning -->
+              <!-- 03: meaning -->
               <div class="stage-layer" data-layer="2">
                 <div class="flex h-full flex-col justify-center gap-3 p-6 sm:p-9">
                   <div class="item chip-card" style="--d: 0">
@@ -245,7 +245,7 @@
                   </div>
                   <div class="item chip-card" style="--d: 0.18">
                     <p class="eyebrow">Action item</p>
-                    <p class="mt-1.5 flex items-center gap-2 text-[14.5px]"><span class="tick"></span>Sam — rewrite the pricing page · <span class="text-ink-muted">Friday</span></p>
+                    <p class="mt-1.5 flex items-center gap-2 text-[14.5px]"><span class="tick"></span>Sam: rewrite the pricing page · <span class="text-ink-muted">Friday</span></p>
                   </div>
                   <div class="item chip-card chip-card--ask" style="--d: 0.36">
                     <p class="eyebrow !text-record">Worth asking now</p>
@@ -254,18 +254,18 @@
                 </div>
               </div>
 
-              <!-- 04 — answers -->
+              <!-- 04: answers -->
               <div class="stage-layer" data-layer="3">
                 <div class="flex h-full flex-col justify-center gap-4 p-6 sm:p-9">
                   <div class="item ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-[14px] text-bg" style="--d: 0">
                     What did we decide about pricing?
                   </div>
                   <div class="item w-fit max-w-[90%] rounded-2xl rounded-bl-md border border-hairline bg-raised px-4 py-2.5 text-[14px] leading-relaxed" style="--d: 0.25">
-                    Three tiers — starter, team and enterprise, with enterprise on a custom quote.
+                    Three tiers: starter, team and enterprise, with enterprise on a custom quote.
                     <span class="font-mono text-accent">[1]</span>
                   </div>
                   <p class="item font-mono text-[11.5px] text-ink-faint" style="--d: 0.45">
-                    [1] meeting — Pricing review · 00:12
+                    [1] meeting: Pricing review · 00:12
                   </p>
                 </div>
               </div>
@@ -280,7 +280,7 @@
         <div class="scene-sticky">
           <div class="container-page grid h-full content-center items-center gap-6 pt-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-14">
             <div>
-              <p class="eyebrow">One graph</p>
+              <p class="eyebrow" data-scramble>One graph</p>
               <h2 class="mt-3 text-[clamp(1.9rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
                 A meeting is where the work <span class="text-accent-soft">starts</span>.
               </h2>
@@ -299,12 +299,20 @@
               </defs>
               <circle cx="300" cy="230" r="120" fill="url(#node-glow)" class="graph-halo" />
               <g class="edges" fill="none" stroke-linecap="round">
-                <path data-edge="0" pathLength="1" d="M300 230 C 230 170, 170 120, 110 95" />
-                <path data-edge="1" pathLength="1" d="M300 230 C 370 170, 430 120, 490 95" />
-                <path data-edge="2" pathLength="1" d="M300 230 C 390 250, 460 280, 515 330" />
-                <path data-edge="3" pathLength="1" d="M300 230 C 300 300, 300 360, 300 405" />
-                <path data-edge="4" pathLength="1" d="M300 230 C 220 260, 150 290, 85 325" />
+                <path id="edge-0" data-edge="0" pathLength="1" d="M300 230 C 230 170, 170 120, 110 95" />
+                <path id="edge-1" data-edge="1" pathLength="1" d="M300 230 C 370 170, 430 120, 490 95" />
+                <path id="edge-2" data-edge="2" pathLength="1" d="M300 230 C 390 250, 460 280, 515 330" />
+                <path id="edge-3" data-edge="3" pathLength="1" d="M300 230 C 300 300, 300 360, 300 405" />
+                <path id="edge-4" data-edge="4" pathLength="1" d="M300 230 C 220 260, 150 290, 85 325" />
                 <path data-edge="5" pathLength="1" class="edge-2nd" d="M490 95 C 530 180, 535 250, 515 330" />
+              </g>
+              <!-- Data flowing out from the meeting, once its edges are drawn. -->
+              <g class="pulses">
+                <circle data-pulse="0" r="3.5"><animateMotion dur="2.8s" begin="0.00s" repeatCount="indefinite"><mpath xlink:href="#edge-0" /></animateMotion></circle>
+                <circle data-pulse="1" r="3.5"><animateMotion dur="2.8s" begin="0.45s" repeatCount="indefinite"><mpath xlink:href="#edge-1" /></animateMotion></circle>
+                <circle data-pulse="2" r="3.5"><animateMotion dur="2.8s" begin="0.90s" repeatCount="indefinite"><mpath xlink:href="#edge-2" /></animateMotion></circle>
+                <circle data-pulse="3" r="3.5"><animateMotion dur="2.8s" begin="1.35s" repeatCount="indefinite"><mpath xlink:href="#edge-3" /></animateMotion></circle>
+                <circle data-pulse="4" r="3.5"><animateMotion dur="2.8s" begin="1.80s" repeatCount="indefinite"><mpath xlink:href="#edge-4" /></animateMotion></circle>
               </g>
               <g class="nodes" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="14" text-anchor="middle">
                 <g data-node="0" class="node"><rect x="50" y="76" width="120" height="38" rx="19" /><text x="110" y="100">Note</text></g>
@@ -319,21 +327,19 @@
         </div>
       </section>
 
-      <!-- ═════════════════════════════════════════════  features
-           Vertical scroll drives a horizontal track. -->
-      <section id="features" class="scene scene--rail" data-scene="rail">
-        <div class="scene-sticky flex flex-col justify-center pt-16">
+      <!-- ═════════════════════════════════════════════  features -->
+      <section id="features" class="py-24">
+        <div>
           <div class="container-page flex items-end justify-between gap-6">
             <div>
-              <p class="eyebrow">Everything in the box</p>
+              <p class="eyebrow" data-scramble>Everything in the box</p>
               <h2 class="mt-3 text-[clamp(1.9rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.025em]">
                 A workspace, not a transcript dump
               </h2>
             </div>
-            <p class="hidden font-mono text-[13px] text-ink-faint sm:block"><span data-rail-count class="text-ink">01</span> / <span data-rail-total>14</span></p>
           </div>
-          <div class="rail-viewport mt-10">
-            <div class="rail-track" id="feature-grid">
+          <div class="container-page mt-12">
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3" id="feature-grid">
               <!-- Filled by main.ts from one list. -->
             </div>
           </div>
@@ -361,7 +367,7 @@
 
         <div class="container-page relative">
           <div class="mx-auto max-w-3xl text-center" data-reveal>
-            <p class="eyebrow">Where your data goes</p>
+            <p class="eyebrow" data-scramble>Where your data goes</p>
             <h2 class="zoom-title mt-3" data-zoom>Nowhere, unless you send it</h2>
             <p class="mx-auto mt-5 max-w-2xl text-[16px] leading-relaxed text-ink-muted">
               Most tools in this category say “private” and mean “encrypted on our servers”.
@@ -392,7 +398,7 @@
                 <h3 class="text-[15px] font-medium">Recording, transcription, search, notes</h3>
                 <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
                   Whisper runs on your hardware. Your workspace is a SQLite file you can open,
-                  back up, or delete. Search — including semantic search — is computed locally.
+                  back up, or delete. Search, including semantic search, is computed locally.
                 </p>
               </div>
             </div>
@@ -434,7 +440,7 @@
 
           <p class="mx-auto mt-8 max-w-2xl text-center text-[13.5px] leading-relaxed text-ink-faint" data-reveal>
             Recognising people by voice is off by default, and switching it off erases what was
-            stored. It identifies people who never installed anything — so it is a decision you
+            stored. It identifies people who never installed anything, so it is a decision you
             make, not one made for you.
           </p>
         </div>
@@ -451,7 +457,7 @@
 
         <div class="container-page relative">
           <div class="mx-auto max-w-2xl text-center" data-reveal="scale">
-            <p class="eyebrow">Download</p>
+            <p class="eyebrow" data-scramble>Download</p>
             <h2 class="mt-3 text-[clamp(2.2rem,6vw,4rem)] font-semibold leading-[1.02] tracking-[-0.035em]">
               Take it home.
             </h2>
@@ -476,13 +482,13 @@
       <section class="border-t border-hairline py-24">
         <div class="container-page grid items-center gap-12 lg:grid-cols-2">
           <div data-reveal="left">
-            <p class="eyebrow">Open source</p>
+            <p class="eyebrow" data-scramble>Open source</p>
             <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.8rem)] font-semibold tracking-[-0.02em]">
               Read it before you trust it
             </h2>
             <p class="mt-5 text-[16px] leading-relaxed text-ink-muted">
               The engine and the apps are MIT licensed. Every claim on this page is checkable
-              against the source — including the one about nothing being uploaded, which is
+              against the source, including the one about nothing being uploaded, which is
               enforced by a server that refuses to bind to anything but loopback.
             </p>
 
@@ -501,7 +507,7 @@
             <div class="border-b border-hairline px-5 py-3 font-mono text-[12px] text-ink-faint">
               repository layout
             </div>
-            <pre class="overflow-x-auto p-5 font-mono text-[12.5px] leading-relaxed text-ink-muted"><span class="text-ink">core/</span>        Rust engine — 16 crates      <span class="text-accent">MIT</span>
+            <pre class="overflow-x-auto p-5 font-mono text-[12.5px] leading-relaxed text-ink-muted"><span class="text-ink">core/</span>        Rust engine, 16 crates       <span class="text-accent">MIT</span>
   storage/     SQLite, migrations, FTS5
   graph/       typed nodes and edges
   ai-router/   the one seam every model call goes through
@@ -514,7 +520,7 @@
   browser-extension/  speaker names, zero permissions
 
 <span class="text-ink">cloud/</span>       opt-in hosted services       <span class="text-ink-faint">BSL 1.1</span>
-             (scaffolds — nothing runs yet)</pre>
+             (scaffolds; nothing runs yet)</pre>
           </div>
         </div>
       </section>
@@ -523,7 +529,7 @@
       <section id="honest" class="border-t border-hairline py-24">
         <div class="container-page">
           <div class="mx-auto max-w-2xl text-center" data-reveal>
-            <p class="eyebrow">What does not work yet</p>
+            <p class="eyebrow" data-scramble>What does not work yet</p>
             <h2 class="mt-3 text-[clamp(1.9rem,4vw,2.9rem)] font-semibold tracking-[-0.02em]">
               The part most landing pages leave out
             </h2>
@@ -555,7 +561,7 @@
 
     <footer class="border-t border-hairline py-10">
       <div class="container-page flex flex-col items-center justify-between gap-4 text-[13px] text-ink-faint sm:flex-row">
-        <p>Notewise — MIT licensed. Built to be read.</p>
+        <p>Notewise. MIT licensed. Built to be read.</p>
         <div class="flex gap-5">
           <a class="transition-colors hover:text-ink" href="#download">Download</a>
           <a class="transition-colors hover:text-ink" href="./download/">Install guide</a>

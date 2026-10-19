@@ -2,7 +2,7 @@
  * The download cards, shared by the overview and the install page.
  *
  * macOS is the only platform with a build. Windows and Ubuntu get a card each anyway, saying
- * plainly that theirs is coming — someone on Windows should learn that here, not by clicking a
+ * plainly that theirs is coming. Someone on Windows should learn that here, not by clicking a
  * button that hands them a disk image they cannot open.
  */
 
@@ -87,7 +87,7 @@ function soonCard(os: Os, name: string, icon: string, files: string, current: Os
       </div>
       <h3 class="mt-6 text-[22px] font-semibold tracking-[-0.02em]">${name}</h3>
       <p class="mt-1 text-[13.5px] text-ink-faint">${files}</p>
-      ${here ? '<p class="mt-3 text-[12.5px] text-accent-soft">You’re on ' + name + " — it’s next.</p>" : ""}
+      ${here ? '<p class="mt-3 text-[12.5px] text-accent-soft">You’re on ' + name + ". It’s next.</p>" : ""}
       <button type="button" class="dl-button is-disabled mt-6" disabled aria-disabled="true">
         Coming soon
       </button>
@@ -118,6 +118,7 @@ function macCard(current: Os, firstLaunchHref: string): string {
       </a>
 
       <div class="fmt-group mt-4" role="radiogroup" aria-label="File format">
+        <span class="fmt-pill" aria-hidden="true"></span>
         ${FORMATS.map(
           ({ format, label }) =>
             `<button type="button" class="fmt" role="radio" data-format="${format}" aria-checked="false">${label}</button>`,
@@ -177,7 +178,11 @@ export function mountDownloads(
       chip.title = missing ? "Not in this release" : "";
     }
 
-    const choice = FORMATS.find((entry) => entry.format === format) ?? FORMATS[0];
+    // The pill slides under whichever format is picked.
+    const picked = Math.max(0, FORMATS.findIndex((entry) => entry.format === format));
+    card.style.setProperty("--fmt", String(picked));
+
+    const choice = FORMATS[picked];
     hint.textContent = choice.hint;
 
     const asset = release?.assets[format];
@@ -225,6 +230,6 @@ export function mountDownloads(
     }
 
     // Could not ask. The Releases page lists the same files, so the button still leads to them.
-    status.textContent = "Couldn’t reach GitHub just now — the button opens the Releases page, which lists every file.";
+    status.textContent = "Couldn’t reach GitHub just now. The button opens the Releases page, which lists every file.";
   });
 }

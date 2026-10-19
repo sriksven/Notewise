@@ -3,7 +3,7 @@
  *
  * # Why the release is looked up rather than linked
  *
- * The files carry the version in their names — `Notewise_0.1.0_aarch64.dmg` — so no fixed URL
+ * The files carry the version in their names (`Notewise_0.1.0_aarch64.dmg`), so no fixed URL
  * points at "the current one". GitHub's `releases/latest/download/<name>` would need a stable
  * name, and it also skips pre-releases, which is what a release candidate is published as. A
  * button that 404s until the first final release would be worse than no button.
@@ -95,7 +95,7 @@ function macAssets(release: ApiRelease): MacRelease["assets"] {
 /**
  * The release to offer: the newest final release with a Mac build, or failing that the newest
  * release candidate. Final first because a candidate is, by definition, not yet the one we
- * recommend — but a candidate is better than telling someone there is nothing.
+ * recommend, but a candidate is better than telling someone there is nothing.
  */
 export function pickRelease(releases: ApiRelease[]): MacRelease | null {
   const usable = releases
