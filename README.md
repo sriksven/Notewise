@@ -5,7 +5,7 @@
 **Local-first meeting intelligence and workspace platform.**
 
 Meetings are captured and understood on your machine, then become notes, tickets,
-drafted emails, and notifications — all linked in one queryable graph.
+drafted emails, and notifications, all linked in one queryable graph.
 
 </div>
 
@@ -24,7 +24,7 @@ Meeting happens → transcribed & understood → becomes:
   └── Notifications     (when something actually needs attention)
 ```
 
-The connective tissue is an **object graph** — meetings, notes, decisions, tickets, and
+The connective tissue is an **object graph**: meetings, notes, decisions, tickets, and
 emails reference each other as typed edges, so "show me everything related to this
 meeting" is one traversal rather than a hand-written join per feature.
 
@@ -51,15 +51,15 @@ transcripts leave the machine.
 Sync is **off** unless you turn it on. `sync-client` is a separate crate specifically so a
 local-only build never compiles it in.
 
-## Licensing — read this before contributing
+## Licensing: read this before contributing
 
 This is an **open-core** project, and we would rather be blunt about the split than have
 you discover it later:
 
 | Path | License |
 |---|---|
-| `core/`, `apps/` | **MIT** — see [LICENSE](LICENSE) |
-| `cloud/` | **BSL 1.1**, converts to Apache-2.0 after 4 years — see [LICENSE-CLOUD.md](LICENSE-CLOUD.md) |
+| `core/`, `apps/` | **MIT** (see [LICENSE](LICENSE)) |
+| `cloud/` | **BSL 1.1**, converts to Apache-2.0 after 4 years (see [LICENSE-CLOUD.md](LICENSE-CLOUD.md)) |
 
 Everything you need to run Notewise entirely on your own machine is MIT. The hosted
 multi-tenant services are BSL.
@@ -73,11 +73,11 @@ Early. The repository structure covers the full roadmap, but code lands phase by
 | `storage`, `graph`, `ai-router` | Implemented, tested |
 | `api-server`, `mcp-server`, `cli` | Implemented, tested |
 | Markdown export | Implemented |
-| `recorder` | **Pipeline implemented** — capture → mix → transcribe → diarize → store |
+| `recorder` | **Pipeline implemented**: capture → mix → transcribe → diarize → store |
 | `transcription` | **Whisper implemented** (`--features whisper-metal`), Parakeet pending |
 | `audio-capture` | **Microphone and macOS system audio implemented** (`--features os-capture`); system audio not yet verified in a release build |
 | `diarization`, `sync-client`, `ffi` | Interfaces defined |
-| `apps/desktop` | **Runs** — React UI served by the engine, in a Tauri window; records from the app |
+| `apps/desktop` | **Runs**: React UI served by the engine, in a Tauri window; records from the app |
 | `apps/mobile`, `cloud/` | Scaffolded, awaiting their phase |
 
 See `docs/roadmap.md` for what lands when, and each directory's `README.md` for
@@ -90,7 +90,7 @@ Each tagged version attaches installers to
 
 | Platform | File | First launch |
 |---|---|---|
-| macOS, Apple silicon | `.dmg` | **Open Anyway**, once per download — below |
+| macOS, Apple silicon | `.dmg` | **Open Anyway**, once per download (see below) |
 | Windows | `.msi` or `.exe` | Unsigned: SmartScreen warns, choose *More info → Run anyway* |
 | Linux | `.deb` or `.AppImage` | Nothing extra |
 
@@ -102,14 +102,14 @@ macOS cannot confirm who made it and stops the first launch:
 1. Drag Notewise from the `.dmg` into Applications, and open it from there.
 2. macOS says it could not verify that Notewise is free of malware. Choose **Done**.
 3. Open **System Settings → Privacy & Security**, scroll down to **Security**, and choose
-   **Open Anyway** beside the line about Notewise — it stays there for about an hour after the
+   **Open Anyway** beside the line about Notewise. It stays there for about an hour after the
    blocked attempt. Confirm with your login password.
 
-You do that once for each download. Permissions you grant — Microphone, Screen & System Audio
-Recording, Accessibility, Input Monitoring — carry over to later versions, because every release
+You do that once for each download. Permissions you grant (Microphone, Screen & System Audio
+Recording, Accessibility, Input Monitoring) carry over to later versions, because every release
 is signed with the same certificate. One thing does not: after an update, macOS may ask whether
-Notewise can use what it saved in your keychain (connector sign-ins). Choose **Always Allow** —
-without an Apple Developer ID, macOS ties those items to each version.
+Notewise can use what it saved in your keychain (connector sign-ins). Choose **Always Allow**.
+Without an Apple Developer ID, macOS ties those items to each version.
 
 To check that a copy is the released one:
 
@@ -148,8 +148,8 @@ cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --features bundle
 ```
 
 `--features bundle` is what makes the record button real: it compiles in microphone capture and
-Metal-accelerated Whisper. Without it the app still browses, searches, summarizes, and exports —
-and says so in About rather than offering a button that does nothing.
+Metal-accelerated Whisper. Without it the app still browses, searches, summarizes, and exports,
+and it says so in About rather than offering a button that does nothing.
 
 The window points at the engine's own loopback port. That is deliberate: serving the UI from the
 engine keeps them same-origin, so the unauthenticated local API needs no CORS. With permissive
@@ -169,8 +169,8 @@ curl -X DELETE 127.0.0.1:47821/v1/recording          # stop, flush, diarize
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents working in this repo
-- [CONTRIBUTING.md](.github/CONTRIBUTING.md) — conventions, commit format, review process
-- [SECURITY.md](.github/SECURITY.md) — vulnerability disclosure
-- `docs/` — architecture, roadmap, build walkthroughs, REST reference. Local only and
+- [CLAUDE.md](CLAUDE.md): orientation for AI coding agents working in this repo
+- [CONTRIBUTING.md](.github/CONTRIBUTING.md): conventions, commit format, review process
+- [SECURITY.md](.github/SECURITY.md): vulnerability disclosure
+- `docs/`: architecture, roadmap, build walkthroughs, REST reference. Local only and
   not published; anything load-bearing lives in doc comments beside the code.
