@@ -15,7 +15,7 @@
    * `clip`, not `hidden`, and on both elements. Two reasons, and both are load-bearing:
    *
    * `overflow-x` set on `body` alone is propagated to the viewport rather than applied, so it
-   * silently does nothing when `html` is the scrolling element — which is why a 390px viewport
+   * silently does nothing when `html` is the scrolling element, which is why a 390px viewport
    * was still scrolling to 402px.
    *
    * And `hidden` would create a scroll container, which breaks `position: sticky` in every
@@ -84,7 +84,7 @@
     @apply text-[12px] font-semibold uppercase tracking-[0.18em] text-accent;
   }
 
-  /* A hairline that fades at both ends — used as a section divider. */
+  /* A hairline that fades at both ends, used as a section divider. */
   .rule {
     @apply h-px w-full bg-gradient-to-r from-transparent via-hairline to-transparent;
   }
@@ -117,7 +117,7 @@
  *
  * All of it is behind `.motion`, which an inline script adds before first paint unless the
  * visitor has asked for reduced motion. Without it the sections are ordinary height, nothing is
- * pinned, and every element is in its finished state — the content, with none of the movement.
+ * pinned, and every element is in its finished state: the content, with none of the movement.
  */
 .scene {
   position: relative;
@@ -802,7 +802,7 @@ html:not(.motion) .feature-icon {
 
 /*
  * Everything above is decoration. Someone who has asked their operating system to reduce
- * motion gets the content immediately and none of the movement — including the smooth
+ * motion gets the content immediately and none of the movement, including the smooth
  * scrolling, which is the part that actually makes people ill.
  */
 @media (prefers-reduced-motion: reduce) {

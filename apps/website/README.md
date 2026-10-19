@@ -19,26 +19,26 @@ to `/`.
 ## No framework
 
 A static document with scroll effects. React would ship ~140 kB to render markup that never
-changes, and every effect here is DOM-level. Each pinned scene — the hero's tilting app window,
+changes, and every effect here is DOM-level. Each pinned scene (the hero's tilting app window,
 the manifesto that lights word by word, the four-act pipeline, the graph that draws itself, the
-sideways feature rail — reduces to one number, how far through it the reader is, and draws itself
+sideways feature rail) reduces to one number, how far through it the reader is, and draws itself
 from that. One scroll listener, coalesced to a frame, feeds all of them. The bundle is ~10 kB
 gzipped.
 
 ## Motion is optional
 
 An inline script adds `.motion` to `<html>` before first paint unless the visitor asked for
-reduced motion, and every pinned or scrubbed effect is gated on that class. Without it — reduced
-motion, or no JavaScript — nothing is pinned and every section is simply laid out in its finished
+reduced motion, and every pinned or scrubbed effect is gated on that class. Without it (reduced
+motion, or no JavaScript) nothing is pinned and every section is simply laid out in its finished
 state, including no `scroll-behavior: smooth`, which is the part that actually makes people ill.
 
 ## The download button
 
-macOS gets a real download in three formats — `.dmg`, `.zip` and `.app` (as `.app.tar.gz`) — all
+macOS gets a real download in three formats, `.dmg`, `.zip` and `.app` (as `.app.tar.gz`), all
 the same signed app, built and verified by `release.yml`. Windows and Ubuntu say "coming soon".
 
 The files carry the version in their names, so no fixed URL points at the current build. The page
-asks the GitHub API for the newest release with a Mac build — final first, then release candidate —
+asks the GitHub API for the newest release with a Mac build (final first, then release candidate)
 and reads the real file names and sizes (`src/release.ts`). That gives three honest states:
 
 | GitHub says | The button |
@@ -54,5 +54,5 @@ an hour per address.
 
 Claims here are checkable against the repository, and several are checked *by* it: the test
 count in the hero, the platform statuses, and the "what does not work yet" section all mirror
-what the app's own About screen reports. If one of those changes, this page changes with it —
+what the app's own About screen reports. If one of those changes, this page changes with it:
 a landing page describing a different version of the product is worse than none.

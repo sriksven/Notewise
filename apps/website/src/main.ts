@@ -5,7 +5,7 @@
  *
  * This is a static document with scroll effects. React would ship ~140 kB to render markup that
  * never changes, and every effect here is DOM-level anyway. Each pinned scene reduces to one
- * number — how far through it the reader is, from 0 to 1 — and draws itself from that. One
+ * number (how far through it the reader is, from 0 to 1) and draws itself from that. One
  * scroll listener, coalesced to one frame, feeds all of them.
  *
  * # Motion is optional, everywhere
@@ -51,7 +51,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
     icon: "✦",
     title: "Summaries that link back",
-    body: "Decisions and action items are first-class objects with owners and dates — not a paragraph you have to re-read.",
+    body: "Decisions and action items are first-class objects with owners and dates, not a paragraph you have to re-read.",
   },
   {
     icon: "⌕",
@@ -66,7 +66,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
     icon: "◇",
     title: "Questions while people can still answer",
-    body: "It watches a live meeting and flags what was left vague — a decision with no owner, a date nobody actually said.",
+    body: "It watches a live meeting and flags what was left vague: a decision with no owner, a date nobody actually said.",
   },
   {
     icon: "◫",
@@ -115,7 +115,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
 const LIMITATIONS: Array<{ title: string; body: string }> = [
   {
     title: "System audio is not verified yet",
-    body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch — and has not yet been run end to end in a release build.",
+    body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch, and has not yet been run end to end in a release build.",
   },
   {
     title: "Signed by the project, not by Apple",
@@ -262,7 +262,7 @@ interface Scene {
 
 /**
  * Progress through a pinned scene: 0 when its top reaches the top of the viewport, 1 when its
- * bottom reaches the bottom — the stretch during which its sticky frame is held in place.
+ * bottom reaches the bottom: the stretch during which its sticky frame is held in place.
  */
 function progressOf(element: HTMLElement): number {
   const box = element.getBoundingClientRect();
@@ -389,7 +389,7 @@ function graphScene(): Scene | null {
           edge.style.setProperty("--draw", (1 - drawn).toFixed(3));
           nodes[index]?.style.setProperty("--pop", easeOut(clamp((drawn - 0.65) / 0.35)).toFixed(3));
         } else {
-          // The second-degree link — decision to ticket — arrives last.
+          // The second-degree link, decision to ticket, arrives last.
           edge.style.setProperty("--show", clamp((run - 0.86) / 0.14).toFixed(3));
         }
       });
@@ -701,7 +701,7 @@ function setupCounters(): void {
 
 /**
  * The pointer's effects: a soft spotlight that follows it, cards that tilt toward it, and
- * buttons that lean after it. Mouse and trackpad only — on touch there is no hover to follow.
+ * buttons that lean after it. Mouse and trackpad only; on touch there is no hover to follow.
  */
 function setupPointer(): void {
   if (!MOTION || !FINE_POINTER) return;

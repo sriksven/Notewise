@@ -2,8 +2,8 @@
  * The install page: the download cards, the macOS first-launch walkthrough, and building from
  * source on every platform.
  *
- * The Mac card is the same one the overview shows, resolved against the real GitHub release —
- * see `downloads.ts`. Windows and Ubuntu say "coming soon" there, and this page's source-build
+ * The Mac card is the same one the overview shows, resolved against the real GitHub release
+ * (see `downloads.ts`). Windows and Ubuntu say "coming soon" there, and this page's source-build
  * steps are how to run Notewise on them today.
  */
 
@@ -26,7 +26,7 @@ const PLATFORMS: Platform[] = [
     name: "macOS",
     status: "works",
     summary:
-      "Apple silicon or Intel. The desktop app, recording, GPU-accelerated transcription — everything except system audio.",
+      "Apple silicon or Intel. The desktop app, recording, GPU-accelerated transcription: everything except system audio.",
   },
   {
     os: "windows",
@@ -83,7 +83,7 @@ const STEPS: Record<Os, Step[]> = {
     ),
     {
       title: "Run the engine with recording enabled",
-      body: "The record and whisper-metal features pull the platform audio SDK and a cmake build of whisper.cpp with Metal — the GPU-accelerated transcription — so this first build is slow.",
+      body: "The record and whisper-metal features pull the platform audio SDK and a cmake build of whisper.cpp with Metal (the GPU-accelerated transcription), so this first build is slow.",
       command: "cargo run -p notewise-cli --features record,whisper-metal -- serve",
     },
     {
@@ -94,7 +94,7 @@ const STEPS: Record<Os, Step[]> = {
   ],
   windows: [
     ...common(
-      "# In PowerShell — Rust, cmake, Node, and the MSVC build tools\nwinget install Rustlang.Rustup\nwinget install Kitware.CMake\nwinget install OpenJS.NodeJS\nwinget install Microsoft.VisualStudio.2022.BuildTools",
+      "# In PowerShell: Rust, cmake, Node, and the MSVC build tools\nwinget install Rustlang.Rustup\nwinget install Kitware.CMake\nwinget install OpenJS.NodeJS\nwinget install Microsoft.VisualStudio.2022.BuildTools",
     ),
     {
       title: "Run the engine",
@@ -123,7 +123,7 @@ const STEPS: Record<Os, Step[]> = {
     },
     {
       title: "Or drive it from the command line",
-      body: "The CLI links the engine directly — no server, no app. Its import command transcribes a 32-bit float WAV, and exists only in a build with the whisper feature.",
+      body: "The CLI links the engine directly: no server, no app. Its import command transcribes a 32-bit float WAV, and exists only in a build with the whisper feature.",
       command: "cargo run -p notewise-cli --features whisper -- import ./meeting.wav\ncargo run -p notewise-cli -- export <meeting-id>",
     },
   ],
@@ -153,7 +153,7 @@ function renderPlatforms(current: Os): void {
           <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.classes}">${badge.label}</span>
         </div>
         <p class="mt-3 text-[13.5px] leading-relaxed text-ink-muted">${platform.summary}</p>
-        ${active ? '<p class="mt-3 text-[12px] text-accent">Detected — instructions below</p>' : ""}
+        ${active ? '<p class="mt-3 text-[12px] text-accent">Detected. Instructions below</p>' : ""}
       </article>`;
   }).join("");
 }
@@ -196,7 +196,7 @@ function renderSteps(os: Os): void {
 /**
  * Copy a command.
  *
- * `navigator.clipboard` needs a secure context, which `file://` and plain http are not — so
+ * `navigator.clipboard` needs a secure context, which `file://` and plain http are not, so
  * there is a fallback, and a button that cannot copy says so rather than doing nothing.
  */
 function wireCopy(): void {
