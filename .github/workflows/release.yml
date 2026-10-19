@@ -45,7 +45,7 @@ env:
   # app carries it — and it lives here rather than in a secret so that changing it is a reviewed
   # commit. A different certificate in the secret then fails the build, instead of shipping a
   # release that silently resets every user's permissions. `macos-signing-identity.sh` prints it.
-  MACOS_CERTIFICATE_SHA1: ""
+  MACOS_CERTIFICATE_SHA1: "176C496FB26F2C5793BDBB6F1A3E593C89F55770"
 
 jobs:
   build:
