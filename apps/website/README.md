@@ -20,8 +20,7 @@ to `/`.
 
 A static document with scroll effects. React would ship ~140 kB to render markup that never
 changes, and every effect here is DOM-level. Each pinned scene (the hero's tilting app window,
-the manifesto that lights word by word, the four-act pipeline, the graph that draws itself, the
-sideways feature rail) reduces to one number, how far through it the reader is, and draws itself
+the four-act pipeline, the graph that draws itself) reduces to one number, how far through it the reader is, and draws itself
 from that. One scroll listener, coalesced to a frame, feeds all of them. The bundle is ~10 kB
 gzipped.
 

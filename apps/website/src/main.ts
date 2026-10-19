@@ -1,5 +1,5 @@
 /**
- * The overview page: pinned scroll scenes, the feature rail, the marquee, and the download cards.
+ * The overview page: pinned scroll scenes, the marquee, and the download cards.
  *
  * # No framework
  *
@@ -27,7 +27,7 @@ const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 // ---------------------------------------------------------------- content
 
 /**
- * What the app does. One list, rendered into the rail.
+ * What the app does. One list, rendered into the grid.
  *
  * Kept in the code rather than the markup because every entry has the same shape, and a
  * fourteen-item list written by hand is fourteen chances for one card to drift out of line.
@@ -136,19 +136,17 @@ const LIMITATIONS: Array<{ title: string; body: string }> = [
 ];
 
 function renderLists(): void {
-  const rail = document.querySelector<HTMLElement>("#feature-grid");
-  if (rail) {
-    rail.innerHTML = FEATURES.map(
+  const grid = document.querySelector<HTMLElement>("#feature-grid");
+  if (grid) {
+    grid.innerHTML = FEATURES.map(
       (feature, index) => `
-        <article class="feature" ${MOTION ? "" : `data-reveal style="--reveal-delay:${(index % 3) * 90}ms"`}>
+        <article class="feature">
           <span class="feature-num">${String(index + 1).padStart(2, "0")}</span>
           <span class="feature-icon">${feature.icon}</span>
           <h3 class="mt-5 text-[18px] font-semibold tracking-[-0.01em]">${feature.title}</h3>
           <p class="mt-2 text-[13.5px] leading-relaxed text-ink-muted">${feature.body}</p>
         </article>`,
     ).join("");
-    const total = document.querySelector<HTMLElement>("[data-rail-total]");
-    if (total) total.textContent = String(FEATURES.length);
   }
 
   const limits = document.querySelector<HTMLElement>("#limitations");
@@ -221,35 +219,6 @@ function splitHeadline(): void {
   }
 }
 
-/** Split the manifesto into words, keeping which ones were emphasised. */
-function splitWords(host: HTMLElement): HTMLElement[] {
-  const words: HTMLElement[] = [];
-  const fragment = document.createDocumentFragment();
-
-  const add = (text: string, emphasised: boolean) => {
-    for (const piece of text.split(/(\s+)/)) {
-      if (!piece) continue;
-      if (/^\s+$/.test(piece)) {
-        fragment.append(" ");
-        continue;
-      }
-      const span = document.createElement("span");
-      span.className = emphasised ? "scrub-word is-em" : "scrub-word";
-      span.textContent = piece;
-      fragment.append(span);
-      words.push(span);
-    }
-  };
-
-  for (const node of [...host.childNodes]) {
-    if (node.nodeType === Node.TEXT_NODE) add(node.textContent ?? "", false);
-    else if (node instanceof HTMLElement) add(node.textContent ?? "", node.tagName === "EM");
-  }
-
-  host.replaceChildren(fragment);
-  return words;
-}
-
 // ---------------------------------------------------------------- scenes
 
 interface Scene {
@@ -300,27 +269,6 @@ function heroScene(): Scene | null {
       device.style.transform =
         `perspective(1400px) translate3d(0, ${(-rise * settle).toFixed(1)}px, 0) ` +
         `rotateX(${(32 * (1 - settle)).toFixed(2)}deg) scale(${(0.88 + 0.12 * settle).toFixed(3)})`;
-    },
-  };
-}
-
-function wordsScene(): Scene | null {
-  const element = document.querySelector<HTMLElement>('[data-scene="words"]');
-  const host = element?.querySelector<HTMLElement>("[data-words]");
-  if (!element || !host) return null;
-
-  const words = splitWords(host);
-  const count = words.length;
-  // A soft edge three words wide, so the light runs along the sentence instead of ticking.
-  const edge = 3;
-
-  return {
-    element,
-    update(progress) {
-      const head = clamp(progress / 0.8) * (count + edge);
-      words.forEach((word, index) => {
-        word.style.setProperty("--w", clamp((head - index) / edge).toFixed(3));
-      });
     },
   };
 }
@@ -397,52 +345,6 @@ function graphScene(): Scene | null {
   };
 }
 
-function railScene(): Scene | null {
-  const element = document.querySelector<HTMLElement>('[data-scene="rail"]');
-  const track = element?.querySelector<HTMLElement>(".rail-track");
-  if (!element || !track) return null;
-
-  const cards = [...track.querySelectorAll<HTMLElement>(".feature")];
-  const counter = element.querySelector<HTMLElement>("[data-rail-count]");
-  let overflow = 0;
-  let centres: number[] = [];
-  let shown = -1;
-
-  return {
-    element,
-    measure() {
-      overflow = Math.max(0, track.scrollWidth - window.innerWidth);
-      // Pinned for exactly as long as the track takes to slide past, plus the screen it starts on.
-      element.style.height = `${overflow + window.innerHeight}px`;
-      centres = cards.map((card) => card.offsetLeft + card.offsetWidth / 2);
-    },
-    update(progress) {
-      const shift = progress * overflow;
-      track.style.transform = `translate3d(${(-shift).toFixed(1)}px, 0, 0)`;
-
-      const middle = window.innerWidth / 2;
-      let nearest = 0;
-      let best = Infinity;
-      cards.forEach((card, index) => {
-        const offset = (centres[index] - shift - middle) / window.innerWidth;
-        const distance = Math.abs(offset);
-        if (distance < best) {
-          best = distance;
-          nearest = index;
-        }
-        // Cards lean away from the centre like pages on a drum.
-        card.style.transform = `perspective(1000px) rotateY(${(clamp(offset, -1, 1) * -22).toFixed(2)}deg) scale(${(1 - clamp(distance) * 0.1).toFixed(3)})`;
-        card.style.opacity = (1 - clamp(distance - 0.35) * 0.9).toFixed(3);
-      });
-
-      if (counter && nearest !== shown) {
-        shown = nearest;
-        counter.textContent = String(nearest + 1).padStart(2, "0");
-      }
-    },
-  };
-}
-
 function setupScenes(): void {
   if (!MOTION) {
     // The pipeline has to show a step as current even without motion; all of them are.
@@ -450,7 +352,7 @@ function setupScenes(): void {
     return;
   }
 
-  const scenes = [heroScene(), wordsScene(), pipelineScene(), graphScene(), railScene()].filter(
+  const scenes = [heroScene(), pipelineScene(), graphScene()].filter(
     (scene): scene is Scene => scene !== null,
   );
 

@@ -165,13 +165,12 @@
         </div>
       </section>
 
-      <!-- ═════════════════════════════════════════════  manifesto
-           Each word lights as it is scrolled past. -->
-      <section id="manifesto" class="scene scene--words" data-scene="words">
-        <div class="scene-sticky flex items-center">
+      <!-- ═════════════════════════════════════════════  manifesto -->
+      <section id="manifesto" class="py-28 sm:py-36">
+        <div>
           <div class="container-page">
             <p class="eyebrow">Why it exists</p>
-            <p class="scrub-text mt-6" data-words>
+            <p class="manifesto-text mt-6">
               Most meeting tools record you, summarise you, and <em>upload you.</em> Notewise does
               the whole thing on <em>your own hardware</em>, and nothing leaves your machine
               <em>unless you send it.</em>
@@ -319,10 +318,9 @@
         </div>
       </section>
 
-      <!-- ═════════════════════════════════════════════  features
-           Vertical scroll drives a horizontal track. -->
-      <section id="features" class="scene scene--rail" data-scene="rail">
-        <div class="scene-sticky flex flex-col justify-center pt-16">
+      <!-- ═════════════════════════════════════════════  features -->
+      <section id="features" class="py-24">
+        <div>
           <div class="container-page flex items-end justify-between gap-6">
             <div>
               <p class="eyebrow">Everything in the box</p>
@@ -330,10 +328,9 @@
                 A workspace, not a transcript dump
               </h2>
             </div>
-            <p class="hidden font-mono text-[13px] text-ink-faint sm:block"><span data-rail-count class="text-ink">01</span> / <span data-rail-total>14</span></p>
           </div>
-          <div class="rail-viewport mt-10">
-            <div class="rail-track" id="feature-grid">
+          <div class="container-page mt-12">
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3" id="feature-grid">
               <!-- Filled by main.ts from one list. -->
             </div>
           </div>

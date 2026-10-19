@@ -134,9 +134,6 @@
 .motion .scene--hero {
   height: 230vh;
 }
-.motion .scene--words {
-  height: 260vh;
-}
 .motion .scene--pipe {
   height: 460vh;
 }
@@ -341,26 +338,15 @@ html:not(.motion) .hero-stage {
 }
 
 /* ──────────────────────────────────────────────────────────────  manifesto */
-.scrub-text {
+.manifesto-text {
   font-size: clamp(1.75rem, 4.6vw, 3.9rem);
   line-height: 1.12;
   letter-spacing: -0.03em;
   @apply max-w-5xl font-semibold;
 }
-.scrub-text em {
+.manifesto-text em {
   font-style: normal;
-}
-.scrub-word {
-  display: inline-block;
-}
-.scrub-word.is-em {
   @apply text-accent-soft;
-}
-.motion .scrub-word {
-  /* `--w` runs 0 → 1 as the word is scrolled past; main.ts sets it. */
-  opacity: calc(0.13 + var(--w, 0) * 0.87);
-  filter: blur(calc((1 - var(--w, 0)) * 4px));
-  transform: translateY(calc((1 - var(--w, 0)) * 0.18em));
 }
 
 /* ──────────────────────────────────────────────────────────────  pipeline */
@@ -548,40 +534,16 @@ html:not(.motion) .stage-layer > div {
   }
 }
 
-/* ──────────────────────────────────────────────────────────────  feature rail */
-.rail-viewport {
-  @apply w-full;
-}
-.rail-track {
-  @apply container-page grid gap-4 md:grid-cols-2 lg:grid-cols-3;
-}
-.motion .rail-track {
-  display: flex;
-  gap: 1.25rem;
-  width: max-content;
-  max-width: none;
-  padding-left: max(1.5rem, calc((100vw - 72rem) / 2 + 2rem));
-  padding-right: 20vw;
-  will-change: transform;
-}
-
+/* ──────────────────────────────────────────────────────────────  features */
 .feature {
   @apply card relative flex flex-col overflow-hidden p-7;
-}
-.motion .feature {
-  width: min(78vw, 330px);
-  height: min(52svh, 360px);
-  transform-style: preserve-3d;
 }
 .feature-num {
   @apply font-mono text-[12px] text-ink-faint;
 }
 .feature-icon {
-  @apply mt-auto text-[44px] leading-none text-accent;
+  @apply mt-5 text-[30px] leading-none text-accent;
   text-shadow: 0 0 30px rgba(124, 140, 248, 0.6);
-}
-html:not(.motion) .feature-icon {
-  @apply mt-4 text-[26px];
 }
 .feature::after {
   content: "";
