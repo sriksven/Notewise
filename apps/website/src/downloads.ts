@@ -118,6 +118,7 @@ function macCard(current: Os, firstLaunchHref: string): string {
       </a>
 
       <div class="fmt-group mt-4" role="radiogroup" aria-label="File format">
+        <span class="fmt-pill" aria-hidden="true"></span>
         ${FORMATS.map(
           ({ format, label }) =>
             `<button type="button" class="fmt" role="radio" data-format="${format}" aria-checked="false">${label}</button>`,
@@ -177,7 +178,11 @@ export function mountDownloads(
       chip.title = missing ? "Not in this release" : "";
     }
 
-    const choice = FORMATS.find((entry) => entry.format === format) ?? FORMATS[0];
+    // The pill slides under whichever format is picked.
+    const picked = Math.max(0, FORMATS.findIndex((entry) => entry.format === format));
+    card.style.setProperty("--fmt", String(picked));
+
+    const choice = FORMATS[picked];
     hint.textContent = choice.hint;
 
     const asset = release?.assets[format];

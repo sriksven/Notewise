@@ -17,6 +17,7 @@
 
 import "./style.css";
 import { mountDownloads } from "./downloads";
+import { cardHover, decodeLabels, downloadBurst, liveDemo, particles } from "./effects";
 
 const MOTION = document.documentElement.classList.contains("motion");
 const FINE_POINTER = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -140,7 +141,7 @@ function renderLists(): void {
   if (grid) {
     grid.innerHTML = FEATURES.map(
       (feature, index) => `
-        <article class="feature">
+        <article class="feature" data-anim="${index % 4}">
           <span class="feature-num">${String(index + 1).padStart(2, "0")}</span>
           <span class="feature-icon">${feature.icon}</span>
           <h3 class="mt-5 text-[18px] font-semibold tracking-[-0.01em]">${feature.title}</h3>
@@ -324,6 +325,7 @@ function graphScene(): Scene | null {
   if (!element) return null;
 
   const edges = [...element.querySelectorAll<SVGPathElement>("[data-edge]")];
+  const pulses = [...element.querySelectorAll<SVGCircleElement>("[data-pulse]")];
   const nodes = [...element.querySelectorAll<SVGGElement>("[data-node]")];
   const spokes = nodes.length;
 
@@ -336,6 +338,8 @@ function graphScene(): Scene | null {
           const drawn = clamp((run - index * 0.1) / 0.42);
           edge.style.setProperty("--draw", (1 - drawn).toFixed(3));
           nodes[index]?.style.setProperty("--pop", easeOut(clamp((drawn - 0.65) / 0.35)).toFixed(3));
+          // Data only flows along an edge once it exists.
+          pulses[index]?.style.setProperty("--flow", clamp((drawn - 0.9) / 0.1).toFixed(3));
         } else {
           // The second-degree link, decision to ticket, arrives last.
           edge.style.setProperty("--show", clamp((run - 0.86) / 0.14).toFixed(3));
@@ -709,6 +713,11 @@ function init(): void {
   setupDrift();
   setupCounters();
   setupPointer();
+  liveDemo();
+  particles();
+  decodeLabels();
+  cardHover();
+  downloadBurst();
 }
 
 if (document.readyState === "loading") {

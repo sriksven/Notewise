@@ -69,7 +69,7 @@
   }
 
   .btn-primary {
-    @apply btn bg-ink text-bg hover:shadow-[0_10px_40px_-10px_rgba(165,176,250,0.7)];
+    @apply btn relative overflow-hidden bg-ink text-bg hover:shadow-[0_10px_40px_-10px_rgba(165,176,250,0.7)];
   }
 
   .btn-ghost {
@@ -694,14 +694,22 @@ html:not(.motion) .stage-layer > div {
 }
 
 .fmt-group {
-  @apply grid grid-cols-3 gap-1 rounded-xl border border-hairline bg-bg/60 p-1;
+  @apply relative grid grid-cols-3 gap-1 rounded-xl border border-hairline bg-bg/60 p-1;
 }
 .fmt {
-  @apply rounded-lg py-1.5 font-mono text-[12.5px] text-ink-muted transition-all duration-200 hover:text-ink;
+  @apply relative z-[1] rounded-lg py-1.5 font-mono text-[12.5px] text-ink-muted transition-colors duration-200 hover:text-ink;
 }
 .fmt[aria-checked="true"] {
-  @apply bg-raised text-ink;
+  @apply text-ink;
+}
+/* One pill under the three options, sliding to the picked one: a cell is a third of the inner
+   width, and each step across is one cell plus the gap. */
+.fmt-pill {
+  @apply pointer-events-none absolute bottom-1 left-1 top-1 rounded-lg bg-raised;
+  width: calc((100% - 1rem) / 3);
   box-shadow: inset 0 0 0 1px theme("colors.hairline");
+  transform: translateX(calc(var(--fmt, 0) * (100% + 0.25rem)));
+  transition: transform 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .fmt:disabled {
   @apply cursor-not-allowed line-through opacity-40;
@@ -723,6 +731,203 @@ html:not(.motion) .stage-layer > div {
 }
 .motion .logo-mark {
   transform: rotate(calc(var(--scroll-turn, 0) * 1deg));
+}
+
+/* ══════════════════════════════════════════════════════════════════  time, hover, click
+ *
+ * Animations that are not driven by scroll. effects.ts runs the ones that need script.
+ */
+
+/* ── live demo in the hero window */
+.motion [data-live-line],
+.motion [data-live-item] {
+  transition:
+    opacity 400ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.motion .live-hidden {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.motion [data-live-item]:not(.live-hidden) > span:first-child {
+  display: inline-block;
+  animation: tick-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes tick-in {
+  from {
+    transform: scale(0) rotate(-40deg);
+  }
+  to {
+    transform: none;
+  }
+}
+.live-typing [data-live-text]::after {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  @apply bg-accent;
+  animation: caret 900ms steps(1) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ── particles behind the hero */
+.hero-particles {
+  @apply absolute inset-0 h-full w-full;
+}
+
+/* ── data flowing along the graph's edges */
+.graph .pulses circle {
+  fill: theme("colors.accent.soft");
+  filter: drop-shadow(0 0 5px rgba(165, 176, 250, 0.95));
+}
+.motion .graph .pulses circle {
+  opacity: var(--flow, 0);
+}
+html:not(.motion) .graph .pulses {
+  display: none;
+}
+
+/* ── the manifesto's highlighted phrases, with light moving through them */
+.motion .manifesto-text em {
+  background: linear-gradient(100deg, #a5b0fa 0%, #a5b0fa 35%, #ffffff 50%, #a5b0fa 65%, #a5b0fa 100%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 5s ease-in-out infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+/* ── feature cards: a glow under the pointer, and an icon with its own move */
+.feature {
+  transition:
+    border-color 300ms,
+    transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.feature::before {
+  content: "";
+  @apply pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300;
+  background: radial-gradient(
+    320px circle at var(--cx, 50%) var(--cy, 50%),
+    rgba(124, 140, 248, 0.16),
+    transparent 65%
+  );
+}
+.motion .feature:hover {
+  @apply -translate-y-1 border-ink-faint/60;
+}
+.motion .feature:hover::before {
+  opacity: 1;
+}
+.feature-icon {
+  display: inline-block;
+  width: fit-content;
+}
+.motion .feature:hover .feature-icon {
+  animation: 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.motion .feature[data-anim="0"]:hover .feature-icon {
+  animation-name: icon-spin;
+}
+.motion .feature[data-anim="1"]:hover .feature-icon {
+  animation-name: icon-bounce;
+}
+.motion .feature[data-anim="2"]:hover .feature-icon {
+  animation-name: icon-wiggle;
+}
+.motion .feature[data-anim="3"]:hover .feature-icon {
+  animation-name: icon-pulse;
+}
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg) scale(1.1);
+  }
+}
+@keyframes icon-bounce {
+  30% {
+    transform: translateY(-12px) scale(1.1);
+  }
+  60% {
+    transform: translateY(2px) scale(0.96);
+  }
+  to {
+    transform: translateY(0) scale(1.05);
+  }
+}
+@keyframes icon-wiggle {
+  20% {
+    transform: rotate(-14deg);
+  }
+  40% {
+    transform: rotate(12deg);
+  }
+  60% {
+    transform: rotate(-8deg);
+  }
+  80% {
+    transform: rotate(4deg);
+  }
+  to {
+    transform: scale(1.05);
+  }
+}
+@keyframes icon-pulse {
+  40% {
+    transform: scale(1.35);
+    text-shadow: 0 0 40px rgba(165, 176, 250, 1);
+  }
+  to {
+    transform: scale(1.05);
+  }
+}
+
+/* ── a press on a primary button: a ripple from the point of contact */
+.ripple {
+  @apply pointer-events-none absolute rounded-full;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  background: rgba(124, 140, 248, 0.45);
+  animation: ripple 650ms ease-out forwards;
+}
+@keyframes ripple {
+  to {
+    transform: scale(40);
+    opacity: 0;
+  }
+}
+
+/* ── and on the download button, a burst */
+.burst {
+  @apply pointer-events-none fixed z-[60];
+}
+.burst i {
+  @apply absolute block h-1.5 w-1.5 rounded-full bg-accent-soft;
+  margin: -3px 0 0 -3px;
+  animation: burst 750ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.burst i.is-record {
+  @apply bg-record;
+}
+@keyframes burst {
+  to {
+    transform: translate(var(--dx), var(--dy)) scale(0.2);
+    opacity: 0;
+  }
 }
 
 /*

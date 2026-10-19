@@ -24,6 +24,15 @@ the four-act pipeline, the graph that draws itself) reduces to one number, how f
 from that. One scroll listener, coalesced to a frame, feeds all of them. The bundle is ~10 kB
 gzipped.
 
+## Not only scroll
+
+`src/effects.ts` holds the animations that run on their own or answer the pointer: the hero
+window plays a live recording on a timer (the clock ticks, lines type in, extracted items
+appear), specks drift up behind the hero on a canvas, pulses flow along the graph's edges, the
+manifesto's highlights shimmer, section labels decode the first time they appear, feature cards
+glow under the pointer with a different icon move each, and pressing the download button sends
+out a ripple and a burst. Each one pauses when it is off screen.
+
 ## Motion is optional
 
 An inline script adds `.motion` to `<html>` before first paint unless the visitor asked for

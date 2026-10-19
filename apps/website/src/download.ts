@@ -9,6 +9,7 @@
 
 import "./style.css";
 import { detectOs, mountDownloads, type Os } from "./downloads";
+import { downloadBurst } from "./effects";
 
 const REDUCED = !document.documentElement.classList.contains("motion");
 
@@ -318,6 +319,7 @@ function init(): void {
   }
 
   selectOs(detectOs());
+  downloadBurst();
   setupChrome();
 }
 
