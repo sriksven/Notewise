@@ -284,6 +284,54 @@ jobs:
           fi
           echo "designated requirement: $requirement"
 
+      # The same signed app for people who would rather not mount a disk image: a .zip, which
+      # Safari unpacks to Notewise.app by itself, and the bare bundle as .app.tar.gz. The website
+      # offers all three. Both are made from the app *inside the dmg* — the copy the step above
+      # just verified — so the three downloads hold the same bytes rather than three copies that
+      # might differ.
+      #
+      # `ditto`, not `zip`: `zip` follows symlinks, and a framework's `Versions/Current` turned from
+      # a link into a directory is enough to break the signature. Extended attributes are left out
+      # of both archives — a bundle's signature lives in its files, not in xattrs — because each
+      # tool stores them as `._` AppleDouble files: Archive Utility folds those back in, but plain
+      # `unzip` writes them into the bundle as files the signature does not cover, and the app is
+      # then "damaged". Measured: `ditto -c -k --keepParent` alone fails exactly that way.
+      - name: Package the app as .zip and .app.tar.gz
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -not -name 'rw.*' | head -1)
+          base=$(basename "$dmg" .dmg)
+          out="$PWD/src-tauri/target/release/bundle/macos"
+          mount=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
+          trap 'hdiutil detach "$mount" -quiet' EXIT
+
+          ditto -c -k --norsrc --noextattr --noacl --keepParent "$mount/Notewise.app" "$out/$base.app.zip"
+          COPYFILE_DISABLE=1 tar -C "$mount" -czf "$out/$base.app.tar.gz" Notewise.app
+
+          # Unpacked the ways a Mac will unpack them — Archive Utility's `ditto`, plain `unzip`, and
+          # `tar` — each must still verify and carry the same designated requirement as the app in
+          # the dmg, or permissions would not carry over between a dmg install and a later zip one.
+          expected=$(codesign -d -r- "$mount/Notewise.app" 2>&1 | sed -n -E 's/^(# )?designated => //p')
+          for way in ditto unzip tar; do
+            check=$(mktemp -d)
+            case "$way" in
+              ditto) archive="$out/$base.app.zip"; ditto -x -k "$archive" "$check" ;;
+              unzip) archive="$out/$base.app.zip"; unzip -q "$archive" -d "$check" ;;
+              tar) archive="$out/$base.app.tar.gz"; tar -C "$check" -xzf "$archive" ;;
+            esac
+            name="$(basename "$archive") via $way"
+            codesign --verify --deep --strict "$check/Notewise.app" \
+              || { echo "::error::$name: the app inside does not verify"; exit 1; }
+            got=$(codesign -d -r- "$check/Notewise.app" 2>&1 | sed -n -E 's/^(# )?designated => //p')
+            [ "$got" = "$expected" ] \
+              || { echo "::error::$name: designated requirement '$got', not '$expected'"; exit 1; }
+            echo "$name: verifies, $(du -h "$archive" | cut -f1)"
+            rm -rf "$check"
+          done
+
       # Collected by name rather than by globbing the whole bundle directory, which also holds
       # the unpacked `.app` and intermediates that need not be uploaded twice.
       #
@@ -296,7 +344,8 @@ jobs:
         run: |
           mkdir -p ../../dist-release
           find src-tauri/target/release/bundle -type f \
-            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+            \( -name '*.dmg' -o -name '*.app.zip' -o -name '*.app.tar.gz' \
+               -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.deb' -o -name '*.AppImage' \) \
             -not -name 'rw.*' \
             -exec cp {} ../../dist-release/ \;
@@ -344,7 +393,7 @@ jobs:
 
           | Platform | File | Status |
           |---|---|---|
-          | macOS, Apple silicon | `.dmg` | Signed with the project's own certificate — see below |
+          | macOS, Apple silicon | `.dmg`, `.app.zip` or `.app.tar.gz` — the same app in each | Signed with the project's own certificate — see below |
           | Windows | `.msi` or `.exe` | Unsigned — SmartScreen will warn |
           | Linux | `.deb` or `.AppImage` | Ready to install |
 
@@ -353,7 +402,8 @@ jobs:
           Notewise is signed, but with its own certificate rather than an Apple Developer ID, so
           macOS cannot confirm who made it and stops the first launch. Once per download:
 
-          1. Drag Notewise from the `.dmg` into Applications, and open it from there.
+          1. Drag Notewise from the `.dmg` into Applications — or move the `Notewise.app` that the
+             `.zip` or `.app.tar.gz` unpacks to — and open it from there.
           2. macOS says it could not verify that Notewise is free of malware. Choose **Done**.
           3. Open **System Settings → Privacy & Security**, scroll down to **Security**, and choose
              **Open Anyway** beside the line about Notewise — it stays there for about an hour

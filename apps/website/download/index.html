@@ -1,30 +1,39 @@
 <!doctype html>
-<html lang="en" class="scroll-smooth">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Install Notewise — macOS, Windows, Linux</title>
+    <title>Download Notewise — macOS, with Windows and Ubuntu coming soon</title>
     <meta
       name="description"
-      content="How to get Notewise running on macOS, Windows or Linux. Built from source — there are no installers yet, and this page says exactly what works on each platform."
+      content="Download Notewise for Mac as a .dmg, .zip or .app. Windows and Ubuntu builds are coming soon; until then, every platform can build it from source."
     />
     <meta name="theme-color" content="#0d0d0f" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>◐</text></svg>" />
+    <script>
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        document.documentElement.classList.add("motion");
+      }
+    </script>
     <script type="module" src="/src/download.ts"></script>
   </head>
 
   <body>
     <div class="fixed inset-x-0 top-0 z-50 h-0.5 bg-transparent">
-      <div id="progress" class="h-full w-0 bg-accent transition-[width] duration-150 ease-out"></div>
+      <div id="progress" class="h-full w-0 bg-gradient-to-r from-accent via-accent-soft to-record"></div>
     </div>
 
     <header id="nav" class="fixed inset-x-0 top-0 z-40 border-b border-transparent transition-all duration-300">
       <div class="container-page flex h-16 items-center gap-6">
         <a href="../" class="flex items-center gap-2 font-semibold tracking-tight">
-          <span class="text-accent">◐</span>
+          <span class="logo-mark text-accent">◐</span>
           Notewise
         </a>
-        <div class="ml-auto flex items-center gap-2">
+        <nav class="ml-auto hidden items-center gap-6 text-[13.5px] text-ink-muted md:flex">
+          <a class="transition-colors hover:text-ink" href="#first-launch">First launch</a>
+          <a class="transition-colors hover:text-ink" href="#source">Build from source</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-2 md:ml-0">
           <a class="btn-ghost px-4 py-2 text-[13px]" href="../">Overview</a>
           <a
             class="btn-primary px-4 py-2 text-[13px]"
@@ -38,33 +47,95 @@
     </header>
 
     <main class="pt-16">
-      <section class="relative overflow-hidden py-20">
+      <section class="download-band relative overflow-hidden pb-20 pt-20">
+        <div class="download-grid" aria-hidden="true"></div>
         <div
           data-parallax="0.2"
-          class="pointer-events-none absolute left-1/2 top-0 h-[26rem] w-[40rem] -translate-x-1/2 rounded-full bg-accent/15 blur-[130px]"
+          class="pointer-events-none absolute left-1/2 top-0 h-[26rem] w-[44rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[130px]"
           aria-hidden="true"
         ></div>
 
         <div class="container-page relative text-center">
-          <p class="eyebrow animate-fade-up">Install</p>
+          <p class="eyebrow fade-in">Download</p>
           <h1
-            class="mx-auto mt-4 max-w-3xl text-[clamp(2.2rem,5.5vw,3.6rem)] font-semibold leading-[1.06] tracking-[-0.03em] animate-fade-up"
-            style="animation-delay: 70ms"
+            class="fade-in mx-auto mt-4 max-w-3xl text-[clamp(2.4rem,6.5vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.04em]"
+            style="--fade-delay: 80ms"
           >
-            Build it from source
+            Get Notewise
           </h1>
-          <p
-            class="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-ink-muted animate-fade-up"
-            style="animation-delay: 140ms"
-          >
-            There are no installers yet — no signed builds, no release channel, no auto-update.
-            Ten minutes and a working toolchain gets you the whole thing.
+          <p class="fade-in mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-ink-muted" style="--fade-delay: 160ms">
+            Free and open source, with no account to make. The Mac app is ready in three
+            formats — pick whichever you like, they hold the same signed app.
+          </p>
+        </div>
+
+        <div id="downloads" class="downloads container-page relative mt-14 grid max-w-5xl gap-5 lg:grid-cols-[1.25fr_1fr_1fr]">
+          <!-- Filled by downloads.ts. -->
+        </div>
+      </section>
+
+      <!-- What the first launch looks like, said before it happens rather than after. -->
+      <section id="first-launch" class="border-t border-hairline py-20">
+        <div class="container-page mx-auto max-w-3xl">
+          <div data-reveal>
+            <p class="eyebrow">macOS</p>
+            <h2 class="mt-3 text-[clamp(1.7rem,3.5vw,2.4rem)] font-semibold tracking-[-0.02em]">The first launch</h2>
+            <p class="mt-4 text-[15px] leading-relaxed text-ink-muted">
+              Notewise is signed, but with the project's own certificate rather than an Apple
+              Developer ID, so macOS cannot confirm who made it and stops the first launch. Once
+              per download, it takes three steps.
+            </p>
+          </div>
+
+          <ol class="mt-8 space-y-4">
+            <li class="card flex items-start gap-4 p-6" data-reveal>
+              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hairline font-mono text-[12px] text-ink-muted">1</span>
+              <p class="text-[14.5px] leading-relaxed text-ink-muted">
+                <span class="text-ink">Put Notewise in Applications and open it from there.</span>
+                From the .dmg, drag it across; from the .zip or .app, move the unpacked
+                Notewise.app.
+              </p>
+            </li>
+            <li class="card flex items-start gap-4 p-6" data-reveal style="--reveal-delay: 80ms">
+              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hairline font-mono text-[12px] text-ink-muted">2</span>
+              <p class="text-[14.5px] leading-relaxed text-ink-muted">
+                <span class="text-ink">macOS says it could not verify that Notewise is free of malware.</span>
+                Choose <strong class="font-medium text-ink">Done</strong>.
+              </p>
+            </li>
+            <li class="card flex items-start gap-4 p-6" data-reveal style="--reveal-delay: 160ms">
+              <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hairline font-mono text-[12px] text-ink-muted">3</span>
+              <p class="text-[14.5px] leading-relaxed text-ink-muted">
+                <span class="text-ink">Open System Settings → Privacy &amp; Security</span>, scroll to
+                Security, and choose <strong class="font-medium text-ink">Open Anyway</strong> beside
+                the line about Notewise. It stays there for about an hour after the blocked attempt.
+                Confirm with your login password.
+              </p>
+            </li>
+          </ol>
+
+          <p class="mt-6 text-[13px] leading-relaxed text-ink-faint" data-reveal>
+            Permissions you grant carry over to later releases, because every release is signed
+            with the same certificate. To check that your copy is the one released on GitHub, run
+            <code class="text-ink-muted">codesign -d -r- /Applications/Notewise.app</code> and compare
+            the certificate hash with the one in the release notes.
+          </p>
+        </div>
+      </section>
+
+      <section id="source" class="border-t border-hairline pt-20">
+        <div class="container-page mx-auto max-w-3xl" data-reveal>
+          <p class="eyebrow">Every platform</p>
+          <h2 class="mt-3 text-[clamp(1.7rem,3.5vw,2.4rem)] font-semibold tracking-[-0.02em]">Or build it from source</h2>
+          <p class="mt-4 text-[15px] leading-relaxed text-ink-muted">
+            Ten minutes and a working toolchain. This is also the way in on Windows and Linux
+            until their apps ship — here is what works on each today.
           </p>
         </div>
       </section>
 
       <!-- Platform status, stated before the commands rather than after. -->
-      <section class="container-page pb-6">
+      <section class="container-page pb-6 pt-10">
         <div class="grid gap-4 md:grid-cols-3" id="platforms">
           <!-- Filled by download.ts; the detected platform is highlighted. -->
         </div>

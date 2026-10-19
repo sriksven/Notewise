@@ -19,7 +19,7 @@
    * was still scrolling to 402px.
    *
    * And `hidden` would create a scroll container, which breaks `position: sticky` in every
-   * descendant. The pipeline's sticky panel is exactly that. `clip` cuts the overflow without
+   * descendant. Every pinned scene below is exactly that. `clip` cuts the overflow without
    * creating one.
    */
   html,
@@ -61,15 +61,19 @@
 
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5
-           text-[14px] font-medium transition-all duration-200;
+           text-[14px] font-medium transition-[background-color,border-color,box-shadow,color] duration-200;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-[15px];
   }
 
   .btn-primary {
-    @apply btn bg-ink text-bg hover:-translate-y-0.5 hover:shadow-[0_10px_30px_-10px_rgba(237,237,240,0.5)];
+    @apply btn bg-ink text-bg hover:shadow-[0_10px_40px_-10px_rgba(165,176,250,0.7)];
   }
 
   .btn-ghost {
-    @apply btn border border-hairline text-ink hover:-translate-y-0.5 hover:border-ink-faint hover:bg-white/5;
+    @apply btn border border-hairline text-ink hover:border-ink-faint hover:bg-white/5;
   }
 
   .card {
@@ -84,6 +88,679 @@
   .rule {
     @apply h-px w-full bg-gradient-to-r from-transparent via-hairline to-transparent;
   }
+
+  .tag {
+    @apply mt-0.5 shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold;
+  }
+  .tag--local {
+    @apply bg-accent/15 text-accent-soft;
+  }
+  .tag--choice {
+    @apply bg-record/15 text-record;
+  }
+
+  .stat {
+    @apply px-3 py-6;
+  }
+  .stat-num {
+    @apply text-[clamp(1.5rem,4vw,2.4rem)] font-semibold tracking-[-0.02em];
+  }
+  .stat-label {
+    @apply mt-1 text-[12px] text-ink-faint;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════  scenes
+ *
+ * A scene is a tall section with a sticky, viewport-sized frame inside it. main.ts turns how far
+ * the section has scrolled into a progress from 0 to 1 and each scene draws itself from that.
+ *
+ * All of it is behind `.motion`, which an inline script adds before first paint unless the
+ * visitor has asked for reduced motion. Without it the sections are ordinary height, nothing is
+ * pinned, and every element is in its finished state — the content, with none of the movement.
+ */
+.scene {
+  position: relative;
+}
+
+.motion .scene-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+}
+
+.motion .scene--hero {
+  height: 230vh;
+}
+.motion .scene--words {
+  height: 260vh;
+}
+.motion .scene--pipe {
+  height: 460vh;
+}
+.motion .scene--graph {
+  height: 240vh;
+}
+/* The rail's height depends on how wide the track is; main.ts sets it. */
+
+/* Without motion, a scene is just a section with breathing room. */
+html:not(.motion) .scene:not(.scene--hero) {
+  @apply py-24;
+}
+
+/* ──────────────────────────────────────────────────────────────  spotlight */
+.spotlight {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 600ms ease;
+  background: radial-gradient(
+    600px circle at var(--mx, 50%) var(--my, 30%),
+    rgba(124, 140, 248, 0.07),
+    transparent 60%
+  );
+}
+.motion .spotlight.is-on {
+  opacity: 1;
+}
+
+/* ──────────────────────────────────────────────────────────────  hero */
+.hero-stage {
+  @apply flex flex-col items-center;
+  padding-top: clamp(6.5rem, 16vh, 10rem);
+}
+html:not(.motion) .hero-stage {
+  @apply pb-24;
+}
+
+.hero-bg {
+  @apply pointer-events-none absolute inset-0 overflow-hidden;
+}
+
+/* A receding grid floor, scrolling toward the viewer forever. */
+.hero-floor {
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  bottom: -10%;
+  height: 70%;
+  background-image:
+    linear-gradient(rgba(124, 140, 248, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 140, 248, 0.16) 1px, transparent 1px);
+  background-size: 64px 64px;
+  transform: perspective(500px) rotateX(62deg);
+  transform-origin: center top;
+  mask-image: linear-gradient(to bottom, transparent, black 30%, black 60%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 30%, black 60%, transparent);
+  animation: floor 3.5s linear infinite;
+}
+
+@keyframes floor {
+  to {
+    background-position: 0 64px;
+  }
+}
+
+.orb {
+  @apply absolute rounded-full;
+  filter: blur(120px);
+}
+.orb--a {
+  @apply -left-40 top-10 h-[34rem] w-[34rem] bg-accent/25 animate-drift;
+}
+.orb--b {
+  @apply -right-32 top-1/3 h-[28rem] w-[28rem] bg-record/15 animate-drift;
+  animation-delay: -3s;
+}
+
+.hero-copy {
+  @apply relative z-10 text-center;
+  will-change: transform, opacity, filter;
+}
+
+.hero-title {
+  @apply mt-5 font-semibold;
+  font-size: clamp(2.9rem, 8.5vw, 6.4rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+.hero-title .line {
+  display: block;
+}
+
+/* Split headline. Each character rises out of its own clipped word. */
+.split-word {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+  /* Room for descenders, which the clip would otherwise cut. */
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+}
+.split-char {
+  display: inline-block;
+}
+.motion .split-char {
+  animation: char-in 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i) * 32ms + 120ms);
+}
+/* Hidden until split, so the unsplit headline never paints and then jumps. */
+.motion [data-split]:not(.is-split) {
+  opacity: 0;
+}
+
+@keyframes char-in {
+  from {
+    opacity: 0;
+    transform: translateY(105%) rotate(10deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-in {
+  animation: fade-up 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--fade-delay, 60ms);
+}
+
+.hero-device {
+  @apply relative z-10 mt-14 w-[min(1060px,94vw)];
+  transform-origin: 50% 0%;
+  will-change: transform;
+}
+.motion .hero-device {
+  /* The starting pose, so the first paint already matches what main.ts will draw. */
+  transform: perspective(1400px) rotateX(32deg) scale(0.88);
+}
+
+.device-frame {
+  @apply card overflow-hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 50px 120px -30px rgba(0, 0, 0, 0.9),
+    0 30px 90px -40px rgba(124, 140, 248, 0.45);
+}
+
+.mini-wave {
+  height: 28px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(124, 140, 248, 0.7) 0 2px,
+    transparent 2px 5px
+  );
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 28' preserveAspectRatio='none'%3E%3Cpath d='M0 14 Q 10 2 20 14 T 40 14 T 60 14 Q 70 0 80 14 T 100 14 Q 110 8 120 14 T 140 14 Q 150 1 160 14 T 180 14 T 200 14 L200 28 L0 28Z M0 14 Q 10 26 20 14 T 40 14 T 60 14 Q 70 28 80 14 T 100 14 Q 110 20 120 14 T 140 14 Q 150 27 160 14 T 180 14 T 200 14 L200 0 L0 0Z' fill='black'/%3E%3C/svg%3E");
+  mask-size: 100% 100%;
+  animation: wave-scroll 1.6s linear infinite;
+}
+@keyframes wave-scroll {
+  to {
+    background-position: 50px 0;
+  }
+}
+
+.scroll-cue {
+  @apply absolute bottom-7 left-1/2 z-10 hidden h-9 w-6 -translate-x-1/2 rounded-full border border-ink-faint/60;
+}
+.motion .scroll-cue {
+  display: block;
+}
+.scroll-cue span {
+  @apply absolute left-1/2 top-2 h-2 w-0.5 -translate-x-1/2 rounded-full bg-ink-muted;
+  animation: cue 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes cue {
+  0% {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+  70% {
+    transform: translate(-50%, 12px);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────  manifesto */
+.scrub-text {
+  font-size: clamp(1.75rem, 4.6vw, 3.9rem);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  @apply max-w-5xl font-semibold;
+}
+.scrub-text em {
+  font-style: normal;
+}
+.scrub-word {
+  display: inline-block;
+}
+.scrub-word.is-em {
+  @apply text-accent-soft;
+}
+.motion .scrub-word {
+  /* `--w` runs 0 → 1 as the word is scrolled past; main.ts sets it. */
+  opacity: calc(0.13 + var(--w, 0) * 0.87);
+  filter: blur(calc((1 - var(--w, 0)) * 4px));
+  transform: translateY(calc((1 - var(--w, 0)) * 0.18em));
+}
+
+/* ──────────────────────────────────────────────────────────────  pipeline */
+.rail {
+  @apply absolute bottom-2 left-0 top-2 w-px bg-hairline;
+}
+.rail-fill {
+  @apply absolute inset-0 origin-top bg-gradient-to-b from-accent to-record;
+  transform: scaleY(var(--p, 1));
+}
+
+.step {
+  @apply relative py-2;
+}
+.step::before {
+  content: "";
+  @apply absolute -left-6 top-[1.05rem] h-2 w-2 -translate-x-[3.5px] rounded-full border border-hairline bg-bg transition-all duration-300;
+}
+.step-title {
+  @apply flex items-baseline gap-3 text-[20px] font-semibold tracking-[-0.01em] text-ink-faint transition-colors duration-300 lg:text-[22px];
+}
+.step-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 450ms cubic-bezier(0.16, 1, 0.3, 1), opacity 450ms;
+}
+.step-body > p {
+  @apply min-h-0 overflow-hidden pt-1.5 text-[14.5px] leading-relaxed text-ink-muted;
+  max-width: 28rem;
+}
+html:not(.motion) .step-title,
+.step.is-active .step-title {
+  @apply text-ink;
+}
+.step.is-active::before {
+  @apply scale-125 border-accent bg-accent;
+  box-shadow: 0 0 14px rgba(124, 140, 248, 0.8);
+}
+.motion .step:not(.is-active) .step-body {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+/*
+ * On a phone the heading, four steps and the stage cannot all fit in one pinned screen, so only
+ * the current step is shown. The stage beside it says which one it is anyway.
+ */
+@media (max-width: 1023px) {
+  .motion .pipe-eyebrow,
+  .motion .scene--pipe .rail,
+  .motion .step:not(.is-active) {
+    display: none;
+  }
+  .motion .steps {
+    @apply mt-4;
+  }
+}
+
+.stage {
+  @apply relative overflow-hidden;
+  aspect-ratio: 4 / 3;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(124, 140, 248, 0.12), transparent 60%),
+    theme("colors.surface");
+}
+@media (max-width: 1023px) {
+  .motion .stage {
+    aspect-ratio: auto;
+    height: min(44svh, 380px);
+  }
+}
+html:not(.motion) .stage {
+  aspect-ratio: auto;
+  @apply divide-y divide-hairline;
+}
+
+.motion .stage-layer {
+  position: absolute;
+  inset: 0;
+  will-change: opacity, transform;
+}
+html:not(.motion) .stage-layer > div {
+  @apply py-10;
+}
+
+/* Items inside a layer arrive in turn as the layer's own progress, `--t`, passes their `--d`. */
+.motion .stage-layer .item {
+  --r: clamp(0, calc((var(--t, 1) - var(--d, 0)) * 4), 1);
+  opacity: var(--r);
+  transform: translateY(calc((1 - var(--r)) * 18px)) scale(calc(0.96 + var(--r) * 0.04));
+}
+.motion .stage-layer .type {
+  /* One line each: the reveal wipes left to right, and a wrapped line would show its second
+     half before its first had finished. */
+  white-space: nowrap;
+  --r: clamp(0, calc((var(--t, 1) - var(--d, 0)) * 3.2), 1);
+  clip-path: inset(-4px calc((1 - var(--r)) * 100%) -4px 0);
+}
+
+.mic {
+  @apply flex h-20 w-20 items-center justify-center rounded-full bg-record text-white animate-pulse-ring;
+}
+
+.eq {
+  @apply flex h-24 items-center gap-[3px];
+}
+.eq span {
+  @apply w-[4px] rounded-full bg-gradient-to-t from-accent to-accent-soft;
+  height: 100%;
+  transform: scaleY(var(--h, 0.4));
+  animation: eq 1.1s ease-in-out infinite alternate;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes eq {
+  from {
+    transform: scaleY(calc(var(--h, 0.4) * 0.25));
+  }
+  to {
+    transform: scaleY(var(--h, 0.4));
+  }
+}
+
+.chip-card {
+  @apply rounded-xl border border-hairline bg-raised px-4 py-3;
+}
+.chip-card--ask {
+  @apply border-record/30 bg-record/[0.06];
+}
+.tick {
+  @apply inline-block h-4 w-4 shrink-0 rounded border border-accent bg-accent/20;
+}
+
+/* ──────────────────────────────────────────────────────────────  graph */
+.graph {
+  @apply mx-auto w-full max-w-[600px];
+  max-height: 62svh;
+}
+.graph .edges path {
+  stroke: rgba(165, 176, 250, 0.75);
+  stroke-width: 2;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: var(--draw, 0);
+  filter: drop-shadow(0 0 6px rgba(124, 140, 248, 0.7));
+}
+.graph .edges .edge-2nd {
+  stroke: rgba(226, 56, 46, 0.6);
+  stroke-dasharray: 0.02 0.02;
+}
+.motion .graph .edges .edge-2nd {
+  opacity: var(--show, 0);
+  stroke-dasharray: 0.02 0.02;
+  stroke-dashoffset: 0;
+}
+.graph .node rect {
+  fill: theme("colors.raised");
+  stroke: theme("colors.hairline");
+}
+.graph .node text {
+  fill: theme("colors.ink.DEFAULT");
+}
+.graph .node--root rect {
+  fill: theme("colors.accent.DEFAULT");
+  stroke: none;
+}
+.graph .node--root text {
+  fill: theme("colors.bg");
+}
+.graph .node {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.motion .graph .node:not(.node--root) {
+  opacity: var(--pop, 0);
+  transform: scale(calc(0.6 + var(--pop, 0) * 0.4));
+}
+.graph-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: halo 3.2s ease-in-out infinite;
+}
+@keyframes halo {
+  50% {
+    transform: scale(1.18);
+    opacity: 0.6;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────  feature rail */
+.rail-viewport {
+  @apply w-full;
+}
+.rail-track {
+  @apply container-page grid gap-4 md:grid-cols-2 lg:grid-cols-3;
+}
+.motion .rail-track {
+  display: flex;
+  gap: 1.25rem;
+  width: max-content;
+  max-width: none;
+  padding-left: max(1.5rem, calc((100vw - 72rem) / 2 + 2rem));
+  padding-right: 20vw;
+  will-change: transform;
+}
+
+.feature {
+  @apply card relative flex flex-col overflow-hidden p-7;
+}
+.motion .feature {
+  width: min(78vw, 330px);
+  height: min(52svh, 360px);
+  transform-style: preserve-3d;
+}
+.feature-num {
+  @apply font-mono text-[12px] text-ink-faint;
+}
+.feature-icon {
+  @apply mt-auto text-[44px] leading-none text-accent;
+  text-shadow: 0 0 30px rgba(124, 140, 248, 0.6);
+}
+html:not(.motion) .feature-icon {
+  @apply mt-4 text-[26px];
+}
+.feature::after {
+  content: "";
+  @apply pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-3xl;
+}
+
+/* ──────────────────────────────────────────────────────────────  marquee */
+.marquee {
+  @apply overflow-hidden whitespace-nowrap;
+}
+.marquee-row {
+  display: inline-block;
+  padding-right: 2rem;
+  font-size: clamp(2.4rem, 7vw, 5.5rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  @apply text-ink;
+  will-change: transform;
+}
+.marquee-row--outline {
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(165, 176, 250, 0.55);
+}
+
+/* ──────────────────────────────────────────────────────────────  privacy */
+.zoom-title {
+  font-size: clamp(2.1rem, 5.5vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  @apply font-semibold;
+}
+.motion .zoom-title {
+  transform: scale(var(--z, 1));
+  letter-spacing: calc(-0.035em + (1 - var(--z, 1)) * 0.25em);
+}
+
+/* ──────────────────────────────────────────────────────────────  download */
+.download-grid {
+  @apply pointer-events-none absolute inset-0;
+  background-image: radial-gradient(rgba(165, 176, 250, 0.16) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse at 50% 40%, black, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black, transparent 70%);
+}
+
+.dl-card {
+  @apply card relative flex flex-col overflow-hidden p-6 sm:p-7;
+  transform-style: preserve-3d;
+  transition:
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 300ms;
+}
+.dl-card.is-current {
+  @apply border-ink-faint/60;
+}
+
+/* The Mac card gets a slowly turning gradient border: it is the one that works. */
+@property --angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.dl-card--mac {
+  border-color: transparent;
+  background:
+    linear-gradient(theme("colors.surface"), theme("colors.surface")) padding-box,
+    conic-gradient(
+        from var(--angle),
+        rgba(124, 140, 248, 0.9),
+        rgba(226, 56, 46, 0.6),
+        rgba(42, 42, 46, 1) 40%,
+        rgba(42, 42, 46, 1) 70%,
+        rgba(124, 140, 248, 0.9)
+      )
+      border-box;
+  animation: spin-border 6s linear infinite;
+}
+@keyframes spin-border {
+  to {
+    --angle: 360deg;
+  }
+}
+
+.dl-sheen {
+  @apply pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300;
+  background: radial-gradient(
+    380px circle at var(--sx, 50%) var(--sy, 0%),
+    rgba(165, 176, 250, 0.14),
+    transparent 60%
+  );
+}
+.dl-card:hover .dl-sheen {
+  opacity: 1;
+}
+
+.badge-live {
+  @apply flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-semibold text-accent-soft;
+}
+.badge-live .dot {
+  @apply h-1.5 w-1.5 rounded-full bg-accent-soft;
+  animation: blink 1.6s ease-in-out infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.badge-soon {
+  @apply rounded-full border border-hairline px-2.5 py-1 text-[11px] font-semibold text-ink-faint;
+}
+
+.dl-button {
+  @apply relative flex w-full items-center justify-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-4 py-3.5 text-[14.5px] font-semibold sm:px-5 sm:text-[15px];
+}
+.dl-button.is-primary {
+  @apply bg-ink text-bg transition-shadow duration-300;
+}
+.dl-button.is-primary:hover {
+  box-shadow: 0 14px 44px -12px rgba(165, 176, 250, 0.8);
+}
+/* A light sweep across the button every few seconds. */
+.dl-button.is-primary::after {
+  content: "";
+  @apply pointer-events-none absolute inset-y-0 -left-1/2 w-1/3;
+  background: linear-gradient(100deg, transparent, rgba(124, 140, 248, 0.35), transparent);
+  animation: sweep 3.6s ease-in-out infinite;
+}
+@keyframes sweep {
+  0%,
+  55% {
+    transform: translateX(0) skewX(-12deg);
+  }
+  100% {
+    transform: translateX(520%) skewX(-12deg);
+  }
+}
+.dl-button.is-disabled {
+  @apply cursor-not-allowed border border-dashed border-hairline bg-transparent text-ink-faint;
+}
+.dl-meta {
+  @apply max-[380px]:hidden rounded-md bg-bg/10 px-1.5 py-0.5 font-mono text-[11.5px] font-medium opacity-70;
+}
+.dl-card.is-pending .dl-button.is-primary::after,
+.dl-card.is-pending .fmt-group,
+.dl-card.is-pending [data-hint] {
+  display: none;
+}
+
+.fmt-group {
+  @apply grid grid-cols-3 gap-1 rounded-xl border border-hairline bg-bg/60 p-1;
+}
+.fmt {
+  @apply rounded-lg py-1.5 font-mono text-[12.5px] text-ink-muted transition-all duration-200 hover:text-ink;
+}
+.fmt[aria-checked="true"] {
+  @apply bg-raised text-ink;
+  box-shadow: inset 0 0 0 1px theme("colors.hairline");
+}
+.fmt:disabled {
+  @apply cursor-not-allowed line-through opacity-40;
+}
+
+/* ──────────────────────────────────────────────────────────────  finale */
+.finale-word {
+  @apply pointer-events-none absolute left-1/2 top-1/2 select-none whitespace-nowrap font-semibold;
+  font-size: clamp(4rem, 17vw, 15rem);
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(165, 176, 250, 0.12);
+  transform: translate(calc(-50% + var(--fx, 0px)), -50%);
+}
+
+.logo-mark {
+  display: inline-block;
+  transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.motion .logo-mark {
+  transform: rotate(calc(var(--scroll-turn, 0) * 1deg));
 }
 
 /*
@@ -93,28 +770,34 @@
  * painted at full opacity for one frame and then hidden. `.is-visible` is added by an
  * IntersectionObserver in `main.ts`.
  */
-[data-reveal] {
+.motion [data-reveal] {
   opacity: 0;
   transform: translateY(28px);
   transition:
-    opacity 800ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 900ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
   transition-delay: var(--reveal-delay, 0ms);
 }
-
-[data-reveal].is-visible {
+.motion [data-reveal="left"] {
+  transform: translateX(-48px);
+}
+.motion [data-reveal="right"] {
+  transform: translateX(48px);
+}
+.motion [data-reveal="scale"] {
+  transform: scale(0.92);
+}
+.motion [data-reveal="rise"] {
+  transform: perspective(1000px) translateY(80px) rotateX(24deg) scale(0.94);
+  transform-origin: 50% 100%;
+}
+.motion [data-reveal].is-visible {
   opacity: 1;
   transform: none;
 }
-
-[data-reveal="left"] {
-  transform: translateX(-36px);
-}
-[data-reveal="right"] {
-  transform: translateX(36px);
-}
-[data-reveal="scale"] {
-  transform: scale(0.94);
+/* Once revealed, a tilting card's transform belongs to the pointer, not the reveal. */
+.motion .dl-card.is-visible.is-tilting {
+  transition: transform 120ms linear;
 }
 
 /*
@@ -127,49 +810,22 @@
     scroll-behavior: auto;
   }
 
-  [data-reveal],
-  [data-reveal].is-visible {
-    opacity: 1;
-    transform: none;
-    transition: none;
-  }
-
   .animate-drift,
   .animate-pulse-ring,
-  .animate-fade-up {
+  .fade-in,
+  .hero-floor,
+  .mini-wave,
+  .eq span,
+  .graph-halo,
+  .dl-card--mac,
+  .dl-button.is-primary::after,
+  .badge-live .dot,
+  .scroll-cue span {
     animation: none !important;
   }
 
   [data-parallax] {
     transform: none !important;
-  }
-}
-
-/*
- * The pipeline's sticky panels.
- *
- * All four are stacked in the same box and cross-faded, rather than mounted and unmounted.
- * Swapping the DOM would resize the container on every step and make the whole section jump.
- */
-.stage-panel {
-  opacity: 0;
-  transform: translateY(12px) scale(0.98);
-  transition:
-    opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
-  pointer-events: none;
-}
-
-.stage-panel.is-active {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .stage-panel {
-    transition: none;
-    transform: none;
   }
 }
 

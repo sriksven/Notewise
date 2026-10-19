@@ -1,31 +1,36 @@
 /**
- * The site's behaviour: scroll reveals, the sticky pipeline, parallax, counters, and the
- * content lists that are generated rather than hand-written twice.
+ * The overview page: pinned scroll scenes, the feature rail, the marquee, and the download cards.
  *
  * # No framework
  *
- * This is a static document with scroll effects. React would ship ~140 kB to render markup
- * that never changes, and every effect here is DOM-level anyway — an IntersectionObserver and
- * a scroll listener. The whole bundle is a few kilobytes.
+ * This is a static document with scroll effects. React would ship ~140 kB to render markup that
+ * never changes, and every effect here is DOM-level anyway. Each pinned scene reduces to one
+ * number — how far through it the reader is, from 0 to 1 — and draws itself from that. One
+ * scroll listener, coalesced to one frame, feeds all of them.
  *
  * # Motion is optional, everywhere
  *
- * `prefers-reduced-motion` is checked once and every animated path is skipped when it is set.
- * The CSS handles the reveals; this file handles the parts CSS cannot, which is why the check
- * appears here too rather than only in the stylesheet.
+ * An inline script in the page adds `.motion` to `<html>` before first paint unless the visitor
+ * has asked for reduced motion. Every pinned or scrubbed effect is gated on that class in the CSS,
+ * and on `MOTION` here: without it the scenes are ordinary sections in their finished state.
  */
 
 import "./style.css";
+import { mountDownloads } from "./downloads";
 
-const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const MOTION = document.documentElement.classList.contains("motion");
+const FINE_POINTER = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
 // ---------------------------------------------------------------- content
 
 /**
- * What the app does. One list, rendered into the grid.
+ * What the app does. One list, rendered into the rail.
  *
  * Kept in the code rather than the markup because every entry has the same shape, and a
- * fourteen-item grid written by hand is fourteen chances for one card to drift out of line.
+ * fourteen-item list written by hand is fourteen chances for one card to drift out of line.
  */
 const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
@@ -41,7 +46,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
     icon: "◑",
     title: "Speaker separation",
-    body: "The transcript reads as a conversation. Name a voice once and it applies throughout, or merge two the diarizer split apart. Names arrive on their own when the browser extension is running.",
+    body: "The transcript reads as a conversation. Name a voice once and it applies throughout, or merge two the diarizer split apart.",
   },
   {
     icon: "✦",
@@ -61,7 +66,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
   {
     icon: "◇",
     title: "Questions while people can still answer",
-    body: "It watches a live meeting and flags what was left vague — a decision with no owner, a date nobody actually said. Learning that from a summary afterwards is too late to fix it.",
+    body: "It watches a live meeting and flags what was left vague — a decision with no owner, a date nobody actually said.",
   },
   {
     icon: "◫",
@@ -110,15 +115,15 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
 const LIMITATIONS: Array<{ title: string; body: string }> = [
   {
     title: "System audio is not verified yet",
-    body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch — and has not yet been run end to end in a release build. macOS only.",
+    body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch — and has not yet been run end to end in a release build.",
   },
   {
-    title: "macOS only, in practice",
-    body: "The engine and CLI build anywhere Rust does. The desktop shell is macOS; Windows and Linux builds are not done.",
+    title: "Signed by the project, not by Apple",
+    body: "The Mac app is signed with Notewise's own certificate rather than an Apple Developer ID, so macOS blocks the first launch until you choose Open Anyway in Privacy & Security. Once per download. There is no auto-update yet.",
   },
   {
-    title: "There are no installers",
-    body: "No release channel, no signed binaries, no auto-update. You build it from source — the install page has the commands.",
+    title: "macOS only, for now",
+    body: "The downloadable app is for Apple silicon Macs. Windows and Ubuntu builds are coming; until then the engine, CLI and web dashboard build from source anywhere Rust does.",
   },
   {
     title: "Speakers are separated, not recognised",
@@ -131,24 +136,26 @@ const LIMITATIONS: Array<{ title: string; body: string }> = [
 ];
 
 function renderLists(): void {
-  const grid = document.querySelector<HTMLElement>("#feature-grid");
-  if (grid) {
-    grid.innerHTML = FEATURES.map(
+  const rail = document.querySelector<HTMLElement>("#feature-grid");
+  if (rail) {
+    rail.innerHTML = FEATURES.map(
       (feature, index) => `
-        <article class="card group p-6 transition-all duration-300 hover:-translate-y-1 hover:border-ink-faint"
-                 data-reveal style="--reveal-delay:${(index % 3) * 90}ms">
-          <span class="text-[20px] text-accent transition-transform duration-300 group-hover:scale-110 inline-block">${feature.icon}</span>
-          <h3 class="mt-3 text-[15px] font-medium">${feature.title}</h3>
+        <article class="feature" ${MOTION ? "" : `data-reveal style="--reveal-delay:${(index % 3) * 90}ms"`}>
+          <span class="feature-num">${String(index + 1).padStart(2, "0")}</span>
+          <span class="feature-icon">${feature.icon}</span>
+          <h3 class="mt-5 text-[18px] font-semibold tracking-[-0.01em]">${feature.title}</h3>
           <p class="mt-2 text-[13.5px] leading-relaxed text-ink-muted">${feature.body}</p>
         </article>`,
     ).join("");
+    const total = document.querySelector<HTMLElement>("[data-rail-total]");
+    if (total) total.textContent = String(FEATURES.length);
   }
 
   const limits = document.querySelector<HTMLElement>("#limitations");
   if (limits) {
     limits.innerHTML = LIMITATIONS.map(
       (limit, index) => `
-        <div class="card flex items-start gap-4 p-5" data-reveal style="--reveal-delay:${index * 70}ms">
+        <div class="card flex items-start gap-4 p-5" data-reveal="${index % 2 ? "right" : "left"}" style="--reveal-delay:${index * 70}ms">
           <span class="mt-1 shrink-0 text-ink-faint">○</span>
           <div>
             <h3 class="text-[15px] font-medium">${limit.title}</h3>
@@ -157,6 +164,389 @@ function renderLists(): void {
         </div>`,
     ).join("");
   }
+}
+
+// ---------------------------------------------------------------- text splitting
+
+/** Interpolated across the second headline line, standing in for a gradient. */
+const GRADIENT = ["#a5b0fa", "#ededf0", "#7c8cf8"];
+
+function mix(from: string, to: string, t: number): string {
+  const a = Number.parseInt(from.slice(1), 16);
+  const b = Number.parseInt(to.slice(1), 16);
+  const channel = (shift: number) =>
+    Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * t);
+  return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`;
+}
+
+function gradientAt(t: number): string {
+  const scaled = t * (GRADIENT.length - 1);
+  const index = Math.min(GRADIENT.length - 2, Math.floor(scaled));
+  return mix(GRADIENT[index], GRADIENT[index + 1], scaled - index);
+}
+
+/**
+ * Split the headline into characters so each can rise on its own.
+ *
+ * A clipped wrapper per word, not per character: per character, the clip would cut the
+ * neighbouring glyph's overhang. The whole line keeps its text for screen readers via the
+ * heading's label, and the fragments are hidden from them.
+ */
+function splitHeadline(): void {
+  const lines = [...document.querySelectorAll<HTMLElement>("[data-split]")];
+  const heading = lines[0]?.closest("h1");
+  if (heading) heading.setAttribute("aria-label", lines.map((line) => line.textContent?.trim()).join(" "));
+
+  let order = 0;
+  for (const line of lines) {
+    const text = line.textContent?.trim() ?? "";
+    const gradient = line.dataset.split === "gradient";
+    const letters = text.replace(/\s/g, "").length;
+    let seen = 0;
+
+    line.innerHTML = text
+      .split(" ")
+      .map((word) => {
+        const chars = [...word]
+          .map((char) => {
+            const color = gradient ? `color:${gradientAt(letters > 1 ? seen / (letters - 1) : 0)};` : "";
+            seen += 1;
+            return `<span class="split-char" style="--i:${order++};${color}">${char}</span>`;
+          })
+          .join("");
+        return `<span class="split-word" aria-hidden="true">${chars}</span>`;
+      })
+      .join(" ");
+    line.classList.add("is-split");
+  }
+}
+
+/** Split the manifesto into words, keeping which ones were emphasised. */
+function splitWords(host: HTMLElement): HTMLElement[] {
+  const words: HTMLElement[] = [];
+  const fragment = document.createDocumentFragment();
+
+  const add = (text: string, emphasised: boolean) => {
+    for (const piece of text.split(/(\s+)/)) {
+      if (!piece) continue;
+      if (/^\s+$/.test(piece)) {
+        fragment.append(" ");
+        continue;
+      }
+      const span = document.createElement("span");
+      span.className = emphasised ? "scrub-word is-em" : "scrub-word";
+      span.textContent = piece;
+      fragment.append(span);
+      words.push(span);
+    }
+  };
+
+  for (const node of [...host.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE) add(node.textContent ?? "", false);
+    else if (node instanceof HTMLElement) add(node.textContent ?? "", node.tagName === "EM");
+  }
+
+  host.replaceChildren(fragment);
+  return words;
+}
+
+// ---------------------------------------------------------------- scenes
+
+interface Scene {
+  element: HTMLElement;
+  /** Called with how far through the scene the reader is, 0 → 1. */
+  update(progress: number): void;
+  /** Called on resize, before `update`, for anything that depends on layout. */
+  measure?(): void;
+}
+
+/**
+ * Progress through a pinned scene: 0 when its top reaches the top of the viewport, 1 when its
+ * bottom reaches the bottom — the stretch during which its sticky frame is held in place.
+ */
+function progressOf(element: HTMLElement): number {
+  const box = element.getBoundingClientRect();
+  const travel = box.height - window.innerHeight;
+  if (travel <= 0) return box.top <= 0 ? 1 : 0;
+  return clamp(-box.top / travel);
+}
+
+function heroScene(): Scene | null {
+  const element = document.querySelector<HTMLElement>('[data-scene="hero"]');
+  const copy = document.querySelector<HTMLElement>("[data-hero-copy]");
+  const device = document.querySelector<HTMLElement>("[data-hero-device]");
+  const cue = document.querySelector<HTMLElement>(".scroll-cue");
+  if (!element || !copy || !device) return null;
+
+  // How far the window must rise to sit centred, measured from its resting place in the layout.
+  let rise = 0;
+
+  return {
+    element,
+    measure() {
+      const height = device.offsetHeight;
+      const target = Math.max(84, (window.innerHeight - height) / 2);
+      rise = Math.max(0, device.offsetTop - target);
+    },
+    update(progress) {
+      const settle = easeOut(clamp(progress / 0.72));
+      const lift = clamp(progress * 1.9);
+
+      copy.style.transform = `translate3d(0, ${(-progress * window.innerHeight * 0.24).toFixed(1)}px, 0) scale(${(1 - progress * 0.08).toFixed(3)})`;
+      copy.style.opacity = (1 - lift).toFixed(3);
+      copy.style.filter = `blur(${(lift * 10).toFixed(1)}px)`;
+      if (cue) cue.style.opacity = clamp(1 - progress * 6).toFixed(3);
+
+      device.style.transform =
+        `perspective(1400px) translate3d(0, ${(-rise * settle).toFixed(1)}px, 0) ` +
+        `rotateX(${(32 * (1 - settle)).toFixed(2)}deg) scale(${(0.88 + 0.12 * settle).toFixed(3)})`;
+    },
+  };
+}
+
+function wordsScene(): Scene | null {
+  const element = document.querySelector<HTMLElement>('[data-scene="words"]');
+  const host = element?.querySelector<HTMLElement>("[data-words]");
+  if (!element || !host) return null;
+
+  const words = splitWords(host);
+  const count = words.length;
+  // A soft edge three words wide, so the light runs along the sentence instead of ticking.
+  const edge = 3;
+
+  return {
+    element,
+    update(progress) {
+      const head = clamp(progress / 0.8) * (count + edge);
+      words.forEach((word, index) => {
+        word.style.setProperty("--w", clamp((head - index) / edge).toFixed(3));
+      });
+    },
+  };
+}
+
+function pipelineScene(): Scene | null {
+  const element = document.querySelector<HTMLElement>('[data-scene="pipe"]');
+  if (!element) return null;
+
+  const layers = [...element.querySelectorAll<HTMLElement>("[data-layer]")];
+  const steps = [...element.querySelectorAll<HTMLElement>("[data-step]")];
+  const count = layers.length;
+
+  const eq = element.querySelector<HTMLElement>("[data-eq]");
+  if (eq) {
+    // Fixed heights rather than random ones: the page should look the same on every visit.
+    eq.innerHTML = Array.from({ length: 44 }, (_, index) => {
+      const height = 0.25 + 0.75 * Math.abs(Math.sin(index * 0.55) * Math.cos(index * 0.17));
+      return `<span style="--h:${height.toFixed(2)};--delay:${(-(index % 7) * 0.13).toFixed(2)}s"></span>`;
+    }).join("");
+  }
+
+  let active = -1;
+
+  return {
+    element,
+    update(progress) {
+      const position = progress * count;
+      element.style.setProperty("--p", progress.toFixed(4));
+
+      layers.forEach((layer, index) => {
+        const local = clamp(position - index);
+        const enter = index === 0 ? 1 : clamp((position - index) / 0.16);
+        const leave = index === count - 1 ? 1 : clamp((index + 1 - position) / 0.14);
+        const shown = Math.min(enter, leave);
+
+        layer.style.setProperty("--t", local.toFixed(3));
+        layer.style.opacity = shown.toFixed(3);
+        layer.style.transform = `translate3d(0, ${((1 - enter) * 40 - (1 - leave) * 40).toFixed(1)}px, 0) scale(${(0.96 + 0.04 * shown).toFixed(3)})`;
+        layer.style.visibility = shown <= 0.001 ? "hidden" : "visible";
+      });
+
+      const now = Math.min(count - 1, Math.floor(position));
+      if (now !== active) {
+        active = now;
+        steps.forEach((step, index) => step.classList.toggle("is-active", index === now));
+      }
+    },
+  };
+}
+
+function graphScene(): Scene | null {
+  const element = document.querySelector<HTMLElement>('[data-scene="graph"]');
+  if (!element) return null;
+
+  const edges = [...element.querySelectorAll<SVGPathElement>("[data-edge]")];
+  const nodes = [...element.querySelectorAll<SVGGElement>("[data-node]")];
+  const spokes = nodes.length;
+
+  return {
+    element,
+    update(progress) {
+      const run = clamp(progress / 0.78);
+      edges.forEach((edge, index) => {
+        if (index < spokes) {
+          const drawn = clamp((run - index * 0.1) / 0.42);
+          edge.style.setProperty("--draw", (1 - drawn).toFixed(3));
+          nodes[index]?.style.setProperty("--pop", easeOut(clamp((drawn - 0.65) / 0.35)).toFixed(3));
+        } else {
+          // The second-degree link — decision to ticket — arrives last.
+          edge.style.setProperty("--show", clamp((run - 0.86) / 0.14).toFixed(3));
+        }
+      });
+    },
+  };
+}
+
+function railScene(): Scene | null {
+  const element = document.querySelector<HTMLElement>('[data-scene="rail"]');
+  const track = element?.querySelector<HTMLElement>(".rail-track");
+  if (!element || !track) return null;
+
+  const cards = [...track.querySelectorAll<HTMLElement>(".feature")];
+  const counter = element.querySelector<HTMLElement>("[data-rail-count]");
+  let overflow = 0;
+  let centres: number[] = [];
+  let shown = -1;
+
+  return {
+    element,
+    measure() {
+      overflow = Math.max(0, track.scrollWidth - window.innerWidth);
+      // Pinned for exactly as long as the track takes to slide past, plus the screen it starts on.
+      element.style.height = `${overflow + window.innerHeight}px`;
+      centres = cards.map((card) => card.offsetLeft + card.offsetWidth / 2);
+    },
+    update(progress) {
+      const shift = progress * overflow;
+      track.style.transform = `translate3d(${(-shift).toFixed(1)}px, 0, 0)`;
+
+      const middle = window.innerWidth / 2;
+      let nearest = 0;
+      let best = Infinity;
+      cards.forEach((card, index) => {
+        const offset = (centres[index] - shift - middle) / window.innerWidth;
+        const distance = Math.abs(offset);
+        if (distance < best) {
+          best = distance;
+          nearest = index;
+        }
+        // Cards lean away from the centre like pages on a drum.
+        card.style.transform = `perspective(1000px) rotateY(${(clamp(offset, -1, 1) * -22).toFixed(2)}deg) scale(${(1 - clamp(distance) * 0.1).toFixed(3)})`;
+        card.style.opacity = (1 - clamp(distance - 0.35) * 0.9).toFixed(3);
+      });
+
+      if (counter && nearest !== shown) {
+        shown = nearest;
+        counter.textContent = String(nearest + 1).padStart(2, "0");
+      }
+    },
+  };
+}
+
+function setupScenes(): void {
+  if (!MOTION) {
+    // The pipeline has to show a step as current even without motion; all of them are.
+    document.querySelectorAll(".step").forEach((step) => step.classList.add("is-active"));
+    return;
+  }
+
+  const scenes = [heroScene(), wordsScene(), pipelineScene(), graphScene(), railScene()].filter(
+    (scene): scene is Scene => scene !== null,
+  );
+
+  const draw = () => {
+    for (const scene of scenes) {
+      const box = scene.element.getBoundingClientRect();
+      // Off-screen scenes are skipped, but still drawn once at their nearest end so a fast jump
+      // past one never leaves it half-finished when scrolled back to.
+      if (box.bottom < -50 || box.top > window.innerHeight + 50) {
+        scene.update(box.bottom < 0 ? 1 : 0);
+        continue;
+      }
+      scene.update(progressOf(scene.element));
+    }
+  };
+
+  const remeasure = () => {
+    for (const scene of scenes) scene.measure?.();
+    draw();
+  };
+
+  remeasure();
+  window.addEventListener("scroll", onFrame(draw), { passive: true });
+  window.addEventListener("resize", onFrame(remeasure));
+  // Web fonts and late layout shift the measurements; one more pass once everything is in.
+  window.addEventListener("load", remeasure);
+}
+
+// ---------------------------------------------------------------- marquee
+
+/**
+ * Two rows of type that drift on their own and surge with scrolling, leaning into the direction
+ * of travel. Runs only while the band is on screen.
+ */
+function setupMarquee(): void {
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-marquee]")];
+  if (rows.length === 0) return;
+
+  const tracks = rows.map((row) => {
+    const inner = row.querySelector<HTMLElement>(".marquee-row");
+    if (!inner) return null;
+    // Two copies, so the seam is never on screen.
+    inner.innerHTML = `<span>${inner.textContent}&nbsp;</span><span>${inner.textContent}&nbsp;</span>`;
+    return { inner, direction: Number(row.dataset.marquee ?? "1"), x: 0, width: 0 };
+  });
+
+  if (!MOTION) return;
+
+  let velocity = 0;
+  let lastY = window.scrollY;
+  let lastTime = performance.now();
+  let running = false;
+
+  const frame = (now: number) => {
+    if (!running) return;
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+
+    const y = window.scrollY;
+    const delta = y - lastY;
+    lastY = y;
+    // Smoothed, so a single big wheel tick reads as a lean rather than a jolt.
+    velocity += (delta - velocity) * 0.12;
+
+    for (const track of tracks) {
+      if (!track) continue;
+      if (track.width === 0) track.width = track.inner.scrollWidth / 2;
+      const speed = (60 + Math.abs(velocity) * 28) * dt;
+      track.x -= speed * track.direction;
+      if (track.x <= -track.width) track.x += track.width;
+      if (track.x > 0) track.x -= track.width;
+      const lean = clamp(velocity * -0.35, -14, 14);
+      track.inner.style.transform = `translate3d(${track.x.toFixed(1)}px, 0, 0) skewX(${lean.toFixed(2)}deg)`;
+    }
+
+    requestAnimationFrame(frame);
+  };
+
+  const band = rows[0].parentElement;
+  if (!band || !("IntersectionObserver" in window)) return;
+
+  new IntersectionObserver((entries) => {
+    const visible = entries.some((entry) => entry.isIntersecting);
+    if (visible && !running) {
+      running = true;
+      lastTime = performance.now();
+      lastY = window.scrollY;
+      requestAnimationFrame(frame);
+    } else if (!visible) {
+      running = false;
+    }
+  }).observe(band);
+
+  window.addEventListener("resize", () => {
+    for (const track of tracks) if (track) track.width = 0;
+  });
 }
 
 // ---------------------------------------------------------------- reveal
@@ -170,7 +560,7 @@ function renderLists(): void {
 function setupReveal(): void {
   const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
 
-  if (REDUCED || !("IntersectionObserver" in window)) {
+  if (!MOTION || !("IntersectionObserver" in window)) {
     targets.forEach((element) => element.classList.add("is-visible"));
     return;
   }
@@ -191,55 +581,13 @@ function setupReveal(): void {
   targets.forEach((element) => observer.observe(element));
 }
 
-// ---------------------------------------------------------------- pipeline
-
-/**
- * Swap the sticky panel as each step scrolls through the middle of the viewport.
- *
- * Driven by which stage is nearest the centre rather than by "last one that entered": with
- * fast scrolling, entry events arrive out of order and the panel ends up on the wrong step.
- */
-function setupPipeline(): void {
-  const stages = [...document.querySelectorAll<HTMLElement>("[data-stage]")];
-  const panels = [...document.querySelectorAll<HTMLElement>("[data-panel]")];
-  if (stages.length === 0 || panels.length === 0) return;
-
-  const show = (id: string) => {
-    for (const panel of panels) {
-      panel.classList.toggle("is-active", panel.dataset.panel === id);
-    }
-  };
-
-  show("1");
-
-  const update = () => {
-    const middle = window.innerHeight / 2;
-    let nearest = stages[0];
-    let best = Infinity;
-
-    for (const stage of stages) {
-      const box = stage.getBoundingClientRect();
-      const distance = Math.abs(box.top + box.height / 2 - middle);
-      if (distance < best) {
-        best = distance;
-        nearest = stage;
-      }
-    }
-
-    if (nearest.dataset.stage) show(nearest.dataset.stage);
-  };
-
-  update();
-  window.addEventListener("scroll", onScroll(update), { passive: true });
-  window.addEventListener("resize", update);
-}
-
 // ---------------------------------------------------------------- chrome
 
-/** Solidify the header once the page has moved, so it reads over content. */
+/** Solidify the header once the page has moved, and run the progress bar. */
 function setupNav(): void {
   const nav = document.querySelector<HTMLElement>("#nav");
   const progress = document.querySelector<HTMLElement>("#progress");
+  const logo = document.querySelector<HTMLElement>(".logo-mark");
 
   const update = () => {
     const y = window.scrollY;
@@ -257,36 +605,57 @@ function setupNav(): void {
       const total = document.documentElement.scrollHeight - window.innerHeight;
       progress.style.width = `${total > 0 ? Math.min(100, (y / total) * 100) : 0}%`;
     }
+
+    if (logo && MOTION) logo.style.setProperty("--scroll-turn", (y * 0.12).toFixed(1));
   };
 
   update();
-  window.addEventListener("scroll", onScroll(update), { passive: true });
+  window.addEventListener("scroll", onFrame(update), { passive: true });
   window.addEventListener("resize", update);
 }
 
-/** Drift decorative layers against the scroll. */
-function setupParallax(): void {
-  if (REDUCED) return;
+/**
+ * Scroll-linked touches outside the pinned scenes: parallax layers, the privacy headline that
+ * un-zooms into place, and the outlined word drifting behind the finale.
+ */
+function setupDrift(): void {
+  if (!MOTION) return;
   const layers = [...document.querySelectorAll<HTMLElement>("[data-parallax]")];
-  if (layers.length === 0) return;
+  const zooms = [...document.querySelectorAll<HTMLElement>("[data-zoom]")];
+  const finale = document.querySelector<HTMLElement>('[data-scene="finale"]');
+  const word = finale?.querySelector<HTMLElement>(".finale-word");
 
   const update = () => {
+    const height = window.innerHeight;
+
     for (const layer of layers) {
       const rate = Number.parseFloat(layer.dataset.parallax ?? "0");
       const box = layer.getBoundingClientRect();
-      // Relative to the element's own position, so a layer far down the page does not start
-      // its travel already thousands of pixels out.
-      const offset = (box.top + box.height / 2 - window.innerHeight / 2) * -rate;
+      // Relative to the element's own position, so a layer far down the page does not start its
+      // travel already thousands of pixels out.
+      const offset = (box.top + box.height / 2 - height / 2) * -rate;
       layer.style.transform = `translate3d(0, ${offset.toFixed(1)}px, 0)`;
+    }
+
+    for (const zoom of zooms) {
+      const box = zoom.getBoundingClientRect();
+      const arrived = clamp(1 - (box.top - height * 0.3) / (height * 0.6));
+      zoom.style.setProperty("--z", (0.78 + 0.22 * easeOut(arrived)).toFixed(3));
+    }
+
+    if (finale && word) {
+      const box = finale.getBoundingClientRect();
+      const through = clamp((height - box.top) / (height + box.height));
+      word.style.setProperty("--fx", `${((0.5 - through) * 260).toFixed(1)}px`);
     }
   };
 
   update();
-  window.addEventListener("scroll", onScroll(update), { passive: true });
+  window.addEventListener("scroll", onFrame(update), { passive: true });
   window.addEventListener("resize", update);
 }
 
-/** Count the hero's numbers up when they first appear. */
+/** Count the stats up when they first appear. */
 function setupCounters(): void {
   const counters = [...document.querySelectorAll<HTMLElement>("[data-count]")];
   if (counters.length === 0) return;
@@ -295,7 +664,7 @@ function setupCounters(): void {
     element.textContent = Number(element.dataset.count ?? "0").toLocaleString();
   };
 
-  if (REDUCED || !("IntersectionObserver" in window)) {
+  if (!MOTION || !("IntersectionObserver" in window)) {
     counters.forEach(settle);
     return;
   }
@@ -315,10 +684,8 @@ function setupCounters(): void {
 
         const started = performance.now();
         const step = (now: number) => {
-          const progress = Math.min(1, (now - started) / 1400);
-          // Ease out, so it decelerates into the final number rather than stopping dead.
-          const eased = 1 - Math.pow(1 - progress, 3);
-          element.textContent = Math.round(target * eased).toLocaleString();
+          const progress = Math.min(1, (now - started) / 1600);
+          element.textContent = Math.round(target * easeOut(progress)).toLocaleString();
           if (progress < 1) requestAnimationFrame(step);
         };
         requestAnimationFrame(step);
@@ -330,13 +697,69 @@ function setupCounters(): void {
   counters.forEach((element) => observer.observe(element));
 }
 
+// ---------------------------------------------------------------- pointer
+
+/**
+ * The pointer's effects: a soft spotlight that follows it, cards that tilt toward it, and
+ * buttons that lean after it. Mouse and trackpad only — on touch there is no hover to follow.
+ */
+function setupPointer(): void {
+  if (!MOTION || !FINE_POINTER) return;
+
+  const spotlight = document.querySelector<HTMLElement>(".spotlight");
+  if (spotlight) {
+    window.addEventListener(
+      "pointermove",
+      onFrameWith((event: PointerEvent) => {
+        spotlight.style.setProperty("--mx", `${event.clientX}px`);
+        spotlight.style.setProperty("--my", `${event.clientY}px`);
+        spotlight.classList.add("is-on");
+      }),
+      { passive: true },
+    );
+  }
+
+  for (const card of document.querySelectorAll<HTMLElement>("[data-tilt]")) {
+    card.addEventListener("pointermove", (event) => {
+      // Not until the reveal has finished: both want the same transform.
+      if (!card.classList.contains("is-visible")) return;
+      const box = card.getBoundingClientRect();
+      const x = (event.clientX - box.left) / box.width;
+      const y = (event.clientY - box.top) / box.height;
+      card.classList.add("is-tilting");
+      card.style.transform = `perspective(900px) rotateX(${((0.5 - y) * 9).toFixed(2)}deg) rotateY(${((x - 0.5) * 11).toFixed(2)}deg) translateZ(0)`;
+      card.style.setProperty("--sx", `${(x * 100).toFixed(1)}%`);
+      card.style.setProperty("--sy", `${(y * 100).toFixed(1)}%`);
+    });
+    card.addEventListener("pointerleave", () => {
+      card.classList.remove("is-tilting");
+      card.style.transform = "";
+    });
+  }
+
+  for (const button of document.querySelectorAll<HTMLElement>("[data-magnetic]")) {
+    button.style.transition = "transform 400ms cubic-bezier(0.16, 1, 0.3, 1)";
+    button.addEventListener("pointermove", (event) => {
+      const box = button.getBoundingClientRect();
+      const dx = event.clientX - (box.left + box.width / 2);
+      const dy = event.clientY - (box.top + box.height / 2);
+      button.style.transform = `translate3d(${(dx * 0.22).toFixed(1)}px, ${(dy * 0.32).toFixed(1)}px, 0)`;
+    });
+    button.addEventListener("pointerleave", () => {
+      button.style.transform = "";
+    });
+  }
+}
+
+// ---------------------------------------------------------------- frame coalescing
+
 /**
  * Coalesce scroll work into one frame.
  *
  * A scroll listener can fire far more often than the display refreshes, and doing layout reads
- * in each one is how a page with four scroll effects starts to stutter.
+ * in each one is how a page with several scroll effects starts to stutter.
  */
-function onScroll(run: () => void): () => void {
+function onFrame(run: () => void): () => void {
   let queued = false;
   return () => {
     if (queued) return;
@@ -348,16 +771,42 @@ function onScroll(run: () => void): () => void {
   };
 }
 
+/** `onFrame` for handlers that need the latest event. */
+function onFrameWith<E>(run: (event: E) => void): (event: E) => void {
+  let latest: E | null = null;
+  return (event: E) => {
+    const queued = latest !== null;
+    latest = event;
+    if (queued) return;
+    requestAnimationFrame(() => {
+      if (latest !== null) run(latest);
+      latest = null;
+    });
+  };
+}
+
 // ---------------------------------------------------------------- start
 
 function init(): void {
+  splitHeadline();
   renderLists();
-  // After rendering: the feature cards carry `data-reveal` and do not exist until then.
+
+  const downloads = document.querySelector<HTMLElement>("#downloads");
+  if (downloads) {
+    mountDownloads(downloads, {
+      sourceHref: "./download/#source",
+      firstLaunchHref: "./download/#first-launch",
+    });
+  }
+
+  // After rendering: the cards carry `data-reveal` and do not exist until then.
   setupReveal();
-  setupPipeline();
+  setupScenes();
+  setupMarquee();
   setupNav();
-  setupParallax();
+  setupDrift();
   setupCounters();
+  setupPointer();
 }
 
 if (document.readyState === "loading") {
