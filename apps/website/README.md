@@ -4,7 +4,7 @@
 > [`.github/workflows/pages.yml`](../../.github/workflows/pages.yml) on every push to `main`
 > that touches this directory.
 
-Two pages: the overview, and how to install.
+Two pages: the overview, and the download page (which also covers building from source).
 
 ```sh
 npm install
@@ -19,26 +19,36 @@ to `/`.
 ## No framework
 
 A static document with scroll effects. React would ship ~140 kB to render markup that never
-changes, and every effect here — reveals, the sticky pipeline, parallax, counters — is
-IntersectionObserver and one scroll listener. The whole bundle is about 7 kB.
+changes, and every effect here is DOM-level. Each pinned scene — the hero's tilting app window,
+the manifesto that lights word by word, the four-act pipeline, the graph that draws itself, the
+sideways feature rail — reduces to one number, how far through it the reader is, and draws itself
+from that. One scroll listener, coalesced to a frame, feeds all of them. The bundle is ~10 kB
+gzipped.
 
 ## Motion is optional
 
-Every animated path checks `prefers-reduced-motion`, including `scroll-behavior: smooth`,
-which is the part that actually makes people ill. With it set, the content is simply there.
+An inline script adds `.motion` to `<html>` before first paint unless the visitor asked for
+reduced motion, and every pinned or scrubbed effect is gated on that class. Without it — reduced
+motion, or no JavaScript — nothing is pinned and every section is simply laid out in its finished
+state, including no `scroll-behavior: smooth`, which is the part that actually makes people ill.
 
-## Why there are no download buttons
+## The download button
 
-There is no release channel: no signed builds, no installers, no auto-update. Three buttons
-pointing at binaries that do not exist would be the most dishonest thing on the site, and the
-first click would prove it.
+macOS gets a real download in three formats — `.dmg`, `.zip` and `.app` (as `.app.tar.gz`) — all
+the same signed app, built and verified by `release.yml`. Windows and Ubuntu say "coming soon".
 
-So `/download/` states each platform's real status — macOS supported, Windows and Linux
-engine-only — and gives commands that work today, with a copy button on each. Every button on
-the site does something.
+The files carry the version in their names, so no fixed URL points at the current build. The page
+asks the GitHub API for the newest release with a Mac build — final first, then release candidate —
+and reads the real file names and sizes (`src/release.ts`). That gives three honest states:
 
-When a release pipeline exists, this page grows real artifacts and the honest status badges
-stay.
+| GitHub says | The button |
+|---|---|
+| A release with Mac files | Downloads the chosen format directly, with its size |
+| No release yet | Becomes "Build it from source" and says the first build is not out |
+| Could not ask (offline, rate-limited) | Opens the Releases page, which lists the same files |
+
+The answer is cached for ten minutes per tab, since the unauthenticated API allows sixty requests
+an hour per address.
 
 ## Keeping it true
 

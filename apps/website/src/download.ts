@@ -1,21 +1,16 @@
 /**
- * The install page.
+ * The install page: the download cards, the macOS first-launch walkthrough, and building from
+ * source on every platform.
  *
- * # Why there are no download buttons
- *
- * There is no release channel: no signed builds, no installers, no auto-update. Three big
- * buttons pointing at binaries that do not exist would be the single most dishonest thing on
- * this site, and the first click would prove it.
- *
- * So the page states each platform's real status and gives commands that work today. The
- * buttons that exist all do something: copy a command, switch platform, open the repository.
+ * The Mac card is the same one the overview shows, resolved against the real GitHub release —
+ * see `downloads.ts`. Windows and Ubuntu say "coming soon" there, and this page's source-build
+ * steps are how to run Notewise on them today.
  */
 
 import "./style.css";
+import { detectOs, mountDownloads, type Os } from "./downloads";
 
-const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-type Os = "mac" | "windows" | "linux";
+const REDUCED = !document.documentElement.classList.contains("motion");
 
 interface Platform {
   os: Os;
@@ -133,16 +128,6 @@ const STEPS: Record<Os, Step[]> = {
     },
   ],
 };
-
-/** A first guess at the visitor's platform, so the right tab is already open. */
-function detect(): Os {
-  const hint = `${navigator.userAgent} ${navigator.platform ?? ""}`.toLowerCase();
-  if (hint.includes("win")) return "windows";
-  if (hint.includes("linux") || hint.includes("android")) return "linux";
-  // macOS last as the default: it is the only platform where everything works, so it is the
-  // least misleading fallback when the guess fails.
-  return "mac";
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -323,11 +308,16 @@ function setupChrome(): void {
 }
 
 function init(): void {
+  const downloads = document.querySelector<HTMLElement>("#downloads");
+  if (downloads) {
+    mountDownloads(downloads, { sourceHref: "#source", firstLaunchHref: "#first-launch" });
+  }
+
   for (const tab of document.querySelectorAll<HTMLButtonElement>(".os-tab")) {
     tab.addEventListener("click", () => selectOs(tab.dataset.os as Os));
   }
 
-  selectOs(detect());
+  selectOs(detectOs());
   setupChrome();
 }
 
