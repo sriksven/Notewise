@@ -61,14 +61,20 @@ jobs:
             # Metal is an Apple GPU API and exists nowhere else.
             features: bundle
             bundles: dmg
-          - name: windows
-            os: windows-latest
-            features: bundle-cpu
-            bundles: nsis,msi
-          - name: linux
-            os: ubuntu-22.04
-            features: bundle-cpu
-            bundles: deb,appimage
+          # Windows and Linux are left out until the desktop app compiles there. The first release
+          # run (v0.1.0-rc.1) was also the first time the shell was ever built for either — CI only
+          # builds it on macOS — and both failed at Build, which kept the macOS dmg that had built
+          # and verified from being published. The website already lists them as coming soon. Put
+          # these two entries back, and the two rows in the release notes below, once they build.
+          #
+          # - name: windows
+          #   os: windows-latest
+          #   features: bundle-cpu
+          #   bundles: nsis,msi
+          # - name: linux
+          #   os: ubuntu-22.04
+          #   features: bundle-cpu
+          #   bundles: deb,appimage
 
     defaults:
       run:
@@ -394,8 +400,7 @@ jobs:
           | Platform | File | Status |
           |---|---|---|
           | macOS, Apple silicon | `.dmg`, `.app.zip` or `.app.tar.gz`, the same app in each | Signed with the project's own certificate; see below |
-          | Windows | `.msi` or `.exe` | Unsigned — SmartScreen will warn |
-          | Linux | `.deb` or `.AppImage` | Ready to install |
+          | Windows, Linux | Not in this release | Coming soon; the engine and CLI build from source today |
 
           ### macOS: the first launch
 
