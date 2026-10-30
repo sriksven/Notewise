@@ -3,6 +3,7 @@ import { FileText, Link2, TicketCheck, Users, Video } from "lucide-react";
 
 import { api, type RelatedNode } from "../lib/api";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 
 interface Props {
   meetingId: string;
@@ -95,8 +96,12 @@ export function RelatedItems({ meetingId, onNavigate }: Props) {
             <button
               type="button"
               onClick={() => open(node)}
+              disabled={
+                (node.kind === "person" && !offered("people")) ||
+                (node.kind === "ticket" && !offered("tickets"))
+              }
               className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition
-                         hover:bg-overlay"
+                         enabled:hover:bg-overlay"
             >
               <Icon size={12} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
               <span className="min-w-0 flex-1">

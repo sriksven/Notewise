@@ -18,6 +18,7 @@ import {
 
 import { Logo } from "./Logo";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 
 /** Which top-level destination is showing. A meeting counts as the library. */
 export type View = Route["name"];
@@ -126,7 +127,7 @@ export function Sidebar({ view, onNavigate, isRecording, onGoLive }: Props) {
               {group.label}
             </h2>
           )}
-          {group.items.map((item) => {
+          {group.items.filter((item) => offered(item.route.name)).map((item) => {
             const active = isActive(item);
             return (
               <button

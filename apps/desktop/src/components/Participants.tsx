@@ -3,6 +3,7 @@ import { Mic, Plus } from "lucide-react";
 
 import { api, ApiError, type Person } from "../lib/api";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 
 interface Props {
   meetingId: string;
@@ -100,10 +101,11 @@ function ParticipantsForMeeting({ meetingId, onNavigate }: Props) {
               <button
                 type="button"
                 onClick={() => onNavigate({ name: "people", id: person.id })}
-                title={`Everything ${person.display_name} was in`}
+                disabled={!offered("people")}
+                title={offered("people") ? `Everything ${person.display_name} was in` : undefined}
                 className="flex items-center gap-1 rounded-full border border-hairline bg-surface
-                           px-2 py-0.5 text-[11.5px] text-ink-muted transition hover:bg-overlay
-                           hover:text-ink"
+                           px-2 py-0.5 text-[11.5px] text-ink-muted transition enabled:hover:bg-overlay
+                           enabled:hover:text-ink"
               >
                 {person.display_name}
                 {person.has_voice_print && (

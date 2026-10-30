@@ -42,6 +42,7 @@ import {
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
 import { useRoute } from "./lib/router";
+import { offered } from "./lib/scope";
 import { requestSearchFocus, useShortcuts } from "./lib/shortcuts";
 import { useTheme } from "./lib/useTheme";
 
@@ -255,6 +256,12 @@ export default function App() {
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
+
+  // A deferred section's address — an old bookmark, a link kept in a note — lands on Home rather
+  // than on an empty page. See `lib/scope`.
+  useEffect(() => {
+    if (!offered(route.name)) replace({ name: "home" });
+  }, [route.name, replace]);
 
   // Load the open transcript, polling while that meeting records.
   //
@@ -829,14 +836,14 @@ export default function App() {
             {route.name === "tasks" && (
               <TasksView meetings={meetings} onNavigate={navigate} />
             )}
-            {route.name === "tickets" && <TicketsView />}
-            {route.name === "people" && (
+            {route.name === "tickets" && offered("tickets") && <TicketsView />}
+            {route.name === "people" && offered("people") && (
               <PeopleView personId={route.id} onNavigate={navigate} />
             )}
             {route.name === "ask" && <AskView onNavigate={navigate} />}
             {route.name === "trash" && <TrashView onMeetingRestored={() => void refresh()} />}
             {route.name === "agent" && <AgentView onNavigate={navigate} />}
-            {route.name === "jobs" && <JobsView />}
+            {route.name === "jobs" && offered("jobs") && <JobsView />}
             {route.name === "connectors" && <ConnectorsView />}
             {route.name === "help" && (
               <HelpView section={route.section ?? "docs"} onNavigate={navigate} />

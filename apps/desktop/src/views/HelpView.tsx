@@ -269,7 +269,7 @@ function WhatsNew() {
         "Ask a question of everything you have recorded and get an answer that cites the meetings it came from.",
         "Follow-up emails land as a draft in Gmail or Outlook for you to read — never sent for you.",
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
-        "External tools run only when you confirm that specific call. Scheduled jobs can propose one and never run one.",
+        "External tools run only when you confirm that specific call.",
         "Keeping the audio after transcription is off until you turn it on, under Settings.",
         "On macOS, system audio — the other side of a call — needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
       ],

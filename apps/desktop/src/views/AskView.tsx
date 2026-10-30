@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, Search, Send, Sparkles } from "lucide-react";
 
 import { api, ApiError, type Citation, type GroundedAnswer } from "../lib/api";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 
 interface Props {
   onNavigate: (route: Route) => void;
@@ -178,9 +179,10 @@ export function AskView({ onNavigate }: Props) {
                               type="button"
                               onClick={() => openCitation(citation)}
                               title={`Open ${citation.title}`}
+                              disabled={citation.kind === "ticket" && !offered("tickets")}
                               className="flex items-center gap-1 rounded-full border border-hairline
                                          bg-surface px-2 py-0.5 text-[11.5px] text-ink-muted
-                                         transition hover:bg-overlay hover:text-ink"
+                                         transition enabled:hover:bg-overlay enabled:hover:text-ink"
                             >
                               <span className="tabular-nums text-ink-faint">[{citation.n}]</span>
                               <span className="max-w-[220px] truncate">{citation.title}</span>

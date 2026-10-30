@@ -3,6 +3,7 @@ import { Globe, Loader2, Send, X } from "lucide-react";
 
 import { api, ApiError, type Citation } from "../lib/api";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 
 interface Props {
   noteId: string;
@@ -155,8 +156,9 @@ export function NoteChat({ noteId, noteTitle, onClose, onNavigate }: Props) {
                       <button
                         type="button"
                         onClick={() => openCitation(citation)}
+                        disabled={citation.kind === "ticket" && !offered("tickets")}
                         className="flex w-full items-baseline gap-1.5 rounded px-1 py-0.5 text-left
-                                   text-[11.5px] text-ink-muted transition hover:bg-overlay hover:text-ink"
+                                   text-[11.5px] text-ink-muted transition enabled:hover:bg-overlay enabled:hover:text-ink"
                       >
                         <span className="shrink-0 font-mono text-ink-faint">
                           [{citation.n}]
