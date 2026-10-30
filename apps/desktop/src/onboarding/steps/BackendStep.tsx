@@ -5,6 +5,8 @@ import { api, ApiError, type BackendInfo } from "../../lib/api";
 
 interface BackendStepProps {
   satisfied: boolean;
+  /** The engine's reason when it is not, written for the user. */
+  detail: string | null;
   onChanged: () => Promise<void>;
 }
 
@@ -16,7 +18,7 @@ const KEY_VARIABLES = [
   "OPENROUTER_API_KEY",
 ];
 
-export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
+export function BackendStep({ satisfied, detail, onChanged }: BackendStepProps) {
   const [active, setActive] = useState<{
     kind: string;
     model: string;
@@ -103,7 +105,7 @@ export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
                 <span className={satisfied ? "text-ok-text" : "text-warn-text"}>
                   {satisfied
                     ? `Reachable — ${active?.model ?? "ready"}`
-                    : "Not reachable. Is it running?"}
+                    : (detail ?? "Not reachable. Is it running?")}
                 </span>
               </div>
 

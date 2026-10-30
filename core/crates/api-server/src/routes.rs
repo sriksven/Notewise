@@ -2079,7 +2079,10 @@ async fn readiness(state: &AppState) -> ApiResult<crate::setup::SetupReadiness> 
     };
 
     let model_installed = !state.model_store().installed().is_empty();
-    let backend_reachable = state.ai().probe().await.is_ok();
+    // The reason is kept: it is the one place that knows whether Ollama is stopped, a key is
+    // missing or a model was never pulled, and the banner used to say only that summaries
+    // "will not run".
+    let backend_problem = state.ai().probe().await.err().map(|e| e.to_string());
 
     Ok(SetupReadiness {
         completed_at,
@@ -2087,10 +2090,12 @@ async fn readiness(state: &AppState) -> ApiResult<crate::setup::SetupReadiness> 
             model: StepReadiness {
                 satisfied: model_installed,
                 required: true,
+                detail: None,
             },
             backend: StepReadiness {
-                satisfied: backend_reachable,
+                satisfied: backend_problem.is_none(),
                 required: true,
+                detail: backend_problem,
             },
             permissions: PermissionsReadiness::from_parts(
                 permission_readiness(CaptureKindArg::Microphone, false),
@@ -4518,6 +4523,53 @@ mod tests {
             false
         );
         assert!(body["steps"]["permissions"]["system_audio"]["detail"].is_string());
+    }
+
+    /// The banner reads `detail` to say what to do. It said only that summaries "will not run",
+    /// when the probe behind it had known all along that Ollama was simply not running.
+    #[tokio::test]
+    async fn setup_says_why_the_ai_backend_is_not_ready() {
+        // Ollama pointed at a port that was just freed, so the connection is refused: a stopped
+        // daemon, without depending on whether this machine happens to run one.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .map(|addr| addr.port())
+            .expect("a free port");
+        let config = RouterConfig::new(notewise_ai_router::BackendKind::Ollama)
+            .with_endpoint(format!("http://127.0.0.1:{port}"));
+        let state = AppState::new(
+            Database::open_in_memory().expect("in-memory db"),
+            AiRouter::from_config(config).expect("ollama router"),
+        );
+
+        let (status, body) = json(
+            &router(Arc::new(state)),
+            Request::get("/v1/setup").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let backend = &body["steps"]["backend"];
+        assert_eq!(backend["satisfied"], false);
+        let detail = backend["detail"].as_str().expect("a reason");
+        assert!(detail.starts_with("Ollama isn't running."), "{detail}");
+        assert!(!detail.contains("http"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn a_ready_backend_has_no_detail() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_, body) = json(
+            &app_with_model_dir(dir.path()),
+            Request::get("/v1/setup").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(
+            body["steps"]["backend"]["satisfied"], true,
+            "the mock answers"
+        );
+        assert!(body["steps"]["backend"]["detail"].is_null());
     }
 
     /// A GET must never raise a TCC dialog. The only defence in code is that the handler calls

@@ -26,6 +26,10 @@ pub(crate) struct Steps {
 pub(crate) struct StepReadiness {
     pub satisfied: bool,
     pub required: bool,
+    /// Why it is not satisfied, in words written for the user — "Ollama isn't running. Open the
+    /// Ollama app…" — so the banner can say what to do rather than only what will not work.
+    /// `None` when satisfied, or when there is nothing more specific to say than the step.
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,10 +151,12 @@ mod tests {
                 model: StepReadiness {
                     satisfied: false,
                     required: true,
+                    detail: None,
                 },
                 backend: StepReadiness {
                     satisfied: true,
                     required: true,
+                    detail: None,
                 },
                 permissions: PermissionsReadiness::from_parts(
                     permission("denied", true),
@@ -170,10 +176,12 @@ mod tests {
                 model: StepReadiness {
                     satisfied: true,
                     required: true,
+                    detail: None,
                 },
                 backend: StepReadiness {
                     satisfied: true,
                     required: true,
+                    detail: None,
                 },
                 permissions: PermissionsReadiness::from_parts(
                     permission("granted", true),

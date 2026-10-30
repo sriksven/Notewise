@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bannerProblems,
   canFinish,
   firstUnsatisfied,
   regressions,
@@ -153,5 +154,53 @@ describe("skipConsequences", () => {
       "meetings will not be transcribed",
       "summaries, chat and suggested questions will not run",
     ]);
+  });
+});
+
+describe("bannerProblems", () => {
+  it("is empty when nothing is broken", () => {
+    expect(bannerProblems(snapshot())).toEqual([]);
+  });
+
+  // What the banner is for: it said "Summaries, chat and suggested questions will not run" while
+  // the engine knew Ollama was simply not running.
+  it("says what to do, in the engine's words, when the AI backend gives a reason", () => {
+    const stopped = snapshot({
+      backend: {
+        satisfied: false,
+        required: true,
+        detail: "Ollama isn't running. Open the Ollama app, and Notewise will use it straight away.",
+      },
+    });
+
+    expect(bannerProblems(stopped)).toEqual([
+      "Ollama isn't running. Open the Ollama app, and Notewise will use it straight away. Summaries, chat and suggested questions won't work until then.",
+    ]);
+  });
+
+  it("finishes a reason that has no full stop", () => {
+    const [problem] = bannerProblems(
+      snapshot({ backend: { satisfied: false, required: true, detail: "Anthropic needs an API key" } }),
+    );
+    expect(problem).toMatch(/^Anthropic needs an API key\. Summaries/);
+  });
+
+  // An older engine sends no reason. The banner still says where to look.
+  it("points at Settings when the engine gives no reason", () => {
+    const [problem] = bannerProblems(snapshot({ backend: { satisfied: false, required: true } }));
+    expect(problem).toMatch(/Settings → Models/);
+  });
+
+  it("says where to fix each broken step, in wizard order", () => {
+    const problems = bannerProblems(
+      snapshot({
+        model: { satisfied: false, required: true },
+        backend: { satisfied: false, required: true, detail: "Ollama isn't running." },
+      }),
+    );
+
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toMatch(/^No transcription model is downloaded.*Settings → Models\.$/);
+    expect(problems[1]).toMatch(/^Ollama isn't running\./);
   });
 });

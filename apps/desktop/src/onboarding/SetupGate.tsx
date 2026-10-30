@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api } from "../lib/api";
-import { skipConsequences, type SetupReadiness } from "./readiness";
+import { bannerProblems, type SetupReadiness } from "./readiness";
 import { SetupBanner } from "./SetupBanner";
 import { SetupFlow } from "./SetupFlow";
 
@@ -46,6 +46,24 @@ export function SetupGate({ children }: SetupGateProps) {
     void refresh().finally(() => setLoading(false));
   }, [refresh]);
 
+  const problems =
+    readiness && readiness.completed_at !== null && !dismissed ? bannerProblems(readiness) : [];
+  const showing = problems.length > 0;
+
+  // While the banner is up, look again: when the window comes back to the front — which is the
+  // moment after someone has gone and opened Ollama — and every 15 seconds. It used to be read
+  // once at launch, so it went on saying Ollama was down after it had been started.
+  useEffect(() => {
+    if (!showing) return;
+    const again = () => void refresh();
+    window.addEventListener("focus", again);
+    const timer = window.setInterval(again, 15_000);
+    return () => {
+      window.removeEventListener("focus", again);
+      window.clearInterval(timer);
+    };
+  }, [showing, refresh]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-overlay">
@@ -58,12 +76,10 @@ export function SetupGate({ children }: SetupGateProps) {
     return <SetupFlow readiness={readiness} refresh={refresh} onFinished={() => void refresh()} />;
   }
 
-  const consequences = readiness && !dismissed ? skipConsequences(readiness) : [];
-
   return (
     <div className="flex h-full flex-col">
       <SetupBanner
-        consequences={consequences}
+        problems={problems}
         onOpenSettings={() => window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT))}
         onDismiss={() => setDismissed(true)}
       />

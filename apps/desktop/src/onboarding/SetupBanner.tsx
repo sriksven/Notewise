@@ -2,13 +2,13 @@ import { AlertCircle, X } from "lucide-react";
 
 interface SetupBannerProps {
   /**
-   * What is not working, in the user's terms — not the names of wizard steps.
+   * What is not working and what to do about it, as whole sentences — see `bannerProblems`.
    *
    * "permissions needs attention" describes the setup screen's state and tells someone with a
-   * meeting starting in a minute nothing. "Notewise will not be able to hear a meeting" tells
-   * them what will happen.
+   * meeting starting in a minute nothing. "Ollama isn't running. Open the Ollama app…" tells
+   * them what to do.
    */
-  consequences: string[];
+  problems: string[];
   onOpenSettings: () => void;
   onDismiss: () => void;
 }
@@ -20,13 +20,8 @@ interface SetupBannerProps {
  * deliberately passed on is a small problem, and demoting an established user to a welcome
  * screen over it would be absurd.
  */
-export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBannerProps) {
-  if (consequences.length === 0) return null;
-
-  // Capitalised here rather than in the source strings, which are also used mid-sentence in
-  // the setup wizard.
-  const [first, ...rest] = consequences;
-  const sentence = [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(", and ");
+export function SetupBanner({ problems, onOpenSettings, onDismiss }: SetupBannerProps) {
+  if (problems.length === 0) return null;
 
   return (
     <div
@@ -34,7 +29,7 @@ export function SetupBanner({ consequences, onOpenSettings, onDismiss }: SetupBa
       className="flex items-center gap-2 border-b border-warn-line bg-warn px-4 py-2 text-[13px] text-warn-text"
     >
       <AlertCircle size={15} className="shrink-0" aria-hidden />
-      <span className="flex-1">{sentence}.</span>
+      <span className="flex-1 leading-snug">{problems.join(" ")}</span>
 
       {/* A real button. The old banner ended in "Open Settings to fix it" as advice, pointing
           at a screen that had no permissions on it at all. */}

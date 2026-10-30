@@ -64,6 +64,19 @@ impl Preset {
         }
     }
 
+    /// The identifier errors carry, which `crate::error` turns into the name a person knows:
+    /// "LM Studio's server isn't running" rather than one message for every provider here.
+    fn error_name(&self) -> &'static str {
+        match self {
+            Preset::Groq => "groq",
+            Preset::OpenRouter => "openrouter",
+            Preset::LmStudio => "lmstudio",
+            Preset::Unsloth => "unsloth",
+            Preset::OllamaCompat => "ollama",
+            Preset::Custom { .. } => BACKEND,
+        }
+    }
+
     /// A sensible default model for this provider.
     pub fn default_model(&self) -> &str {
         match self {
@@ -150,7 +163,9 @@ impl OpenAiCompatBackend {
         let key = api_key.filter(|k| !k.trim().is_empty());
 
         if preset.requires_api_key() && key.is_none() {
-            return Err(AiError::MissingApiKey { backend: BACKEND });
+            return Err(AiError::MissingApiKey {
+                backend: preset.error_name(),
+            });
         }
 
         Ok(Self {
@@ -200,7 +215,7 @@ impl OpenAiCompatBackend {
         }
 
         let response = request.send().await.map_err(|source| AiError::Transport {
-            backend: BACKEND,
+            backend: self.preset.error_name(),
             source,
         })?;
 
@@ -214,7 +229,7 @@ impl OpenAiCompatBackend {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30);
             return Err(AiError::RateLimited {
-                backend: BACKEND,
+                backend: self.preset.error_name(),
                 retry_after_secs,
             });
         }
@@ -225,14 +240,14 @@ impl OpenAiCompatBackend {
                 .await
                 .unwrap_or_else(|_| "<unreadable error body>".into());
             return Err(AiError::Provider {
-                backend: BACKEND,
+                backend: self.preset.error_name(),
                 status: status.as_u16(),
                 message,
             });
         }
 
         let parsed: Completion = response.json().await.map_err(|source| AiError::Transport {
-            backend: BACKEND,
+            backend: self.preset.error_name(),
             source,
         })?;
 
@@ -242,7 +257,7 @@ impl OpenAiCompatBackend {
                 .into_iter()
                 .next()
                 .ok_or_else(|| AiError::MalformedResponse {
-                    backend: BACKEND,
+                    backend: self.preset.error_name(),
                     reason: "response contained no choices".into(),
                 })?;
 
@@ -250,7 +265,7 @@ impl OpenAiCompatBackend {
         // HTTP error, so a declined request would otherwise look like an empty answer.
         if choice.finish_reason.as_deref() == Some("content_filter") {
             return Err(AiError::Refused {
-                backend: BACKEND,
+                backend: self.preset.error_name(),
                 category: Some("content_filter".into()),
             });
         }
@@ -260,7 +275,7 @@ impl OpenAiCompatBackend {
             .content
             .filter(|c| !c.trim().is_empty())
             .ok_or_else(|| AiError::MalformedResponse {
-                backend: BACKEND,
+                backend: self.preset.error_name(),
                 reason: "response message had no content".into(),
             })
     }

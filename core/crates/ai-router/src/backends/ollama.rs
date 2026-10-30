@@ -539,7 +539,7 @@ mod tests {
 
         let shown = err.to_string();
         assert!(shown.contains("llama3.1:8b"), "{shown}");
-        assert!(shown.contains("Pick one in Settings"), "{shown}");
+        assert!(shown.contains("Settings → Models"), "{shown}");
     }
 
     #[test]
