@@ -32,6 +32,13 @@ on:
   # So the build can be exercised without cutting a tag. A dispatch run uploads artifacts and
   # stops short of publishing a release.
   workflow_dispatch:
+  # A change to how the installers are built is proved by building them, before a tag depends on
+  # it. rc.1 was the first time the shell had ever been built for Windows, and it found out at the
+  # tag. A pull-request run builds and uploads exactly as a dispatch run does, and never publishes.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "apps/desktop/src-tauri/**"
 
 permissions:
   contents: write
@@ -61,16 +68,22 @@ jobs:
             # Metal is an Apple GPU API and exists nowhere else.
             features: bundle
             bundles: dmg
-          # Windows and Linux are left out until the desktop app compiles there. The first release
-          # run (v0.1.0-rc.1) was also the first time the shell was ever built for either — CI only
-          # builds it on macOS — and both failed at Build, which kept the macOS dmg that had built
-          # and verified from being published. The website already lists them as coming soon. Put
-          # these two entries back, and the two rows in the release notes below, once they build.
+          # An NSIS installer, `Notewise_<version>_x64-setup.exe`. It installs for the current user,
+          # so it needs no administrator. One file rather than an .msi beside it: a person choosing
+          # between two installers for the same app has been given a question with no answer, and
+          # the .msi needs WiX, one more tool that can fail a release.
           #
-          # - name: windows
-          #   os: windows-latest
-          #   features: bundle-cpu
-          #   bundles: nsis,msi
+          # rc.1 failed at Build. Compiled for Windows from a Mac since, the shell was importing the
+          # macOS-only hotkey layer on every platform; `main.rs` now gates it to macOS.
+          - name: windows
+            os: windows-latest
+            features: bundle-cpu
+            bundles: nsis
+          # Linux is left out until the desktop app has been built there. rc.1 failed at Build on
+          # it too, most likely on the same hotkey import, but that is a guess until a run says so,
+          # and a failing platform keeps the others from being published. Put this back, and its
+          # row in the release notes below, once a pull-request run has built it.
+          #
           # - name: linux
           #   os: ubuntu-22.04
           #   features: bundle-cpu
@@ -108,6 +121,19 @@ jobs:
             patchelf \
             libasound2-dev \
             cmake
+
+      # bindgen writes whisper.cpp's Rust bindings with libclang. When it cannot load libclang it
+      # does not fail: whisper-rs-sys falls back to bindings generated on Linux, where `long` is
+      # eight bytes and on Windows it is four, and the build then dies on a struct-layout
+      # assertion that says nothing about the cause. The runner image ships LLVM; this makes sure
+      # bindgen is using it, and says so plainly when it is not there.
+      - name: Windows build dependencies
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          llvm="C:/Program Files/LLVM/bin"
+          [ -f "$llvm/libclang.dll" ] || { echo "::error::No libclang.dll in $llvm, so whisper.cpp's bindings would be the wrong layout for Windows."; exit 1; }
+          echo "LIBCLANG_PATH=$llvm" >> "$GITHUB_ENV"
 
       - run: npm ci
 
@@ -167,7 +193,28 @@ jobs:
       # `beforeBuildCommand` in tauri.conf.json runs `npm run build`, which typechecks first, so
       # a broken frontend fails here rather than shipping an app with a blank window.
       - name: Build
-        run: npx tauri build --features ${{ matrix.features }} --bundles ${{ matrix.bundles }}
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tauri build --features ${{ matrix.features }} --bundles ${{ matrix.bundles }} 2>&1 \
+            | tee "$RUNNER_TEMP/build.log"
+
+      # A job's log can only be read by someone signed in to GitHub, and only by opening it. An
+      # annotation shows on the run's summary page and through the public API. rc.1 failed on two
+      # platforms with nothing visible but "exit code 1", and the cause took a cross-compile on
+      # a Mac to find. The lines go into one annotation each, joined and with `%` escaped, as the
+      # runner wants.
+      - name: Say why the build failed
+        if: failure() && steps.build.outcome == 'failure'
+        shell: bash
+        run: |
+          # Colour codes and Windows line endings would reach the annotation as noise.
+          clean() { perl -pe 's/\e\[[0-9;]*m//g; s/\r//g' "$RUNNER_TEMP/build.log"; }
+          annotate() { sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }'; }
+          errors=$(clean | grep -E '^(error|warning: unused)|^[[:space:]]+--> |panicked at|failed to run|Error ' | head -40 | annotate)
+          [ -n "$errors" ] && echo "::error title=Build errors::$errors"
+          echo "::error title=End of the build log::$(clean | tail -40 | annotate)"
 
       # Given a real identity, Tauri signs the dmg as well as the app. A signed disk image that is
       # not notarised is stopped by Gatekeeper before it even mounts (tauri-apps/tauri#12288), which
@@ -200,16 +247,21 @@ jobs:
       # The collect step below would have shipped that: its only test is that an installer file
       # exists, and a broken dmg is a file. So the installer is opened and looked inside.
       #
-      # Windows is skipped rather than faked: an NSIS installer is a self-extracting executable, and
-      # reading one on the runner needs a tool that is not there. `bundled-frontend.test.ts` covers
-      # the config half on every platform, and the path rewriting is Tauri's, not the platform's — so
-      # catching it here catches it everywhere.
+      # On Windows the installer is read with 7-Zip, which the runner image ships and which opens
+      # an NSIS installer as an archive. Its listing uses backslashes.
       - name: The frontend is inside the installer
-        if: matrix.name != 'windows'
         shell: bash
         run: |
           set -euo pipefail
           case "${{ matrix.name }}" in
+            windows)
+              exe=$(find src-tauri/target/release/bundle/nsis -name '*-setup.exe' | head -1)
+              [ -n "$exe" ] || { echo "no installer was produced"; exit 1; }
+              listing=$(7z l "$exe")
+              found=$(echo "$listing" | grep -iE 'dist[\\/]index\.html' | head -1 || true)
+              mangled=$(echo "$listing" | grep '_up_' | head -1 || true)
+              [ -n "$found" ] || echo "$listing" | tail -40
+              ;;
             macos)
               dmg=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -not -name 'rw.*' | head -1)
               [ -n "$dmg" ] || { echo "no dmg was produced"; exit 1; }
@@ -400,7 +452,8 @@ jobs:
           | Platform | File | Status |
           |---|---|---|
           | macOS, Apple silicon | `.dmg`, `.app.zip` or `.app.tar.gz`, the same app in each | Signed with the project's own certificate; see below |
-          | Windows, Linux | Not in this release | Coming soon; the engine and CLI build from source today |
+          | Windows 10 and 11, 64-bit | `_x64-setup.exe` | Not signed; see below |
+          | Linux | Not in this release | Coming soon; the engine and CLI build from source today |
 
           ### macOS: the first launch
 
@@ -423,12 +476,28 @@ jobs:
           `codesign -d -r- /Applications/Notewise.app`. The requirement it prints should end in
           `H"@CERTIFICATE_SHA1@"`.
 
+          ### Windows: the first launch
+
+          The installer is not signed, so Windows cannot say who made it:
+
+          1. Your browser may call the download uncommon. Choose **Keep** (in Edge, under **…**).
+          2. Run the `_x64-setup.exe`. If **Windows protected your PC** appears, choose
+             **More info**, then **Run anyway**.
+          3. It installs for your account only, so it does not ask for an administrator, and it
+             adds Notewise to the Start menu. It may download Microsoft's WebView2 first if this
+             PC does not have it; Windows 11 always does.
+
           ### What is in this build
 
-          Local transcription, search, notes, tickets and the agent, and recording from the
+          Local transcription, search, notes and the agent, and recording from the
           microphone. On macOS, system audio — the other people on a call — needs the Screen &
           System Audio Recording permission, switched on by hand in System Settings and applied
           after a relaunch. It has not yet been run end to end in a release build.
+
+          On Windows, recording is from the microphone only: system audio is not built there yet,
+          so on a call it hears you and not the others. Transcription runs on the processor rather
+          than a GPU, so it is slower than on a Mac. The desktop assistant — dictation into other apps, the
+          highlighted-text panel — is macOS only.
           NOTES
 
           # The tag build could not have got this far without the pin, so it is never empty here.

@@ -91,8 +91,8 @@ Each tagged version attaches installers to
 | Platform | File | First launch |
 |---|---|---|
 | macOS, Apple silicon | `.dmg` | **Open Anyway**, once per download (see below) |
-| Windows | `.msi` or `.exe` | Unsigned: SmartScreen warns, choose *More info → Run anyway* |
-| Linux | `.deb` or `.AppImage` | Nothing extra |
+| Windows 10 and 11, 64-bit | `_x64-setup.exe` | Unsigned: SmartScreen warns, choose *More info → Run anyway* |
+| Linux | Not released yet | The engine and CLI build from source |
 
 ### macOS: the first launch
 
@@ -119,6 +119,16 @@ codesign -d -r- /Applications/Notewise.app
 
 The requirement it prints should end in `H"…"` with the fingerprint pinned as
 `MACOS_CERTIFICATE_SHA1` in [`release.yml`](.github/workflows/release.yml).
+
+### Windows: the first launch
+
+The installer is not signed, so Windows cannot say who made it. Your browser may call the
+download uncommon; keep it. Run the `_x64-setup.exe`, and if **Windows protected your PC**
+appears, choose **More info**, then **Run anyway**. It installs for your account only, with no
+administrator prompt.
+
+On Windows, recording is from the microphone only — system audio is not built there yet —
+transcription runs on the processor, and the desktop assistant is not available.
 
 ## Quick start
 
