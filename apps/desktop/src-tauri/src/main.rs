@@ -28,7 +28,9 @@ use notewise_api_server::{AppState, Server, BACKEND_KIND_KEY, BACKEND_MODEL_KEY}
 use notewise_storage::{Database, SettingsRepository};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-#[cfg(feature = "assistant")]
+// The hotkey is Carbon, so this is macOS only. Elsewhere the engine is still built with the
+// assistant feature and its endpoints say the platform is not supported, which is what the UI shows.
+#[cfg(all(feature = "assistant", target_os = "macos"))]
 mod assistant;
 
 fn main() {
@@ -50,9 +52,9 @@ fn main() {
             // On the main thread and before the event loop, which is where Carbon delivers a
             // hot-key event. Registering it from the engine's runtime thread would succeed and
             // never fire.
-            #[cfg(feature = "assistant")]
+            #[cfg(all(feature = "assistant", target_os = "macos"))]
             assistant::install(app.handle(), addr, &hotkeys);
-            #[cfg(not(feature = "assistant"))]
+            #[cfg(not(all(feature = "assistant", target_os = "macos")))]
             let _ = hotkeys;
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))

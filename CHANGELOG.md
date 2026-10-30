@@ -72,6 +72,9 @@ The first tagged build.
 - **macOS system audio has not yet been run end to end in a release build.** It needs the Screen &
   System Audio Recording permission, switched on by hand in System Settings, and a relaunch.
   Microphone capture works.
+- **On Windows, recording hears the microphone only.** System audio is not built there yet, so on
+  a call it records you and not the others. Transcription runs on the processor, so it is slower
+  than on a Mac, and the desktop assistant is macOS only.
 - **Transcription needs a model download** on first use. The default build stays small on purpose.
 - **The desktop assistant needs permissions macOS cannot grant on your behalf** — Accessibility,
   and Input Monitoring for typing pauses. Without them the app says which pane to open rather than
