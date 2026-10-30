@@ -62,9 +62,30 @@ jobs:
         run: cargo build --workspace --all-targets
 
       - name: Test
+        id: test
         # Tests needing a GPU, a signed bundle, a TCC grant, or a paid API key are
         # marked #[ignore] with a reason, so a green run here never implies they passed.
-        run: cargo test --workspace
+        #
+        # `--no-fail-fast` so one failing crate does not hide another, and the output is kept
+        # for the step below.
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      # Which tests failed, where anyone can read it. A job log needs a signed-in account; an
+      # annotation shows on the run page and through the public API. A Windows-only failure on
+      # 2026-10-30 showed nothing but "exit code 1" and had to be found by reproducing it.
+      - name: Say which tests failed
+        if: failure() && steps.test.outcome == 'failure'
+        shell: bash
+        run: |
+          clean() { perl -pe 's/\r//g' "$RUNNER_TEMP/test.log"; }
+          annotate() { sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }'; }
+          failed=$(clean | grep -E '^test .* FAILED$|^error: test failed|panicked at' | head -40 | annotate)
+          [ -n "$failed" ] && echo "::error title=Failed tests::$failed"
+          # The assertion message follows `panicked at`, so a few lines after each give the why.
+          echo "::error title=Why::$(clean | grep -A6 'panicked at' | head -60 | annotate)"
 
       - name: Doc tests
         run: cargo test --workspace --doc
