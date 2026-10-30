@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, channels, resolveMode } from "./theme";
+import { ACCENTS, DEFAULT_ACCENT, DEFAULT_THEME, channels, companionAccent, resolveMode } from "./theme";
 import tailwindConfig from "../../tailwind.config.js?raw";
 import themeSource from "./theme.ts?raw";
 
@@ -44,6 +44,26 @@ describe("accents", () => {
   it("defaults to an accent that exists", () => {
     expect(ACCENTS.some((a) => a.id === DEFAULT_ACCENT)).toBe(true);
     expect(ACCENTS.some((a) => a.id === DEFAULT_THEME.accent)).toBe(true);
+  });
+});
+
+describe("companionAccent", () => {
+  // The note's Ask is drawn in it so it never looks like the workspace Ask beside it. A companion
+  // equal to the accent would put the two back in one colour.
+  it("is never the accent it accompanies", () => {
+    for (const accent of ACCENTS) {
+      expect(companionAccent(accent.id).id, accent.id).not.toBe(accent.id);
+    }
+  });
+
+  it("still gives a colour for an accent this build does not know", () => {
+    expect(ACCENTS).toContain(companionAccent("retired-accent"));
+  });
+
+  // `index.css` carries the default's companion as its fallback, for the moment before
+  // `applyTheme` runs. If the default changes, that fallback has to change with it.
+  it("pairs the default accent with teal", () => {
+    expect(companionAccent(DEFAULT_ACCENT).id).toBe("teal");
   });
 });
 

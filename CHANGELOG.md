@@ -28,13 +28,14 @@ The first tagged build.
 
 - Summaries, with named templates you can write yourself. Running another template adds a summary
   rather than replacing the one you have.
-- Decisions, action items and tickets, all of which outlive the summary that proposed them and can
+- Decisions and action items, both of which outlive the summary that proposed them and can
   be added or removed by hand.
 - Clarifying questions during a live meeting, when there is still time to ask them.
 - What a recurring meeting is still carrying from last time.
 - Search across everything said, and a question you can ask the whole workspace that answers only
-  from your own material and cites it.
-- An agent that reads across your meetings, notes and tickets and writes up what it finds. It only
+  from your own material and cites it — from its own page, or from the Ask button at the bottom
+  right of any screen but Notes. A note's own Ask works the same way, in a second colour.
+- An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 
 ### Getting work out
@@ -51,7 +52,6 @@ The first tagged build.
 
 - Calendar connected to Google or Microsoft, which is what makes auto-join detection possible — and
   it always asks before recording.
-- Scheduled jobs. They may propose an external tool call and never execute one.
 - External tools over MCP, default-deny: nothing runs without you confirming that specific call.
 - A desktop assistant on macOS — dictation into whatever has focus, a panel that can act on
   highlighted text, and inline suggestions. Every one of those needs a permission you grant.
@@ -62,6 +62,8 @@ The first tagged build.
 
 ### Known limits of this build
 
+- **Tickets, People and Automation are held back for a later release.** They are built and
+  kept, but this build does not show them.
 - **Signed on macOS, but not by Apple.** The app carries the project's own certificate rather than
   an Apple Developer ID, so the first launch of each download needs **Open Anyway** in System
   Settings → Privacy & Security — the release notes walk through it. Permissions you grant carry

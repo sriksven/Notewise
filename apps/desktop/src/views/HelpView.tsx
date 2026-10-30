@@ -162,7 +162,10 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
       <Topic title="Asking questions about your material">
         <p>
-          Every meeting has an Ask tab, every note has one, and the{" "}
+          Ask is in the sidebar, and the Ask button at the bottom right of most screens opens the
+          same thing beside whatever you are looking at. Every meeting has an Ask tab, every note
+          has its own — drawn in a second colour, because it asks that note rather than
+          everything — and the{" "}
           <Link onClick={() => onNavigate({ name: "agent" })}>Agent</Link> searches across all
           of it. Answers cite what they were drawn from, and clicking a citation opens it.
         </p>
@@ -269,7 +272,7 @@ function WhatsNew() {
         "Ask a question of everything you have recorded and get an answer that cites the meetings it came from.",
         "Follow-up emails land as a draft in Gmail or Outlook for you to read — never sent for you.",
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
-        "External tools run only when you confirm that specific call. Scheduled jobs can propose one and never run one.",
+        "External tools run only when you confirm that specific call.",
         "Keeping the audio after transcription is off until you turn it on, under Settings.",
         "On macOS, system audio — the other side of a call — needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
       ],

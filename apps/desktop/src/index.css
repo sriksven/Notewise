@@ -24,6 +24,10 @@
        colour given as `var(--x)` cannot take one, so every such class compiled to nothing. */
     --accent-rgb: 63 63 70;
     --record-rgb: 226 56 46;
+    --note-accent: #5fb3ad;
+    --note-accent-rgb: 95 179 173;
+    --note-accent-hover: #7bc4bf;
+    --note-accent-on: #081a19;
     --warn-text-rgb: 232 200 119;
     --warn-bg: #2a2312;
     --warn-text: #e8c877;

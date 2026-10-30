@@ -174,9 +174,13 @@ describe("the focus request", () => {
   // Otherwise a search box opened a minute later for an unrelated reason would steal the
   // caret out of whatever the user had started typing.
   it("expires rather than waiting forever", () => {
+    // The clock is read once, before the request. Reading it again afterwards let a busy test run
+    // spend a millisecond between the two reads, turning "999 ms later" into 1,000 — past the
+    // window — and failing at random under load.
+    const at = Date.now();
     requestSearchFocus();
-    expect(focusIsPending(Date.now() + 999)).toBe(true);
-    expect(focusIsPending(Date.now() + 5_000)).toBe(false);
+    expect(focusIsPending(at + 999)).toBe(true);
+    expect(focusIsPending(at + 5_000)).toBe(false);
   });
 
   it("is cleared once answered", () => {

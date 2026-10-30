@@ -31,6 +31,14 @@ export default {
           on: "var(--accent-on)",
         },
 
+        // A note's own Ask: the accent's companion, so it never matches the workspace Ask beside
+        // it. Channels for the same reason as `accent`.
+        note: {
+          DEFAULT: "rgb(var(--note-accent-rgb) / <alpha-value>)",
+          hover: "var(--note-accent-hover)",
+          on: "var(--note-accent-on)",
+        },
+
         warn: {
           DEFAULT: "var(--warn-bg)",
           text: "rgb(var(--warn-text-rgb) / <alpha-value>)",

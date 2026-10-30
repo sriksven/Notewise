@@ -10,6 +10,7 @@ import {
   type ToolExecution,
 } from "../lib/api";
 import type { Route } from "../lib/router";
+import { offered } from "../lib/scope";
 import { ToolCallReview } from "../components/ToolCallReview";
 
 interface Props {
@@ -341,7 +342,7 @@ export function TasksView({ meetings, onNavigate }: Props) {
                     </button>
                   )}
 
-                  {!closed && (
+                  {!closed && offered("tickets") && (
                     <button
                       type="button"
                       onClick={() => void promote(task)}

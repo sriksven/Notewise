@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarClock, Plus, TicketCheck, User, X } from "lucide-react";
 
 import { api, ApiError, type ActionItem } from "../lib/api";
+import { offered } from "../lib/scope";
 
 interface Props {
   meetingId: string;
@@ -198,7 +199,7 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
                   >
                     ticketed
                   </span>
-                ) : (
+                ) : offered("tickets") ? (
                   <button
                     type="button"
                     onClick={() => void promote(item)}
@@ -213,7 +214,7 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
                   >
                     <TicketCheck size={13} aria-hidden />
                   </button>
-                )}
+                ) : null}
 
                 <button
                   type="button"
