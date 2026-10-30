@@ -18,6 +18,11 @@ export interface PermissionReadiness {
 export interface StepReadiness {
   satisfied: boolean;
   required: boolean;
+  /**
+   * Why it is not satisfied, written for the user by the engine: "Ollama isn't running. Open the
+   * Ollama app…". Only the AI backend has one today, and an older engine sends none.
+   */
+  detail?: string | null;
 }
 
 export interface PermissionsReadiness extends StepReadiness {
@@ -97,6 +102,31 @@ const CONSEQUENCE: Record<Exclude<StepId, "welcome">, string> = {
   backend: "summaries, chat and suggested questions will not run",
   permissions: "Notewise will not be able to hear a meeting",
 };
+
+/**
+ * What the banner says about each broken step: what is wrong and what to do, then what stops
+ * working meanwhile. Empty when nothing is broken.
+ *
+ * It used to say only "Summaries, chat and suggested questions will not run", which tells
+ * someone what they have lost and not how to get it back — while the engine's probe knew all
+ * along that Ollama was simply not running. That reason is used whenever the engine gives one.
+ */
+export function bannerProblems(readiness: SetupReadiness): string[] {
+  return regressions(readiness).map((step) => {
+    switch (step.id) {
+      case "model":
+        return "No transcription model is downloaded, so meetings won't be transcribed. Download one in Settings → Models.";
+      case "backend": {
+        const detail = readiness.steps.backend.detail?.trim();
+        return detail
+          ? `${/[.!?]$/.test(detail) ? detail : `${detail}.`} Summaries, chat and suggested questions won't work until then.`
+          : "Summaries, chat and suggested questions won't work: the AI backend isn't answering. Check it in Settings → Models.";
+      }
+      default:
+        return "Notewise can't hear meetings until it has the permissions it asks for. Allow them in Settings → Recording.";
+    }
+  });
+}
 
 /**
  * What is given up by finishing setup now, in the user's terms. Empty when nothing is.

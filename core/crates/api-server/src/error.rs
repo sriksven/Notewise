@@ -141,8 +141,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = self.parts();
 
+        // The message is written for the user and leaves out the mechanics — the URL, the OS
+        // error — so the log records the `Debug` form beside it, which keeps them.
         if status.is_server_error() {
-            tracing::error!(error = %self, %code, "request failed");
+            tracing::error!(error = %self, cause = ?self, %code, "request failed");
         }
 
         (

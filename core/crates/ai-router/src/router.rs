@@ -433,7 +433,10 @@ fn build_backend(config: RouterConfig) -> Result<Box<dyn AiBackend>> {
         // Every remaining kind is the same client behind a different base URL.
         _ => {
             let preset = kind.preset(config.endpoint).ok_or_else(|| {
-                AiError::InvalidRequest(format!("{} requires an endpoint URL", kind.label()))
+                AiError::InvalidRequest(format!(
+                    "{} needs the address of its server. Add it in Settings → Models.",
+                    kind.label()
+                ))
             })?;
 
             let mut backend = OpenAiCompatBackend::new(preset, config.api_key)?;

@@ -204,7 +204,7 @@ pub async fn generate_email_draft(
 ) -> Result<GeneratedEmail> {
     if context.is_empty() {
         return Err(AiError::InvalidRequest(
-            "cannot draft an email from an empty meeting".into(),
+            "There is nothing in this meeting to write an email from yet.".into(),
         ));
     }
 

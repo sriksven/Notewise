@@ -72,7 +72,11 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
             <ModelStep satisfied={readiness.steps.model.satisfied} onChanged={refresh} />
           )}
           {step === "backend" && (
-            <BackendStep satisfied={readiness.steps.backend.satisfied} onChanged={refresh} />
+            <BackendStep
+              satisfied={readiness.steps.backend.satisfied}
+              detail={readiness.steps.backend.detail ?? null}
+              onChanged={refresh}
+            />
           )}
           {step === "permissions" && (
             <PermissionsStep readiness={readiness.steps.permissions} onChanged={refresh} />
