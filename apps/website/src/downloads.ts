@@ -1,18 +1,20 @@
 /**
  * The download cards, shared by the overview and the install page.
  *
- * macOS is the only platform with a build. Windows and Ubuntu get a card each anyway, saying
- * plainly that theirs is coming. Someone on Windows should learn that here, not by clicking a
- * button that hands them a disk image they cannot open.
+ * macOS and Windows are resolved against the real release; Ubuntu says plainly that its build is
+ * coming. Windows says so too until a release carries its installer — the card follows GitHub
+ * rather than this file, so it changes when such a release is published, with no redeploy. Someone on Windows should learn what exists here, not by clicking a button that hands
+ * them a disk image they cannot open.
  */
 
 import {
   RELEASES_PAGE,
-  findMacRelease,
+  findReleases,
   formatBytes,
   type Lookup,
   type MacFormat,
   type MacRelease,
+  type WindowsRelease,
 } from "./release";
 
 export type Os = "mac" | "windows" | "linux";
@@ -79,7 +81,7 @@ const ICON = {
 function soonCard(os: Os, name: string, icon: string, files: string, current: Os, delay: number): string {
   const here = os === current;
   return `
-    <article class="dl-card ${here ? "is-current" : ""}" data-tilt data-reveal="rise" style="--reveal-delay:${delay}ms">
+    <article class="dl-card ${here ? "is-current" : ""}" data-os="${os}" data-tilt data-reveal="rise" style="--reveal-delay:${delay}ms">
       <div class="dl-sheen" aria-hidden="true"></div>
       <div class="flex items-center justify-between gap-3">
         <span class="text-ink-muted">${icon}</span>
@@ -97,6 +99,59 @@ function soonCard(os: Os, name: string, icon: string, files: string, current: Os
         to hear when the app lands.
       </p>
     </article>`;
+}
+
+const LINK = "text-ink-muted underline decoration-hairline underline-offset-2 hover:text-ink";
+
+/**
+ * The Windows card's contents once a release carries the installer.
+ *
+ * Contents rather than the whole card: the card already on the page has been given its tilt and
+ * its reveal, and a replacement would arrive with neither — invisible, since reveal starts hidden.
+ */
+function windowsContents(release: WindowsRelease): string {
+  const kind = release.prerelease ? "Release candidate" : "Latest release";
+  return `
+      <div class="dl-sheen" aria-hidden="true"></div>
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-ink">${ICON.windows}</span>
+        <span class="badge-live"><span class="dot"></span>Available</span>
+      </div>
+      <h3 class="mt-6 text-[22px] font-semibold tracking-[-0.02em]">Windows</h3>
+      <p class="mt-1 text-[13.5px] text-ink-faint">Windows 10 and 11 · 64-bit</p>
+
+      <a id="windows-download" class="dl-button is-primary mt-6" href="${release.installer.url}" rel="noopener">
+        ${ICON.arrow}
+        <!-- Not "Download for Windows": this card is narrower than the Mac one, and that label
+             with the size beside it overflowed the button. The card is already headed Windows. -->
+        <span>Download</span>
+        <span class="dl-meta">.exe · ${formatBytes(release.installer.bytes)}</span>
+      </a>
+
+      <p class="mt-4 text-[12.5px] leading-relaxed text-ink-muted">
+        Run the installer. It installs for your account, with no administrator prompt. It records
+        your microphone; hearing the other side of a call is Mac only for now.
+      </p>
+
+      <p class="mt-3 border-t border-hairline pt-3 text-[12px] leading-relaxed text-ink-faint">
+        ${kind} <a class="${LINK}" href="${release.page}" target="_blank" rel="noreferrer noopener">${release.tag}</a> · straight from GitHub Releases.
+      </p>
+      <p class="mt-2 text-[12px] leading-relaxed text-ink-faint">
+        Not signed yet, so Windows warns on the first run: choose <span class="text-ink-muted">More info</span>, then <span class="text-ink-muted">Run anyway</span>.
+      </p>`;
+}
+
+/**
+ * Text elsewhere on the page that says Windows is coming, swapped once a release has it.
+ *
+ * Marked in the markup with `data-when-windows="…"`, the sentence that becomes true then. It is
+ * left alone until the lookup says so, because a page claiming a download that does not exist
+ * yet is the one thing worse than a page that is a day late saying it does.
+ */
+function announceWindows(scope: ParentNode): void {
+  for (const element of scope.querySelectorAll<HTMLElement>("[data-when-windows]")) {
+    element.textContent = element.dataset.whenWindows ?? element.textContent;
+  }
 }
 
 function macCard(current: Os, firstLaunchHref: string): string {
@@ -149,7 +204,7 @@ export function mountDownloads(
   const current = detectOs();
   host.innerHTML = [
     macCard(current, options.firstLaunchHref),
-    soonCard("windows", "Windows", ICON.windows, "Installer · .msi and .exe", current, 90),
+    soonCard("windows", "Windows", ICON.windows, "Installer · .exe", current, 90),
     soonCard("linux", "Ubuntu", ICON.linux, "Linux · .deb and AppImage", current, 180),
   ].join("");
 
@@ -204,19 +259,28 @@ export function mountDownloads(
 
   paint();
 
-  findMacRelease().then((lookup: Lookup) => {
-    if (lookup.kind === "found") {
-      release = lookup.release;
+  findReleases().then((lookup: Lookup) => {
+    if (lookup.kind === "found" && lookup.windows) {
+      const windows = host.querySelector<HTMLElement>('.dl-card[data-os="windows"]');
+      if (windows) {
+        windows.innerHTML = windowsContents(lookup.windows);
+        windows.classList.add("dl-card--windows");
+      }
+      announceWindows(document);
+    }
+
+    if (lookup.kind === "found" && lookup.mac) {
+      release = lookup.mac;
       // A remembered format the release does not have falls back to the dmg, which every Mac
       // release carries.
       if (!release.assets[format]) format = release.assets.dmg ? "dmg" : (Object.keys(release.assets)[0] as MacFormat);
       const kind = release.prerelease ? "Release candidate" : "Latest release";
-      status.innerHTML = `${kind} <a class="text-ink-muted underline decoration-hairline underline-offset-2 hover:text-ink" href="${release.page}" target="_blank" rel="noreferrer noopener">${release.tag}</a> · straight from GitHub Releases.`;
+      status.innerHTML = `${kind} <a class="${LINK}" href="${release.page}" target="_blank" rel="noreferrer noopener">${release.tag}</a> · straight from GitHub Releases.`;
       paint();
       return;
     }
 
-    if (lookup.kind === "none") {
+    if (lookup.kind === "found") {
       // GitHub answered: there is no Mac build yet. The button stops promising a download.
       button.href = options.sourceHref;
       label.textContent = "Build it from source";

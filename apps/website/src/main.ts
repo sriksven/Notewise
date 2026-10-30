@@ -113,7 +113,11 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
  * system audio does not work by recording a call and getting half a transcript is worse off
  * than someone who was told here.
  */
-const LIMITATIONS: Array<{ title: string; body: string }> = [
+/**
+ * `whenWindows` is the limit as it reads once a release carries the Windows installer — see
+ * `announceWindows` in `downloads.ts`, which swaps it in only then.
+ */
+const LIMITATIONS: Array<{ title: string; body: string; whenWindows?: { title: string; body: string } }> = [
   {
     title: "System audio is not verified yet",
     body: "The microphone hears you and the room. The other people on a call come through macOS system audio, which needs the Screen & System Audio Recording permission switched on by hand and a relaunch, and has not yet been run end to end in a release build.",
@@ -125,6 +129,10 @@ const LIMITATIONS: Array<{ title: string; body: string }> = [
   {
     title: "macOS only, for now",
     body: "The downloadable app is for Apple silicon Macs. Windows and Ubuntu builds are coming; until then the engine, CLI and web dashboard build from source anywhere Rust does.",
+    whenWindows: {
+      title: "Windows records the microphone only",
+      body: "The Windows app records your microphone and transcribes on the processor, so it is slower than a Mac. Hearing the other side of a call and the desktop assistant are Mac only for now, and the installer is not signed yet. Ubuntu is still to come.",
+    },
   },
   {
     title: "Speakers are separated, not recognised",
@@ -157,8 +165,8 @@ function renderLists(): void {
         <div class="card flex items-start gap-4 p-5" data-reveal="${index % 2 ? "right" : "left"}" style="--reveal-delay:${index * 70}ms">
           <span class="mt-1 shrink-0 text-ink-faint">○</span>
           <div>
-            <h3 class="text-[15px] font-medium">${limit.title}</h3>
-            <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted">${limit.body}</p>
+            <h3 class="text-[15px] font-medium"${limit.whenWindows ? ` data-when-windows="${limit.whenWindows.title}"` : ""}>${limit.title}</h3>
+            <p class="mt-1 text-[13.5px] leading-relaxed text-ink-muted"${limit.whenWindows ? ` data-when-windows="${limit.whenWindows.body}"` : ""}>${limit.body}</p>
           </div>
         </div>`,
     ).join("");
