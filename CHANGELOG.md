@@ -33,7 +33,8 @@ The first tagged build.
 - Clarifying questions during a live meeting, when there is still time to ask them.
 - What a recurring meeting is still carrying from last time.
 - Search across everything said, and a question you can ask the whole workspace that answers only
-  from your own material and cites it.
+  from your own material and cites it — from its own page, or from the Ask button at the bottom
+  right of any screen but Notes. A note's own Ask works the same way, in a second colour.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 

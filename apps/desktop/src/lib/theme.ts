@@ -51,6 +51,20 @@ export const ACCENTS: Accent[] = [
 
 export const DEFAULT_ACCENT = "graphite";
 
+/**
+ * The accent a note's own Ask is drawn in.
+ *
+ * Asking one note and asking everything are the same conversation with a different reach, and the
+ * two sit side by side often enough that they should never look like the same thing. So the note's
+ * is always another of the eleven: five along from the user's choice, far enough round the list to
+ * be a different hue, and following light and dark exactly as the main accent does. Graphite gives
+ * Teal; Ocean gives Graphite.
+ */
+export function companionAccent(id: string): Accent {
+  const index = Math.max(0, ACCENTS.findIndex((a) => a.id === id));
+  return ACCENTS[(index + 5) % ACCENTS.length];
+}
+
 /** Surfaces, text and lines for one mode. */
 interface Palette {
   bg: string;
@@ -184,6 +198,12 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty("--accent-rgb", channels(dark ? accent.darkBase : accent.base));
   root.style.setProperty("--accent-hover", dark ? accent.darkHover : accent.hover);
   root.style.setProperty("--accent-on", dark ? accent.darkOn : accent.on);
+
+  const note = companionAccent(accent.id);
+  root.style.setProperty("--note-accent", dark ? note.darkBase : note.base);
+  root.style.setProperty("--note-accent-rgb", channels(dark ? note.darkBase : note.base));
+  root.style.setProperty("--note-accent-hover", dark ? note.darkHover : note.hover);
+  root.style.setProperty("--note-accent-on", dark ? note.darkOn : note.on);
 
   // Recording is always red, in every theme. It is the one signal that must not be confusable
   // with decoration — if it is red, audio is being captured — so it does not follow the accent.

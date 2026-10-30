@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { startNotificationDelivery } from "./lib/notifications";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Search } from "lucide-react";
 
 import { IntelPanel } from "./components/IntelPanel";
 import { MeetingLibrary } from "./components/MeetingLibrary";
 import { MeetingNotes } from "./components/MeetingNotes";
+import { AskPanel } from "./components/AskPanel";
 import { RecordDock } from "./components/RecordDock";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -76,6 +77,8 @@ export default function App() {
   // URL, so Back works, a window reload lands where it was, and a meeting can be linked to.
   const { route, navigate, replace } = useRoute();
   const [panelOpen, setPanelOpen] = useState(true);
+  /** The Ask panel that opens from any screen. See `askHere` for where it is offered. */
+  const [askOpen, setAskOpen] = useState(false);
   const theme = useTheme();
 
   const tab: Tab = route.name === "meeting" ? route.tab : "transcript";
@@ -646,6 +649,21 @@ export default function App() {
   /** Only a meeting page gets the library column and the intelligence panel beside it. */
   const inWorkspace = route.name === "meeting";
 
+  // Where the floating Ask is offered: everywhere except screens that already ask, or that keep
+  // their own text box along the bottom edge where the button would sit on it — Notes (a note has
+  // its own Ask), the Ask page itself, the Agent, and a meeting's Ask and Notes tabs. The same rule
+  // the record dock follows, for the same reason.
+  const askHere =
+    route.name !== "notes" &&
+    route.name !== "ask" &&
+    route.name !== "agent" &&
+    !(inWorkspace && DOCKLESS_TABS.includes(tab));
+
+  // Leaving for a screen with its own Ask closes the floating one rather than stacking two.
+  useEffect(() => {
+    if (!askHere) setAskOpen(false);
+  }, [askHere]);
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Offscreen rather than hidden: a `display:none` input cannot be opened by a click
@@ -691,7 +709,7 @@ export default function App() {
         />
 
         <div className="relative flex min-h-0 flex-1">
-          <main className="flex min-w-0 flex-1 flex-col">
+          <main className="relative flex min-w-0 flex-1 flex-col">
             {error && (
               <div
                 role="alert"
@@ -858,7 +876,28 @@ export default function App() {
               />
             )}
             {route.name === "about" && <AboutView health={health} />}
+
+            {/* Bottom right of the screen being read, not of the window: with a side panel open it
+                stays beside the content instead of sitting on the panel. */}
+            {askHere && !askOpen && (
+              <button
+                type="button"
+                onClick={() => setAskOpen(true)}
+                aria-label="Ask about everything you have"
+                title="Ask — answered from your own meetings and notes"
+                className="absolute bottom-6 right-6 z-10 flex items-center gap-1.5 rounded-full bg-accent
+                           px-3.5 py-2 text-[12.5px] font-medium text-accent-on shadow-dock transition
+                           hover:bg-accent-hover"
+              >
+                <Search size={13} aria-hidden />
+                Ask
+              </button>
+            )}
           </main>
+
+          {askHere && askOpen && (
+            <AskPanel onClose={() => setAskOpen(false)} onNavigate={navigate} />
+          )}
 
           {inWorkspace && panelOpen && (
             <IntelPanel

@@ -333,7 +333,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
                 title="Ask about this note"
                 className={`flex shrink-0 items-center gap-1 rounded-full border border-hairline
                             px-2.5 py-1 text-[11.5px] transition hover:bg-overlay ${
-                              asking ? "bg-overlay text-ink" : "text-ink-muted hover:text-ink"
+                              asking ? "border-note/60 bg-note/10 text-note" : "text-ink-muted hover:text-ink"
                             }`}
               >
                 <MessageCircleQuestion size={12} aria-hidden />
