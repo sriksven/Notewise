@@ -88,7 +88,15 @@ impl OllamaBackend {
             chosen: false,
             resolved: Arc::new(tokio::sync::OnceCell::new()),
             endpoint: DEFAULT_ENDPOINT.to_string(),
-            http: reqwest::Client::new(),
+            // A daemon on this machine connects at once or not at all. Bounding the connect
+            // below `tags()`'s two-second limit is also what makes a stopped Ollama read as
+            // stopped on Windows, which takes about two seconds to refuse a loopback connection:
+            // the request timed out first, and the person was told Ollama was slow rather than
+            // that it was not running. A connect that times out is still a connect error.
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_millis(1500))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -665,6 +673,29 @@ mod tests {
 
     /// A refused connection is a reachability answer, not a panic. Port 1 is reserved and
     /// nothing listens on it, so this exercises the failure path without a network.
+    /// Windows takes about two seconds to refuse a connection to a closed local port, and
+    /// `tags()` gives up after two. The timeout won that race, so a stopped Ollama was reported
+    /// on Windows as one that was slow — "try again" — rather than as one to open. Only the
+    /// `windows-latest` CI job saw it.
+    ///
+    /// A non-routable address never answers the connection at all, which reproduces the race on
+    /// every platform: before the connect timeout, this read "took too long to answer".
+    #[tokio::test]
+    async fn a_connection_that_never_completes_reads_as_not_running() {
+        let backend = OllamaBackend::new().with_endpoint("http://10.255.255.1:11434/api/chat");
+
+        let started = std::time::Instant::now();
+        let err = backend.probe().await.expect_err("nothing answers there");
+
+        let shown = err.to_string();
+        assert!(shown.starts_with("Ollama isn't running."), "{shown}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "the setup screen waits on this: {:?}",
+            started.elapsed()
+        );
+    }
+
     #[tokio::test]
     async fn probe_reports_an_unreachable_daemon() {
         let backend = OllamaBackend::new().with_endpoint("http://127.0.0.1:1/api/chat");
