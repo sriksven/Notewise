@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Cloud,
@@ -35,6 +35,21 @@ import { VoiceprintSettings } from "./VoiceprintSettings";
 const PRIVACY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security";
 
 type PermissionKind = "microphone" | "system_audio";
+
+/** The page is long enough that finding a setting meant scrolling past all the others. */
+const GROUPS = [
+  { id: "appearance", label: "Appearance" },
+  { id: "recording", label: "Recording" },
+  { id: "models", label: "Models" },
+  { id: "assistant", label: "Assistant" },
+  { id: "search", label: "Search" },
+  { id: "speakers", label: "Speakers" },
+] as const;
+
+type GroupId = (typeof GROUPS)[number]["id"];
+
+/** How far below the top of the pane a group may start and still count as the one being read. */
+const SPY_OFFSET = 48;
 
 interface Active {
   kind: string;
@@ -150,337 +165,433 @@ export function SettingsView({
 
   const permissions = readiness?.steps.permissions;
 
+  const scroller = useRef<HTMLDivElement>(null);
+  const groupNodes = useRef<Partial<Record<GroupId, HTMLDivElement | null>>>({});
+  const [activeGroup, setActiveGroup] = useState<GroupId>(GROUPS[0].id);
+  /**
+   * The group a click in the nav asked for, held until the person scrolls by hand.
+   *
+   * A short group near the bottom can never reach the top of the pane, so without this a click
+   * on "Search" would scroll, and the spy would then light up "Speakers" instead.
+   */
+  const jumpedTo = useRef<GroupId | null>(null);
+
+  const spy = () => {
+    const pane = scroller.current;
+    if (!pane || jumpedTo.current) return;
+
+    // At the very bottom the last group is on screen even though it never reached the top.
+    if (pane.scrollTop > 0 && pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2) {
+      setActiveGroup(GROUPS[GROUPS.length - 1].id);
+      return;
+    }
+
+    const top = pane.getBoundingClientRect().top;
+    let current: GroupId = GROUPS[0].id;
+    for (const { id } of GROUPS) {
+      const node = groupNodes.current[id];
+      if (node && node.getBoundingClientRect().top - top <= SPY_OFFSET) current = id;
+    }
+    setActiveGroup(current);
+  };
+
+  const jumpTo = (id: GroupId) => {
+    jumpedTo.current = id;
+    setActiveGroup(id);
+    groupNodes.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // Wheel, touch, keys and the scrollbar are the ways a person scrolls; a programmatic smooth
+  // scroll fires none of them, so any one of them hands the highlight back to the spy.
+  const releaseJump = () => {
+    jumpedTo.current = null;
+  };
+
+  const group = (id: GroupId) => ({
+    id: `settings-${id}`,
+    ref: (node: HTMLDivElement | null) => {
+      groupNodes.current[id] = node;
+    },
+    className: "scroll-mt-6 space-y-8",
+  });
+
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-6">
-      <div className="mx-auto max-w-2xl space-y-8">
-        <h1 className="text-[20px] font-semibold tracking-tight">Settings</h1>
-
-        <AppearanceSettings
-          theme={theme}
-          onModeChange={onModeChange}
-          onAccentChange={onAccentChange}
-        />
-
-        {(error ?? downloadError) && (
-          <div
-            role="alert"
-            className="rounded-lg border border-warn-line bg-warn px-3 py-2 text-[13px] text-warn-text"
-          >
-            {error ?? downloadError}
-          </div>
-        )}
-
-        {/* First, because it is what the setup banner sends people here to fix. A banner that
-            points at a screen with no permissions on it is a dead end. */}
-        {permissions && (
-          <section>
-            <h2 className="mb-1 text-[13px] font-semibold text-ink">Permissions</h2>
-            <p className="mb-3 text-[12px] text-ink-muted">
-              What the operating system lets Notewise hear. Nothing is captured until you press
-              record.
-            </p>
-
-            <div className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
-              <PermissionRow
-                icon={Mic}
-                title="Microphone"
-                description="Captures your side of the conversation."
-                readiness={permissions.microphone}
-                busy={askingFor === "microphone"}
-                onEnable={() => void requestPermission("microphone")}
-                onOpenSettings={() => {
-                  window.location.href = PRIVACY_SETTINGS;
-                }}
-              />
-              <PermissionRow
-                icon={Volume2}
-                title="System audio"
-                description="Captures everyone else, straight from the meeting app."
-                readiness={permissions.system_audio}
-                busy={askingFor === "system_audio"}
-                onEnable={() => void requestPermission("system_audio")}
-                onOpenSettings={() => {
-                  window.location.href = PRIVACY_SETTINGS;
-                }}
-              />
-            </div>
-          </section>
-        )}
-
-        {/* Before routing and models: this is the one setting that decides whether a meeting gets
-            captured at all, and everything else here is about what happens to one that was. */}
-        <MeetingDetectionSettings onNavigate={onNavigate} />
-
-        {/* Directly after it, for the reason above: that setting decides whether audio is captured,
-            and this one decides whether it survives being turned into text. Everything below is
-            about the text. */}
-        <AudioRetentionSettings />
-
-        <RoutingSettings onChanged={onEngineChange} />
-
-        {/* After routing: that decides which model answers, this decides what it is asked. */}
-        <SummaryTemplateSettings />
-
-        <MemorySettings />
-
-        {/* After memory and before the index: this is the only screen that grants Notewise a way to
-            change something outside itself, so it reads after everything that only changes what it
-            knows. */}
-        <ToolServersSettings />
-
-        {/* Beside external tools, and for the same reason it comes after them: both are ways for
-            Notewise to act outside itself, and this one needs the more alarming permission. */}
-        <AssistantSettings />
-
-        <SearchIndexSettings />
-
-        {/* Above voiceprints deliberately: separating voices is the anonymous, local step, and
-            recognising them across meetings is the one that identifies a person. Reading them in
-            that order is reading them from least to most consequential. */}
-        <SpeakerSeparationSettings />
-
-        <VoiceprintSettings />
-
-        {/* Where audio goes is the product's central claim, so it leads the rest. */}
-        <section>
-          <h2 className="mb-1 text-[13px] font-semibold text-ink">AI backend</h2>
-          <p className="mb-3 text-[12px] text-ink-muted">
-            Runs summaries, chat and suggested questions. Click one to switch — it takes effect
-            immediately, no restart. A key you paste goes to your OS keychain and is never
-            shown again; an environment variable still works if you prefer one.
-          </p>
-
-          {active && (
-            <div
-              className={`mb-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${
-                active.is_local
-                  ? "border-ok-line bg-ok text-ok-text"
-                  : "border-warn-line bg-warn text-warn-text"
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Outside the scrolling pane rather than sticky inside it, so it cannot scroll away. */}
+      <nav aria-label="Settings sections" className="shrink-0 border-b border-hairline px-8">
+        <div className="mx-auto flex max-w-2xl gap-1 overflow-x-auto py-2">
+          {GROUPS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => jumpTo(id)}
+              aria-controls={`settings-${id}`}
+              aria-current={activeGroup === id ? "location" : undefined}
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-[13px] transition-colors ${
+                activeGroup === id
+                  ? "bg-overlay font-medium text-ink"
+                  : "text-ink-muted hover:bg-overlay hover:text-ink"
               }`}
             >
-              {active.is_local ? (
-                <ShieldCheck size={15} aria-hidden />
-              ) : (
-                <ShieldAlert size={15} aria-hidden />
-              )}
-              <span>
-                <strong>{active.model}</strong> —{" "}
-                {active.is_local
-                  ? "transcripts stay on this machine"
-                  : "transcripts are sent to the provider"}
-              </span>
+              {label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div
+        ref={scroller}
+        onScroll={spy}
+        onWheel={releaseJump}
+        onTouchStart={releaseJump}
+        onKeyDown={releaseJump}
+        onPointerDown={releaseJump}
+        className="flex-1 overflow-y-auto px-8 py-6"
+      >
+        <div className="mx-auto max-w-2xl space-y-8">
+          <h1 className="text-[20px] font-semibold tracking-tight">Settings</h1>
+
+          {(error ?? downloadError) && (
+            <div
+              role="alert"
+              className="rounded-lg border border-warn-line bg-warn px-3 py-2 text-[13px] text-warn-text"
+            >
+              {error ?? downloadError}
             </div>
           )}
 
-          <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
-            {backends.map((backend) => {
-              const isActive = backend.kind === active?.kind;
-              // Blocked only while something is genuinely missing. A provider whose key is
-              // saved is as usable as a local one, and greying it out was the reason a key
-              // could be added and then appear not to work.
-              const blocked = backendBlocker(backend) !== null;
+          <div {...group("appearance")}>
+              <AppearanceSettings
+                theme={theme}
+                onModeChange={onModeChange}
+                onAccentChange={onAccentChange}
+              />
+          </div>
 
-              return (
-                <li key={backend.kind}>
-                  <button
-                    type="button"
-                    disabled={blocked || switching !== null}
-                    onClick={() => void switchTo(backend.kind)}
-                    aria-current={isActive ? "true" : undefined}
-                    className={`flex w-full items-center gap-3 px-3 py-2 text-left transition
-                                disabled:cursor-not-allowed ${
-                                  isActive ? "bg-overlay" : "bg-surface hover:bg-overlay"
-                                }`}
-                  >
-                    {backend.is_local ? (
-                      <HardDrive size={14} className="shrink-0 text-ok-text" aria-hidden />
-                    ) : (
-                      <Cloud size={14} className="shrink-0 text-ink-faint" aria-hidden />
-                    )}
+          <div {...group("recording")}>
+            {/* First, because it is what the setup banner sends people here to fix. A banner that
+                points at a screen with no permissions on it is a dead end. */}
+            {permissions && (
+              <section>
+                <h2 className="mb-1 text-[13px] font-semibold text-ink">Permissions</h2>
+                <p className="mb-3 text-[12px] text-ink-muted">
+                  What the operating system lets Notewise hear. Nothing is captured until you press
+                  record.
+                </p>
 
-                    <span
-                      className={`flex-1 text-[13px] ${
-                        blocked ? "text-ink-faint" : "text-ink"
-                      }`}
-                    >
-                      {backend.label}
-                    </span>
+                <div className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
+                  <PermissionRow
+                    icon={Mic}
+                    title="Microphone"
+                    description="Captures your side of the conversation."
+                    readiness={permissions.microphone}
+                    busy={askingFor === "microphone"}
+                    onEnable={() => void requestPermission("microphone")}
+                    onOpenSettings={() => {
+                      window.location.href = PRIVACY_SETTINGS;
+                    }}
+                  />
+                  <PermissionRow
+                    icon={Volume2}
+                    title="System audio"
+                    description="Captures everyone else, straight from the meeting app."
+                    readiness={permissions.system_audio}
+                    busy={askingFor === "system_audio"}
+                    onEnable={() => void requestPermission("system_audio")}
+                    onOpenSettings={() => {
+                      window.location.href = PRIVACY_SETTINGS;
+                    }}
+                  />
+                </div>
+              </section>
+            )}
 
-                    {switching === backend.kind && (
-                      <Loader2 size={13} className="animate-spin text-ink-faint" aria-hidden />
-                    )}
-                    {isActive && <Check size={14} className="text-ok-text" aria-hidden />}
+            {/* Before routing and models: this is the one setting that decides whether a meeting
+                gets captured at all, and everything else here is about what happens to one that
+                was. */}
+            <MeetingDetectionSettings onNavigate={onNavigate} />
 
-                    {backend.requires_api_key && !backend.has_key && (
-                      <span className="rounded-full border border-hairline bg-overlay px-1.5 py-0.5 text-[10px] text-ink-muted">
-                        needs key
-                      </span>
-                    )}
-                    {backend.requires_api_key && backend.has_key && (
-                      <span className="rounded-full border border-ok-line bg-ok px-1.5 py-0.5 text-[10px] text-ok-text">
-                        key saved
-                      </span>
-                    )}
-                    {backend.requires_endpoint && (
-                      <span className="rounded-full border border-hairline bg-overlay px-1.5 py-0.5 text-[10px] text-ink-muted">
-                        needs URL
-                      </span>
-                    )}
-                  </button>
+            {/* Directly after it, for the reason above: that setting decides whether audio is
+                captured, and this one decides whether it survives being turned into text.
+                Everything below is about the text. */}
+            <AudioRetentionSettings />
+          </div>
 
-                  {/* The models this backend actually holds, listed under it while it is the
-                      active one. Choosing a provider was never enough: the tag has to match
-                      what was pulled, exactly. */}
-                  {backend.requires_api_key && (
-                    // Saving a key also switches to that provider, and removing one can leave
-                    // the engine on another — either way the chrome has to hear about it.
-                    <ApiKeyRow
-                      backend={backend}
-                      onChanged={() => {
-                        onEngineChange();
-                        void load();
-                      }}
-                    />
+          <div {...group("models")}>
+            {/* Where audio goes is the product's central claim, so it leads the models. */}
+            <section>
+              <h2 className="mb-1 text-[13px] font-semibold text-ink">AI backend</h2>
+              <p className="mb-3 text-[12px] text-ink-muted">
+                Runs summaries, chat and suggested questions. Click one to switch — it takes effect
+                immediately, no restart. A key you paste goes to your OS keychain and is never
+                shown again; an environment variable still works if you prefer one.
+              </p>
+
+              {active && (
+                <div
+                  className={`mb-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${
+                    active.is_local
+                      ? "border-ok-line bg-ok text-ok-text"
+                      : "border-warn-line bg-warn text-warn-text"
+                  }`}
+                >
+                  {active.is_local ? (
+                    <ShieldCheck size={15} aria-hidden />
+                  ) : (
+                    <ShieldAlert size={15} aria-hidden />
                   )}
-
-                  {isActive && available && (
-                    <div className="border-t border-hairline bg-overlay px-3 py-2">
-                      {available.models.length === 0 ? (
-                        <p className="text-[12px] text-ink-muted">
-                          {available.reason ??
-                            `No models found. Pull one with \`ollama pull llama3.1\`.`}
-                        </p>
-                      ) : (
-                        <>
-                          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
-                            Installed models
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {available.models.map((model) => (
-                              <button
-                                key={model}
-                                type="button"
-                                disabled={switching !== null}
-                                onClick={() => void switchTo(backend.kind, model)}
-                                className={`rounded-full border px-2.5 py-1 text-[12px] transition
-                                            disabled:opacity-50 ${
-                                              model === active?.model
-                                                ? "border-ok-line bg-ok text-ok-text"
-                                                : "border-hairline bg-surface text-ink hover:bg-overlay"
-                                            }`}
-                              >
-                                {switching === model ? "Switching…" : model}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-
-        <section>
-          <h2 className="mb-1 text-[13px] font-semibold text-ink">Transcription models</h2>
-          <p className="mb-3 text-[12px] text-ink-muted">
-            Whisper, from OpenAI — the same models MacWhisper, whisper.cpp and most local
-            transcription tools use. Bigger is more accurate and slower. A name ending in{" "}
-            <code className="rounded bg-overlay px-1">.en</code> is English-only. Stored in{" "}
-            <code className="rounded bg-overlay px-1">{directory}</code>
-          </p>
-
-          <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
-            {models.map((model) => (
-              <li key={model.name} className="flex items-start gap-3 bg-surface px-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-ink">{model.name}</span>
-                    {model.recommended && (
-                      <span className="rounded-full border border-ok-line bg-ok px-1.5 py-0.5 text-[10px] text-ok-text">
-                        recommended
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="mt-0.5 text-[12px] leading-snug text-ink-muted">
-                    {model.tradeoff}
-                  </p>
-                  <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">
-                    {model.language_note}
-                  </p>
-                  {/* RAM is shown because it is the number that decides whether a model is
-                      usable at all — a 3GB model on an 8GB machine will not run. */}
-                  <span className="mt-1 block text-[11px] text-ink-faint">
-                    {size(model.bytes)} download · ~{model.approx_ram_mb} MB RAM
+                  <span>
+                    <strong>{active.model}</strong> —{" "}
+                    {active.is_local
+                      ? "transcripts stay on this machine"
+                      : "transcripts are sent to the provider"}
                   </span>
                 </div>
+              )}
 
-                {model.installed ? (
-                  <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[12px] text-ok-text">
-                    <Check size={14} aria-hidden />
-                    Installed
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void start(model.name)}
-                    disabled={downloading !== null}
-                    className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline
-                               px-2.5 py-1 text-[12px] text-ink transition
-                               hover:bg-overlay disabled:opacity-50"
-                  >
-                    {downloading === model.name ? (
-                      <>
-                        <Loader2 size={13} className="animate-spin" aria-hidden />
-                        Downloading
-                      </>
-                    ) : (
-                      <>
-                        <Download size={13} aria-hidden />
-                        Download
-                      </>
-                    )}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+              <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
+                {backends.map((backend) => {
+                  const isActive = backend.kind === active?.kind;
+                  // Blocked only while something is genuinely missing. A provider whose key is
+                  // saved is as usable as a local one, and greying it out was the reason a key
+                  // could be added and then appear not to work.
+                  const blocked = backendBlocker(backend) !== null;
 
-          {downloading && (
-            <div className="mt-3">
-              <div className="mb-1 flex items-baseline justify-between text-[11px] text-ink-muted">
-                <span>Downloading {downloading}</span>
-                <span className="font-mono tabular-nums">
-                  {progress
-                    ? `${size(progress.downloaded_bytes)} / ${size(
-                        progress.total_bytes,
-                      )} · ${progress.percent}%`
-                    : "starting…"}
-                </span>
-              </div>
-              <div
-                role="progressbar"
-                aria-valuenow={progress?.percent ?? 0}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={`Downloading ${downloading}`}
-                className="h-1.5 w-full overflow-hidden rounded-full bg-overlay"
-              >
-                <div
-                  className="h-full rounded-full bg-record transition-[width] duration-300"
-                  style={{ width: `${progress?.percent ?? 0}%` }}
-                />
-              </div>
-              <p className="mt-1.5 text-[11px] text-ink-faint">
-                The engine owns this download — it continues if you switch views, and resumes
-                where it left off if the connection drops.
+                  return (
+                    <li key={backend.kind}>
+                      <button
+                        type="button"
+                        disabled={blocked || switching !== null}
+                        onClick={() => void switchTo(backend.kind)}
+                        aria-current={isActive ? "true" : undefined}
+                        className={`flex w-full items-center gap-3 px-3 py-2 text-left transition
+                                    disabled:cursor-not-allowed ${
+                                      isActive ? "bg-overlay" : "bg-surface hover:bg-overlay"
+                                    }`}
+                      >
+                        {backend.is_local ? (
+                          <HardDrive size={14} className="shrink-0 text-ok-text" aria-hidden />
+                        ) : (
+                          <Cloud size={14} className="shrink-0 text-ink-faint" aria-hidden />
+                        )}
+
+                        <span
+                          className={`flex-1 text-[13px] ${
+                            blocked ? "text-ink-faint" : "text-ink"
+                          }`}
+                        >
+                          {backend.label}
+                        </span>
+
+                        {switching === backend.kind && (
+                          <Loader2 size={13} className="animate-spin text-ink-faint" aria-hidden />
+                        )}
+                        {isActive && <Check size={14} className="text-ok-text" aria-hidden />}
+
+                        {backend.requires_api_key && !backend.has_key && (
+                          <span className="rounded-full border border-hairline bg-overlay px-1.5 py-0.5 text-[10px] text-ink-muted">
+                            needs key
+                          </span>
+                        )}
+                        {backend.requires_api_key && backend.has_key && (
+                          <span className="rounded-full border border-ok-line bg-ok px-1.5 py-0.5 text-[10px] text-ok-text">
+                            key saved
+                          </span>
+                        )}
+                        {backend.requires_endpoint && (
+                          <span className="rounded-full border border-hairline bg-overlay px-1.5 py-0.5 text-[10px] text-ink-muted">
+                            needs URL
+                          </span>
+                        )}
+                      </button>
+
+                      {/* The models this backend actually holds, listed under it while it is the
+                          active one. Choosing a provider was never enough: the tag has to match
+                          what was pulled, exactly. */}
+                      {backend.requires_api_key && (
+                        // Saving a key also switches to that provider, and removing one can leave
+                        // the engine on another — either way the chrome has to hear about it.
+                        <ApiKeyRow
+                          backend={backend}
+                          onChanged={() => {
+                            onEngineChange();
+                            void load();
+                          }}
+                        />
+                      )}
+
+                      {isActive && available && (
+                        <div className="border-t border-hairline bg-overlay px-3 py-2">
+                          {available.models.length === 0 ? (
+                            <p className="text-[12px] text-ink-muted">
+                              {available.reason ??
+                                `No models found. Pull one with \`ollama pull llama3.1\`.`}
+                            </p>
+                          ) : (
+                            <>
+                              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+                                Installed models
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {available.models.map((model) => (
+                                  <button
+                                    key={model}
+                                    type="button"
+                                    disabled={switching !== null}
+                                    onClick={() => void switchTo(backend.kind, model)}
+                                    className={`rounded-full border px-2.5 py-1 text-[12px] transition
+                                                disabled:opacity-50 ${
+                                                  model === active?.model
+                                                    ? "border-ok-line bg-ok text-ok-text"
+                                                    : "border-hairline bg-surface text-ink hover:bg-overlay"
+                                                }`}
+                                  >
+                                    {switching === model ? "Switching…" : model}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            <section>
+              <h2 className="mb-1 text-[13px] font-semibold text-ink">Transcription models</h2>
+              <p className="mb-3 text-[12px] text-ink-muted">
+                Whisper, from OpenAI — the same models MacWhisper, whisper.cpp and most local
+                transcription tools use. Bigger is more accurate and slower. A name ending in{" "}
+                <code className="rounded bg-overlay px-1">.en</code> is English-only. Stored in{" "}
+                <code className="rounded bg-overlay px-1">{directory}</code>
               </p>
-            </div>
-          )}
-        </section>
+
+              <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
+                {models.map((model) => (
+                  <li key={model.name} className="flex items-start gap-3 bg-surface px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-medium text-ink">{model.name}</span>
+                        {model.recommended && (
+                          <span className="rounded-full border border-ok-line bg-ok px-1.5 py-0.5 text-[10px] text-ok-text">
+                            recommended
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="mt-0.5 text-[12px] leading-snug text-ink-muted">
+                        {model.tradeoff}
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                        {model.language_note}
+                      </p>
+                      {/* RAM is shown because it is the number that decides whether a model is
+                          usable at all — a 3GB model on an 8GB machine will not run. */}
+                      <span className="mt-1 block text-[11px] text-ink-faint">
+                        {size(model.bytes)} download · ~{model.approx_ram_mb} MB RAM
+                      </span>
+                    </div>
+
+                    {model.installed ? (
+                      <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[12px] text-ok-text">
+                        <Check size={14} aria-hidden />
+                        Installed
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void start(model.name)}
+                        disabled={downloading !== null}
+                        className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline
+                                   px-2.5 py-1 text-[12px] text-ink transition
+                                   hover:bg-overlay disabled:opacity-50"
+                      >
+                        {downloading === model.name ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" aria-hidden />
+                            Downloading
+                          </>
+                        ) : (
+                          <>
+                            <Download size={13} aria-hidden />
+                            Download
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              {downloading && (
+                <div className="mt-3">
+                  <div className="mb-1 flex items-baseline justify-between text-[11px] text-ink-muted">
+                    <span>Downloading {downloading}</span>
+                    <span className="font-mono tabular-nums">
+                      {progress
+                        ? `${size(progress.downloaded_bytes)} / ${size(
+                            progress.total_bytes,
+                          )} · ${progress.percent}%`
+                        : "starting…"}
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={progress?.percent ?? 0}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Downloading ${downloading}`}
+                    className="h-1.5 w-full overflow-hidden rounded-full bg-overlay"
+                  >
+                    <div
+                      className="h-full rounded-full bg-record transition-[width] duration-300"
+                      style={{ width: `${progress?.percent ?? 0}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-ink-faint">
+                    The engine owns this download — it continues if you switch views, and resumes
+                    where it left off if the connection drops.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            <RoutingSettings onChanged={onEngineChange} />
+
+            {/* After routing: that decides which model answers, this decides what it is asked. */}
+            <SummaryTemplateSettings />
+          </div>
+
+          <div {...group("assistant")}>
+            <MemorySettings />
+
+            {/* After memory and before the index: this is the only screen that grants Notewise a
+                way to change something outside itself, so it reads after everything that only
+                changes what it knows. */}
+            <ToolServersSettings />
+
+            {/* Beside external tools, and for the same reason it comes after them: both are ways
+                for Notewise to act outside itself, and this one needs the more alarming permission.
+                */}
+            <AssistantSettings />
+          </div>
+
+          <div {...group("search")}>
+            <SearchIndexSettings />
+          </div>
+
+          <div {...group("speakers")}>
+            {/* Above voiceprints deliberately: separating voices is the anonymous, local step, and
+                recognising them across meetings is the one that identifies a person. Reading them
+                in that order is reading them from least to most consequential. */}
+            <SpeakerSeparationSettings />
+
+            <VoiceprintSettings />
+          </div>
+        </div>
       </div>
     </div>
   );
