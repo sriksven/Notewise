@@ -2,9 +2,10 @@
  * The install page: the download cards, the macOS first-launch walkthrough, and building from
  * source on every platform.
  *
- * The Mac card is the same one the overview shows, resolved against the real GitHub release
- * (see `downloads.ts`). Windows and Ubuntu say "coming soon" there, and this page's source-build
- * steps are how to run Notewise on them today.
+ * The Mac and Windows cards are the same ones the overview shows, resolved against the real GitHub
+ * release (see `downloads.ts`). Ubuntu says "coming soon" there, and so does Windows until a
+ * release carries its installer; this page's source-build steps are how to run Notewise on either
+ * before then.
  */
 
 import "./style.css";
@@ -32,16 +33,16 @@ const PLATFORMS: Platform[] = [
   {
     os: "windows",
     name: "Windows",
-    status: "engine-only",
+    status: "partial",
     summary:
-      "The engine, CLI and web dashboard build and run. The desktop shell has not been built for Windows yet.",
+      "The desktop app builds and installs: microphone recording, and transcription on the processor. System audio and the desktop assistant are Mac only.",
   },
   {
     os: "linux",
     name: "Linux / Ubuntu",
     status: "engine-only",
     summary:
-      "Same as Windows: the engine, CLI and dashboard work. The desktop shell is a later phase.",
+      "The engine, CLI and web dashboard build and run. The desktop app has not been built for Linux yet.",
   },
 ];
 
@@ -71,7 +72,7 @@ function common(pkg: string): Step[] {
     },
     {
       title: "Build and test the engine",
-      body: "Around 1,100 tests. If this passes, the engine is sound on your machine.",
+      body: "Around 2,000 tests. If this passes, the engine is sound on your machine.",
       command: "cargo build --workspace\ncargo test --workspace",
     },
   ];
@@ -95,7 +96,7 @@ const STEPS: Record<Os, Step[]> = {
   ],
   windows: [
     ...common(
-      "# In PowerShell: Rust, cmake, Node, and the MSVC build tools\nwinget install Rustlang.Rustup\nwinget install Kitware.CMake\nwinget install OpenJS.NodeJS\nwinget install Microsoft.VisualStudio.2022.BuildTools",
+      "# In PowerShell: Rust, cmake, Node, the MSVC build tools, and LLVM\n# (the Whisper build reads its C headers with libclang)\nwinget install Rustlang.Rustup\nwinget install Kitware.CMake\nwinget install OpenJS.NodeJS\nwinget install Microsoft.VisualStudio.2022.BuildTools\nwinget install LLVM.LLVM",
     ),
     {
       title: "Run the engine",
@@ -103,9 +104,9 @@ const STEPS: Record<Os, Step[]> = {
       command: "cargo run -p notewise-cli -- serve",
     },
     {
-      title: "Use the web dashboard",
-      body: "There is no Windows desktop shell yet. The dashboard is a read-only view of the same workspace, in a browser.",
-      command: "cd apps/web-dashboard\nnpm install\nnpm run dev",
+      title: "Build the desktop app",
+      body: "The same build a release runs, with microphone capture and Whisper on the processor. It takes a while the first time. The installer lands in apps/desktop/src-tauri/target/release/bundle/nsis.",
+      command: "cd apps/desktop\nnpm install\nnpx tauri build --features bundle-cpu --bundles nsis",
     },
   ],
   linux: [

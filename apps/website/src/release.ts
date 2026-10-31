@@ -1,5 +1,5 @@
 /**
- * Finds the macOS build to download.
+ * Finds the macOS and Windows builds to download.
  *
  * # Why the release is looked up rather than linked
  *
@@ -34,14 +34,21 @@ export interface MacRelease {
   assets: Partial<Record<MacFormat, MacAsset>>;
 }
 
+/** The Windows installer, `Notewise_<version>_x64-setup.exe`. `release.yml` makes one. */
+export interface WindowsRelease {
+  tag: string;
+  prerelease: boolean;
+  page: string;
+  installer: { name: string; url: string; bytes: number };
+}
+
 /**
- * What the lookup found. `none` means GitHub answered and there is no macOS build yet; `unknown`
- * means GitHub could not be asked. The two must not be confused: one is a fact about the project,
- * the other about the visitor's network.
+ * What the lookup found. A `null` platform means GitHub answered and there is no build for it
+ * yet; `unknown` means GitHub could not be asked. The two must not be confused: one is a fact
+ * about the project, the other about the visitor's network.
  */
 export type Lookup =
-  | { kind: "found"; release: MacRelease }
-  | { kind: "none" }
+  | { kind: "found"; mac: MacRelease | null; windows: WindowsRelease | null }
   | { kind: "unknown" };
 
 interface ApiAsset {
@@ -93,28 +100,52 @@ function macAssets(release: ApiRelease): MacRelease["assets"] {
 }
 
 /**
- * The release to offer: the newest final release with a Mac build, or failing that the newest
- * release candidate. Final first because a candidate is, by definition, not yet the one we
- * recommend, but a candidate is better than telling someone there is nothing.
+ * The release to offer for one platform: the newest final release with a build for it, or failing
+ * that the newest release candidate. Final first because a candidate is, by definition, not yet
+ * the one we recommend, but a candidate is better than telling someone there is nothing.
+ *
+ * Per platform, because the platforms do not arrive together: rc.2 had a Mac build and no Windows
+ * one, and a release with only a Windows fix would be the reverse.
  */
-export function pickRelease(releases: ApiRelease[]): MacRelease | null {
+function newest<T>(releases: ApiRelease[], buildOf: (release: ApiRelease) => T | null) {
   const usable = releases
     .filter((release) => !release.draft)
-    .map((release) => ({ release, assets: macAssets(release) }))
-    .filter(({ assets }) => Object.keys(assets).length > 0);
+    .map((release) => ({ release, build: buildOf(release) }))
+    .filter((entry): entry is { release: ApiRelease; build: T } => entry.build !== null);
+  return usable.find(({ release }) => !release.prerelease) ?? usable[0] ?? null;
+}
 
-  const chosen = usable.find(({ release }) => !release.prerelease) ?? usable[0];
+export function pickRelease(releases: ApiRelease[]): MacRelease | null {
+  const chosen = newest(releases, (release) => {
+    const assets = macAssets(release);
+    return Object.keys(assets).length > 0 ? assets : null;
+  });
   if (!chosen) return null;
 
   return {
     tag: chosen.release.tag_name,
     prerelease: chosen.release.prerelease,
     page: chosen.release.html_url,
-    assets: chosen.assets,
+    assets: chosen.build,
   };
 }
 
-const CACHE_KEY = "notewise.release.v1";
+export function pickWindowsRelease(releases: ApiRelease[]): WindowsRelease | null {
+  const chosen = newest(releases, (release) => {
+    const asset = release.assets.find((a) => a.name.toLowerCase().endsWith("-setup.exe"));
+    return asset ? { name: asset.name, url: asset.browser_download_url, bytes: asset.size } : null;
+  });
+  if (!chosen) return null;
+
+  return {
+    tag: chosen.release.tag_name,
+    prerelease: chosen.release.prerelease,
+    page: chosen.release.html_url,
+    installer: chosen.build,
+  };
+}
+
+const CACHE_KEY = "notewise.release.v2";
 const CACHE_MS = 10 * 60 * 1000;
 
 /**
@@ -142,7 +173,7 @@ function remember(lookup: Lookup): void {
 
 let pending: Promise<Lookup> | null = null;
 
-export function findMacRelease(): Promise<Lookup> {
+export function findReleases(): Promise<Lookup> {
   const hit = cached();
   if (hit) return Promise.resolve(hit);
 
@@ -152,8 +183,12 @@ export function findMacRelease(): Promise<Lookup> {
         headers: { Accept: "application/vnd.github+json" },
       });
       if (!response.ok) return { kind: "unknown" };
-      const release = pickRelease((await response.json()) as ApiRelease[]);
-      const lookup: Lookup = release ? { kind: "found", release } : { kind: "none" };
+      const releases = (await response.json()) as ApiRelease[];
+      const lookup: Lookup = {
+        kind: "found",
+        mac: pickRelease(releases),
+        windows: pickWindowsRelease(releases),
+      };
       remember(lookup);
       return lookup;
     } catch {
