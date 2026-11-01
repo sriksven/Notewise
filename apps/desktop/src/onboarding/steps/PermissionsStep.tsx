@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Mic, Volume2 } from "lucide-react";
 
-import { api } from "../../lib/api";
+import { api, SETTINGS_BY_HAND } from "../../lib/api";
 import type { PermissionsReadiness } from "../readiness";
 import { PermissionRow } from "./PermissionRow";
 
@@ -9,9 +9,6 @@ interface PermissionsStepProps {
   readiness: PermissionsReadiness;
   onChanged: () => Promise<void>;
 }
-
-/** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
-const PRIVACY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security";
 
 type Kind = "microphone" | "system_audio";
 
@@ -32,9 +29,21 @@ export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) 
     }
   };
 
-  const openSettings = () => {
-    window.location.href = PRIVACY_SETTINGS;
+  // The pane for that row, not the top of Privacy & Security. System audio is granted under
+  // Screen & System Audio Recording.
+  const openSettings = (kind: Kind) => {
+    setError(null);
+    api
+      .openSystemSettings(kind === "microphone" ? "microphone" : "screen_recording")
+      .catch(() => setError(SETTINGS_BY_HAND));
   };
+
+  // Look again when the window comes back: the person has just been in System Settings.
+  useEffect(() => {
+    const again = () => void onChanged();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [onChanged]);
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -61,7 +70,7 @@ export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) 
           readiness={readiness.microphone}
           busy={busy === "microphone"}
           onEnable={() => void enable("microphone")}
-          onOpenSettings={openSettings}
+          onOpenSettings={() => openSettings("microphone")}
         />
         <PermissionRow
           icon={Volume2}
@@ -70,7 +79,7 @@ export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) 
           readiness={readiness.system_audio}
           busy={busy === "system_audio"}
           onEnable={() => void enable("system_audio")}
-          onOpenSettings={openSettings}
+          onOpenSettings={() => openSettings("system_audio")}
         />
       </div>
     </div>

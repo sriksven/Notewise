@@ -104,6 +104,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
         .route("/v1/setup", get(setup_readiness))
         .route("/v1/setup/complete", post(complete_setup))
         .route("/v1/permissions/:kind", post(request_permission))
+        .route("/v1/system-settings/:pane", post(open_system_settings))
         .route("/v1/devices", get(list_devices))
         .route("/v1/languages", get(list_languages))
         .route("/v1/backend", post(switch_backend))
@@ -2016,6 +2017,64 @@ async fn complete_setup(
     // truthfully afterwards.
     Ok(Json(
         serde_json::json!({ "completed_at": stamp, "skipped": unsatisfied }),
+    ))
+}
+
+/// Open a System Settings pane, named rather than linked.
+///
+/// The app's interface is a page inside the shell's web view, and a web view does not hand an
+/// `x-apple.systempreferences:` link to the OS — it ignores it. Every "Open settings" button in
+/// the app set `window.location.href` to one and did nothing. The engine runs in the app's own
+/// process, so it opens the pane itself.
+///
+/// A request picks one of these names; it never supplies what gets opened.
+async fn open_system_settings(Path(pane): Path<String>) -> ApiResult<axum::http::StatusCode> {
+    let url = system_settings_url(&pane).ok_or_else(|| {
+        ApiError::BadRequest(format!(
+            "unknown settings pane '{pane}' — expected privacy, microphone, screen_recording, \
+             accessibility or input_monitoring"
+        ))
+    })?;
+
+    // `open` hands the link to Launch Services and returns; off the async workers regardless.
+    tokio::task::spawn_blocking(move || open_url(url))
+        .await
+        .map_err(|e| ApiError::Internal(format!("opening System Settings panicked: {e}")))??;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+fn system_settings_url(pane: &str) -> Option<&'static str> {
+    use notewise_macos_permissions::Capability;
+
+    Some(match pane {
+        "privacy" => "x-apple.systempreferences:com.apple.preference.security",
+        "microphone" => Capability::Microphone.settings_url(),
+        "screen_recording" => Capability::ScreenRecording.settings_url(),
+        "accessibility" => Capability::Accessibility.settings_url(),
+        "input_monitoring" => Capability::InputMonitoring.settings_url(),
+        _ => return None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn open_url(url: &str) -> ApiResult<()> {
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg(url)
+        .status()
+        .map_err(|e| ApiError::Internal(format!("could not open System Settings: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ApiError::Internal(format!(
+            "System Settings did not open ({status})"
+        )))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_url(_url: &str) -> ApiResult<()> {
+    Err(ApiError::NotImplemented(
+        "System Settings is part of macOS; there is nothing to open on this computer.".into(),
     ))
 }
 
@@ -4523,6 +4582,56 @@ mod tests {
             false
         );
         assert!(body["steps"]["permissions"]["system_audio"]["detail"].is_string());
+    }
+
+    // Never with a real pane here: on a Mac that would open System Settings in front of whoever
+    // is running the tests. The names are checked through the lookup instead.
+    #[tokio::test]
+    async fn an_unknown_settings_pane_is_refused_and_opens_nothing() {
+        let (status, body) = call(
+            &app(),
+            Request::post("/v1/system-settings/x-apple.systempreferences:anything")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("expected privacy"));
+    }
+
+    #[test]
+    fn every_settings_pane_the_app_asks_for_is_a_system_settings_link() {
+        for pane in [
+            "privacy",
+            "microphone",
+            "screen_recording",
+            "accessibility",
+            "input_monitoring",
+        ] {
+            let url = system_settings_url(pane).expect(pane);
+            assert!(
+                url.starts_with("x-apple.systempreferences:"),
+                "{pane}: {url}"
+            );
+        }
+        assert_eq!(system_settings_url("https://example.com"), None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[tokio::test]
+    async fn opening_system_settings_off_macos_says_so() {
+        let (status, _) = call(
+            &app(),
+            Request::post("/v1/system-settings/accessibility")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     }
 
     /// The banner reads `detail` to say what to do. It said only that summaries "will not run",

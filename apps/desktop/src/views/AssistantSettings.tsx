@@ -14,6 +14,7 @@ import {
 import {
   api,
   ApiError,
+  SETTINGS_BY_HAND,
   type AssistantCapabilities,
   type AssistantPermission,
   type Dictated,
@@ -76,6 +77,14 @@ export function AssistantSettings() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Coming back to the window is when a grant may have changed: the person has just been in
+  // System Settings. The screen used to read the permissions once and keep showing the warning.
+  useEffect(() => {
+    const again = () => void load();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
   }, [load]);
 
   const saveHotkey = async (next: string, feature: "dictation" | "overlay" = "dictation") => {
@@ -520,6 +529,8 @@ function ModeChoice({
 }
 
 function PermissionNote({ permission }: { permission: AssistantPermission }) {
+  const [failed, setFailed] = useState(false);
+
   return (
     <li className="rounded-lg border border-warn-line bg-warn px-3 py-2">
       <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-warn-text">
@@ -534,13 +545,15 @@ function PermissionNote({ permission }: { permission: AssistantPermission }) {
       <button
         type="button"
         onClick={() => {
-          window.location.href = permission.settings_url;
+          setFailed(false);
+          api.openSystemSettings(permission.capability).catch(() => setFailed(true));
         }}
         className="mt-1.5 rounded-full border border-warn-line px-2 py-0.5 text-[11.5px] text-warn-text
                    transition hover:bg-warn-text/10"
       >
         Open the {permission.label} settings
       </button>
+      {failed && <p className="mt-1 text-[11.5px] text-warn-text">{SETTINGS_BY_HAND}</p>}
     </li>
   );
 }
