@@ -20,9 +20,13 @@
 //! ```
 //!
 //! `page` is the desktop route the section describes, and what its citation opens. `keywords` are
-//! the words a user would use that the body might not. `live` names values computed when the
-//! question is asked ([`crate::facts`]), so a section can say what a setting is set to now and
-//! not only what it does.
+//! the words a user would use that the body might not. They only find the section: the model
+//! reads the body alone and is told not to fill gaps from general knowledge, so a name the answer
+//! depends on belongs in the body too. With "claude" only in the keywords, "can I add my claude
+//! API?" found the API keys section and was refused, because the body said only "Anthropic".
+//!
+//! `live` names values computed when the question is asked ([`crate::facts`]), so a section can
+//! say what a setting is set to now and not only what it does.
 //!
 //! # Why it is not in the index
 //!
@@ -619,6 +623,44 @@ Deleted meetings and notes wait here until you empty it.
                 .iter()
                 .all(|s| !s.title.contains("Model")),
             "mode is not model"
+        );
+    }
+
+    /// Keywords find a section; the model answering reads only its body, and is told not to fill
+    /// gaps from general knowledge. So it will not supply that Claude is Anthropic's. Measured on
+    /// `llama3.1:8b` with "claude" only in the keywords: "can I add my claude API?" found the two
+    /// right sections and was refused in five runs of five ("Plainly.", "Plainly, no. The material
+    /// only mentions keys for Anthropic, ... but not Claude"); asked about "anthropic" instead, it
+    /// answered in five of five.
+    #[test]
+    fn a_provider_a_section_is_found_by_is_named_in_what_the_model_reads() {
+        const PROVIDERS: &[&str] = &[
+            "anthropic",
+            "claude",
+            "gemini",
+            "groq",
+            "openrouter",
+            "ollama",
+            "unsloth",
+            "openai",
+        ];
+        for section in sections() {
+            for provider in PROVIDERS {
+                if section.keyword_words.iter().any(|word| word == provider) {
+                    assert!(
+                        section.body_words.iter().any(|word| word == provider),
+                        "\"{}\" is found by \"{provider}\" but never says it",
+                        section.title
+                    );
+                }
+            }
+        }
+
+        let found = titles(find(sections(), "can I add my claude API?"));
+        assert_eq!(
+            found.first().copied(),
+            Some("Settings: API keys"),
+            "{found:?}"
         );
     }
 
