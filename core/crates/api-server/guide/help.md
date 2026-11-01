@@ -38,7 +38,7 @@ Ask is in the sidebar, and the Ask button at the bottom right of most screens op
 
 By default Ask matches words: asking about "pricing" will not find a meeting that only ever said "cost structure". Building the search index under Settings, then Search, fixes that. It runs locally through Ollama, never through your chat provider.
 
-Even then, a small workspace can surface the nearest thing rather than nothing. Read the citations: an answer citing something irrelevant is telling you it did not find what you asked for.
+Even then, a small workspace can surface the nearest thing rather than nothing. Read the citations: an answer citing something irrelevant is telling you it did not find what you asked for. When nothing matches at all, Ask says so in a single line, and no model is asked.
 
 ## Help: Keyboard shortcuts
 page: help/shortcuts

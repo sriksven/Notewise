@@ -183,7 +183,8 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         <p>
           Even with it on, a small workspace can surface the nearest thing rather than nothing.
           Read the citations: an answer citing something irrelevant is telling you it did not
-          find what you asked for.
+          find what you asked for. When nothing matches at all, Ask says so in a single line,
+          and no model is asked.
         </p>
       </Topic>
 

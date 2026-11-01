@@ -35,15 +35,16 @@ The first tagged build.
 - Search across everything said, and a question you can ask the whole workspace that answers only
   from your own material and cites it, from its own page, or from the Ask button at the bottom
   right of most screens, beside the record button on a meeting. On Notes that button asks the open
-  note instead, beside it and in a second colour.
+  note instead, beside it and in a second colour. When nothing you have answers the question, it
+  says so in a single line rather than guessing, and names no model, because none was asked.
 - Ask out loud. The mic beside every Ask box shows your words as you say them, in grey while
   they are still a guess, and leaves the finished question in the box for you to check and send.
   Whisper does the listening on this machine, so a spoken question goes nowhere a typed one
   would not.
-- Ask also knows the app. It answers how many recordings, notes and tasks you have, what is in the
-  trash, what each setting does and what it is set to now, and what Help and About say, with a
-  link that opens the page it is about. It explains where to change a setting and never changes
-  one itself.
+- Ask also knows the app. It answers how many recordings, notes and tasks you have, which tasks
+  are still open, what is in the trash, what each setting does and what it is set to now, and what
+  Help and About say, with a link that opens the page it is about. It explains where to change a
+  setting and never changes one itself.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 
