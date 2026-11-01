@@ -218,7 +218,9 @@ export function IntelPanel({
           Select a meeting, or start recording, and what it means shows up here.
         </p>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        // The tail clears the record dock and the Ask beside it, which float across this panel
+        // once the window is narrow, so the last section can always be scrolled out from under them.
+        <div className="min-h-0 flex-1 overflow-y-auto pb-24">
           {/* First, because who was there is context for every other section: a decision means
               something different depending on who was in the room to make it. */}
           <Section icon={<Users size={13} aria-hidden />} title="Who was there">

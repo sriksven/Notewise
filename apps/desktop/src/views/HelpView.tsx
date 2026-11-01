@@ -164,10 +164,10 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
       <Topic title="Asking questions about your material">
         <p>
-          Ask is in the sidebar, and the Ask button at the bottom right of most screens opens the
-          same thing beside whatever you are looking at. On Notes that button asks the open note
-          instead, and is drawn in a second colour because it asks that note rather than
-          everything. Every meeting has an Ask tab, and the{" "}
+          Ask is in the sidebar, and the Ask button at the bottom right of most screens (beside the
+          record button, on a meeting) opens the same thing beside whatever you are looking at. On
+          Notes that button asks the open note instead, and is drawn in a second colour because it
+          asks that note rather than everything. Every meeting has an Ask tab, and the{" "}
           <Link onClick={() => onNavigate({ name: "agent" })}>Agent</Link> searches across all
           of it. Answers cite what they were drawn from, and clicking a citation opens it.
         </p>

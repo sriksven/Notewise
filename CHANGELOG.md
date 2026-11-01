@@ -34,8 +34,8 @@ The first tagged build.
 - What a recurring meeting is still carrying from last time.
 - Search across everything said, and a question you can ask the whole workspace that answers only
   from your own material and cites it, from its own page, or from the Ask button at the bottom
-  right of most screens. On Notes that button asks the open note instead, beside it and in a
-  second colour.
+  right of most screens, beside the record button on a meeting. On Notes that button asks the open
+  note instead, beside it and in a second colour.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 
