@@ -142,8 +142,8 @@ function windowsContents(release: WindowsRelease): string {
 
       <a id="windows-download" class="dl-button is-primary mt-6" href="${release.installer.url}" rel="noopener">
         ${ICON.arrow}
-        <!-- Not "Download for Windows": this card is narrower than the Mac one, and that label
-             with the size beside it overflowed the button. The card is already headed Windows. -->
+        <!-- Not "Download for Windows": at a third of the row, that label with the size beside it
+             overflows the button. The card is already headed Windows. -->
         <span>Download</span>
         <span class="dl-meta">.exe · ${formatBytes(release.installer.bytes)}</span>
       </a>
@@ -188,7 +188,8 @@ function macCard(current: Os, firstLaunchHref: string): string {
 
       <a id="mac-download" class="dl-button is-primary mt-6" href="${RELEASES_PAGE}" rel="noopener">
         ${ICON.arrow}
-        <span data-label>Download for Mac</span>
+        <!-- Not "Download for Mac", for the reason the Windows button gives. -->
+        <span data-label>Download</span>
         <span data-meta class="dl-meta">.dmg</span>
       </a>
 
@@ -302,7 +303,7 @@ export function mountDownloads(
     if (lookup.kind === "found") {
       // GitHub answered: there is no Mac build yet. The button stops promising a download.
       button.href = options.sourceHref;
-      label.textContent = "Build it from source";
+      label.textContent = "Build from source";
       meta.textContent = "~10 min";
       status.textContent =
         "The first macOS build has not been published yet. Until it is, the whole app builds from source.";
