@@ -105,12 +105,20 @@ Guide text follows the repo's prose rules, including no em dashes (`chore/no-em-
 
 A section is scored against the question's terms (`retrieval::terms`, so the same stopwords):
 
-- a term matching a word in the **title** scores 3, in **keywords** 2, in the **body** 1;
-- two words match when they are equal, or one is a prefix of the other and the shorter is at
-  least 4 characters ("light"/"lighter", "record"/"recordings", "task"/"tasks", "model"/"models");
-- each term counts once per section, at its best field.
+- a term matching a word in the **title** scores 3, in **keywords** 2, in the **body** 1. The
+  part of a title before a colon ("Settings: ") is not scored;
+- two words match when they are the same once a common ending is taken off, leaving at least 4
+  letters ("light"/"lighter", "record"/"recordings", "deleting"/"deleted", "notes"/"note").
+  Plain prefix matching was tried first and had "mode" find "model", sending every dark-mode
+  question to the Models page;
+- each term counts once per section, at its best field;
+- everyday words (meeting, note, task, recording, summary, settings, change, open, use, ...)
+  add to the score but never make a section a candidate, unless the question has no other words.
+  "What did Dana say in the meeting about pricing?" is about pricing; "where are my notes?" is
+  about the Notes page.
 
-Sections scoring at least 2 are candidates, best first, at most 3.
+A section is a candidate when some other word matches its title or keywords. Candidates are
+ranked by score, and those under two thirds of the best are dropped, at most 3.
 
 Word matching rather than embeddings because the guide is small, hand-written and ours. Missing
 synonyms are fixed by adding a keyword, which is deterministic and testable; an embedding miss
@@ -121,9 +129,8 @@ nothing and changes nothing.
 
 ### D4: Facts are computed when asked, never cached
 
-Two kinds:
-
-**Live values** inside guide sections, named by `live:`. The Models section gains a line like
+**Live values** inside guide sections, named by `live:`, computed only for the sections a question
+found. The Models section gains a line like
 "Right now: llama3.1:8b through Ollama, on this machine." These come from the same engine state
 the Settings page reads:
 
@@ -131,7 +138,7 @@ the Settings page reads:
 |---|---|
 | `models` | `state.ai()`: resolved model label, backend, local or not; routing rule count |
 | `appearance` | stored preferences (`/v1/preferences`), read best-effort: mode and accent if present |
-| `transcription` | the selected transcription model and language |
+| `transcription` | the downloaded transcription models and the recommended one (there is no per-recording choice to report) |
 | `recording` | microphone and system audio permission state (as `/v1/setup` reports it) |
 | `retention` | the audio retention policy |
 | `detection` | meeting detection on or off |
@@ -139,7 +146,8 @@ the Settings page reads:
 | `speakers` | the speaker separation model |
 | `about` | version, schema version, whether this build can record, whether AI is local |
 
-**Fact sections**, generated in the same section shape and scored by the same scorer:
+The workspace facts are guide sections too, in `workspace.md`, whose body is one sentence and a
+live value. One mechanism rather than two:
 
 | Section | `page` | Content |
 |---|---|---|
@@ -148,9 +156,10 @@ the Settings page reads:
 | Open tasks | `tasks` | up to 20: what, owner, due date, which meeting |
 | In the trash | `trash` | counts, and up to 20 titles with when each was deleted |
 
-Each fact section has authored keywords ("how many, count, total, number, recordings, meetings,
-..."), so "how many recordings do I have" finds the numbers and "what's in the trash" finds the
-trash.
+Their keywords are about counting and time ("how many, count, total, recent, yesterday, due"),
+not the names of things, so "how many recordings do I have" finds the numbers without every
+question that mentions a meeting doing so. The date-based ones say what today is: without it,
+`llama3.1:8b` answered "what did I record yesterday?" with a recording from two days before.
 
 The counts and lists are new repository methods in `storage` (SQL lives only there): counts of
 live and trashed meetings and notes, counts of action items by status, and open action items
