@@ -650,8 +650,8 @@ export default function App() {
   const inWorkspace = route.name === "meeting";
 
   // Where the floating Ask is offered: everywhere except screens that already ask, or that keep
-  // their own text box along the bottom edge where the button would sit on it — Notes (a note has
-  // its own Ask), the Ask page itself, the Agent, and a meeting's Ask and Notes tabs. The same rule
+  // their own text box along the bottom edge where the button would sit on it — Notes (it floats
+  // its own, which asks the open note), the Ask page itself, the Agent, and a meeting's Ask and Notes tabs. The same rule
   // the record dock follows, for the same reason.
   const askHere =
     route.name !== "notes" &&
