@@ -36,6 +36,10 @@ The first tagged build.
   from your own material and cites it, from its own page, or from the Ask button at the bottom
   right of most screens, beside the record button on a meeting. On Notes that button asks the open
   note instead, beside it and in a second colour.
+- Ask out loud. The mic beside every Ask box shows your words as you say them, in grey while
+  they are still a guess, and leaves the finished question in the box for you to check and send.
+  Whisper does the listening on this machine, so a spoken question goes nowhere a typed one
+  would not.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 
