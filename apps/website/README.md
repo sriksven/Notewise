@@ -52,7 +52,7 @@ and reads the real file names and sizes (`src/release.ts`). That gives three hon
 | GitHub says | The button |
 |---|---|
 | A release with Mac files | Downloads the chosen format directly, with its size |
-| No release yet | Becomes "Build it from source" and says the first build is not out |
+| No release yet | Becomes "Build from source" and says the first build is not out |
 | Could not ask (offline, rate-limited) | Opens the Releases page, which lists the same files |
 
 The answer is cached for ten minutes per tab, since the unauthenticated API allows sixty requests

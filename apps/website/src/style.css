@@ -657,7 +657,12 @@ html:not(.motion) .stage-layer > div {
 }
 
 .dl-button {
-  @apply relative flex w-full items-center justify-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-4 py-3.5 text-[14.5px] font-semibold sm:px-5 sm:text-[15px];
+  @apply relative flex w-full items-center justify-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-4 py-3.5 text-[14.5px] font-semibold sm:text-[15px];
+}
+/* Three cards to a row leave the button only just wide enough. The arrow keeps its size and the
+   button spends its own padding instead; flexbox would otherwise squash the arrow first. */
+.dl-button > svg {
+  flex-shrink: 0;
 }
 .dl-button.is-primary {
   @apply bg-ink text-bg transition-shadow duration-300;

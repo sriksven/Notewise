@@ -72,7 +72,8 @@ The first tagged build.
   em or en dashes.
 - The download is always the newest build. Every change to the app is built for macOS and Windows
   and published as the latest build on GitHub Releases, and the website's download buttons offer
-  it as soon as it is up, with its date beside them.
+  it as soon as it is up, with its date beside them. The macOS, Windows and Ubuntu cards there are
+  one size, side by side.
 
 ### Known limits of this build
 
