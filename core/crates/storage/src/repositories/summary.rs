@@ -337,7 +337,9 @@ impl<'a> SummaryRepository<'a> {
              WHERE m.deleted_at IS NULL
              GROUP BY a.status",
         )?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+        })?;
 
         let mut found = Vec::new();
         for row in rows {
@@ -1191,7 +1193,8 @@ mod tests {
         let done = repo
             .add_action_item(NewActionItem::from_summary(&summary, "Draft agenda"))
             .unwrap();
-        repo.set_action_item_status(done.id, WorkStatus::Done).unwrap();
+        repo.set_action_item_status(done.id, WorkStatus::Done)
+            .unwrap();
 
         let other = meetings
             .create(NewMeeting {

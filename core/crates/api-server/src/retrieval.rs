@@ -52,14 +52,14 @@ use crate::error::ApiResult;
 const HIT_LIMIT: u32 = 60;
 
 /// How many passages may reach the model.
-const MAX_PASSAGES: usize = 8;
+pub(crate) const MAX_PASSAGES: usize = 8;
 
 /// Roughly how much text may reach the model, in characters.
 ///
 /// Characters rather than tokens because the token count depends on a tokenizer this crate
 /// does not have and which differs per backend. ~12k characters is on the order of 3k tokens,
 /// which every backend this app supports can hold alongside a conversation.
-const MAX_CONTEXT_CHARS: usize = 12_000;
+pub(crate) const MAX_CONTEXT_CHARS: usize = 12_000;
 
 /// Longest single passage, so one enormous note cannot crowd out everything else.
 const MAX_PASSAGE_CHARS: usize = 3_000;
@@ -82,11 +82,31 @@ const STOPWORDS: &[&str] = &[
 /// One piece of source material, with enough identity to cite it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Passage {
-    /// `meeting`, `note`, or `ticket` — matching `NodeKind` naming.
+    /// `meeting`, `note`, or `ticket` — matching `NodeKind` naming — or `app` for what
+    /// Notewise says about itself.
     pub kind: &'static str,
-    pub id: Id,
+    pub target: Target,
     pub title: String,
     pub text: String,
+}
+
+/// What a citation opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A meeting, note or ticket.
+    Entity(Id),
+    /// A page of the app, as its desktop route without the `#/`. App knowledge has no row to
+    /// point at, only the screen it describes; see [`crate::guide`].
+    Page(&'static str),
+}
+
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Target::Entity(id) => write!(f, "{id}"),
+            Target::Page(page) => f.write_str(page),
+        }
+    }
 }
 
 impl Passage {
@@ -530,8 +550,9 @@ pub async fn keep_relevant(
 
     let prompt = format!(
         "A user asked: {question}\n\n\
-         Below are passages retrieved from their workspace. Some may have been retrieved \
-         only because they are vaguely similar in subject matter.\n\n\
+         Below are passages retrieved from their workspace, and from Notewise's own guide to \
+         itself. Some may have been retrieved only because they are vaguely similar in subject \
+         matter.\n\n\
          {listing}\n\n\
          Which passages contain information that helps answer the question? Reply with only \
          the numbers, separated by commas — for example: 1, 3\n\
@@ -622,7 +643,7 @@ fn load(db: &Database, kind: &'static str, id: Id) -> Option<Passage> {
             }
             Some(Passage {
                 kind,
-                id,
+                target: Target::Entity(id),
                 title: note.title,
                 text: note.body,
             })
@@ -631,7 +652,7 @@ fn load(db: &Database, kind: &'static str, id: Id) -> Option<Passage> {
             let ticket = TicketRepository::new(db).get(id).ok()?;
             Some(Passage {
                 kind,
-                id,
+                target: Target::Entity(id),
                 title: ticket.title,
                 text: ticket.description.unwrap_or_default(),
             })
@@ -646,7 +667,7 @@ fn load(db: &Database, kind: &'static str, id: Id) -> Option<Passage> {
             }
             Some(Passage {
                 kind,
-                id,
+                target: Target::Entity(id),
                 title: meeting.title,
                 text: repo.transcript_text(id).ok()?,
             })
@@ -656,7 +677,7 @@ fn load(db: &Database, kind: &'static str, id: Id) -> Option<Passage> {
 }
 
 /// Cut to a character budget on a UTF-8 boundary, preferring a sentence or line break.
-fn truncate(text: &str, max: usize) -> String {
+pub(crate) fn truncate(text: &str, max: usize) -> String {
     let text = text.trim();
     if text.len() <= max {
         return text.to_string();
@@ -709,12 +730,16 @@ pub fn citations(passages: &[Passage]) -> Vec<serde_json::Value> {
         .iter()
         .enumerate()
         .map(|(index, passage)| {
-            serde_json::json!({
+            let mut citation = serde_json::json!({
                 "n": index + 1,
                 "kind": passage.kind,
-                "id": passage.id,
                 "title": passage.title,
-            })
+            });
+            match passage.target {
+                Target::Entity(id) => citation["id"] = serde_json::json!(id),
+                Target::Page(page) => citation["page"] = serde_json::json!(page),
+            }
+            citation
         })
         .collect()
 }
@@ -809,7 +834,7 @@ mod tests {
 
         assert_eq!(passages.len(), 1, "got {passages:?}");
         assert_eq!(passages[0].kind, "meeting");
-        assert_eq!(passages[0].id, pricing);
+        assert_eq!(passages[0].target, Target::Entity(pricing));
         assert!(passages[0].text.contains("three pricing tiers"));
     }
 

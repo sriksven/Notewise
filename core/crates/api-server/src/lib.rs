@@ -38,6 +38,8 @@ pub mod diarization;
 pub mod dictation;
 pub mod downloads;
 mod error;
+mod facts;
+mod guide;
 pub mod indexing;
 pub mod jobs;
 pub mod join;

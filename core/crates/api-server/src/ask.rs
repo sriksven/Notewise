@@ -19,7 +19,7 @@ use notewise_ai_router::{AiBackend, ChatMessage, ChatRequest, Role};
 use notewise_storage::{Id, NoteRepository};
 
 use crate::error::{ApiError, ApiResult};
-use crate::retrieval::{self, Passage};
+use crate::retrieval::{self, Passage, Target};
 use crate::state::AppState;
 
 type Shared = Arc<AppState>;
@@ -146,7 +146,7 @@ async fn chat_about_note(
 
         vec![Passage {
             kind: "note",
-            id: note.id,
+            target: Target::Entity(note.id),
             title: note.title,
             text: note.body,
         }]
@@ -169,7 +169,7 @@ async fn chat_about_note(
         passages.extend(
             found
                 .into_iter()
-                .filter(|p| !(p.kind == "note" && p.id == note_id)),
+                .filter(|p| !(p.kind == "note" && p.target == Target::Entity(note_id))),
         );
     }
 
@@ -180,6 +180,10 @@ async fn chat_about_note(
 ///
 /// Nothing is pinned here: every passage comes from retrieval, so a question with no matching
 /// material returns the refusal rather than a fluent answer with no basis.
+///
+/// "The workspace" includes the app. A question about a setting, a page, or how much is in the
+/// trash is answered from [`crate::guide`], which is searched beside the user's material and
+/// judged with it.
 async fn ask_workspace(
     State(state): State<Shared>,
     Json(body): Json<AskBody>,
@@ -191,7 +195,10 @@ async fn ask_workspace(
     let question = retrieval_query(&body.messages)
         .ok_or_else(|| ApiError::BadRequest("no question in this conversation".into()))?;
 
-    let retrieved = retrieval::gather_hybrid(&state, &question).await?;
+    let retrieved = with_app_sections(
+        retrieval::gather_hybrid(&state, &question).await?,
+        crate::guide::passages(&state, &question).await,
+    );
     let considered = retrieved.len();
     // Similarity says which document is nearest; it does not say whether any of them is about
     // the question. See `retrieval::keep_relevant`.
@@ -225,6 +232,23 @@ async fn ask_workspace(
     }
 
     answer(&state, body.messages, passages, considered).await
+}
+
+/// The workspace's passages followed by the guide's, inside the budget retrieval keeps.
+///
+/// When both do not fit, the workspace's last passages make room. A guide section is only here
+/// because the question named it ([`crate::guide::find`]), which is better evidence than being
+/// the eighth-best transcript.
+fn with_app_sections(mut workspace: Vec<Passage>, app: Vec<Passage>) -> Vec<Passage> {
+    let size = |passages: &[Passage]| passages.iter().map(|p| p.text.len()).sum::<usize>();
+    while !workspace.is_empty()
+        && (workspace.len() + app.len() > retrieval::MAX_PASSAGES
+            || size(&workspace) + size(&app) > retrieval::MAX_CONTEXT_CHARS)
+    {
+        workspace.pop();
+    }
+    workspace.extend(app);
+    workspace
 }
 
 /// Run the model against assembled passages and return the answer with its citations.
@@ -762,6 +786,110 @@ mod tests {
             Some("Did the hiring plan for it include two backend engineers?")
         );
         assert!(retrieval_query(&[turn("assistant", "hello")]).is_none());
+    }
+
+    // ------------------------------------------------------------ the app itself
+
+    fn app_citations(body: &serde_json::Value) -> Vec<&serde_json::Value> {
+        body["citations"]
+            .as_array()
+            .expect("citations")
+            .iter()
+            .filter(|c| c["kind"] == "app")
+            .collect()
+    }
+
+    /// The question in the screenshot that started this: refused, because no transcript says how
+    /// to change models.
+    #[tokio::test]
+    async fn how_to_change_models_is_answered_from_the_models_settings() {
+        let (app, _state) = app();
+
+        let (status, body) = post_json(&app, "/v1/ask", ask("how to change models?")).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["grounded"], true, "{body}");
+        let cited = app_citations(&body);
+        assert!(
+            cited.iter().any(|c| c["page"] == "settings/models"),
+            "{cited:?}"
+        );
+        assert!(
+            cited.iter().all(|c| c.get("id").is_none()),
+            "a page has no id: {cited:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn how_many_recordings_is_answered_from_the_live_numbers() {
+        let (app, state) = app();
+        seed_meeting(&state, "Kickoff", "hello").await;
+        seed_meeting(&state, "Planning", "hello").await;
+        seed_meeting(&state, "Old standup", "hello").await;
+        {
+            let db = state.db().await;
+            let repo = MeetingRepository::new(&db);
+            let old = repo
+                .list_recent(10)
+                .unwrap()
+                .into_iter()
+                .find(|m| m.title == "Old standup")
+                .unwrap();
+            repo.trash(old.id).unwrap();
+        }
+
+        let (_, body) = post_json(&app, "/v1/ask", ask("how many recordings do I have?")).await;
+
+        let cited = app_citations(&body);
+        let numbers = cited
+            .iter()
+            .find(|c| c["page"] == "library")
+            .unwrap_or_else(|| panic!("{cited:?}"));
+        assert_eq!(numbers["title"], "Your workspace in numbers");
+    }
+
+    /// A question about what was said must cost nothing extra and change nothing.
+    #[tokio::test]
+    async fn a_question_about_a_meeting_cites_no_part_of_the_app() {
+        let (app, state) = app();
+        seed_meeting(
+            &state,
+            "Pricing review",
+            "we settled on three pricing tiers",
+        )
+        .await;
+
+        let (_, body) = post_json(&app, "/v1/ask", ask("what did we decide about pricing?")).await;
+
+        assert!(app_citations(&body).is_empty(), "{body}");
+    }
+
+    #[test]
+    fn the_guide_takes_room_from_the_last_workspace_passages() {
+        let passage = |kind: &'static str, chars: usize| Passage {
+            kind,
+            target: Target::Entity(Id::new()),
+            title: kind.into(),
+            text: "x".repeat(chars),
+        };
+        let workspace: Vec<Passage> = (0..retrieval::MAX_PASSAGES)
+            .map(|_| {
+                passage(
+                    "meeting",
+                    retrieval::MAX_CONTEXT_CHARS / retrieval::MAX_PASSAGES,
+                )
+            })
+            .collect();
+        let first = workspace[0].clone();
+
+        let combined = with_app_sections(workspace, vec![passage("app", 1_000)]);
+
+        assert!(combined.len() <= retrieval::MAX_PASSAGES);
+        assert!(
+            combined.iter().map(|p| p.text.len()).sum::<usize>() <= retrieval::MAX_CONTEXT_CHARS
+        );
+        assert_eq!(combined[0], first, "the best workspace passage stays");
+        assert_eq!(combined.last().map(|p| p.kind), Some("app"));
     }
 
     /// Retrieval must follow the conversation. A follow-up question should find material for

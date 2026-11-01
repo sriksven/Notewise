@@ -1354,20 +1354,20 @@ pub fn spawn(state: Shared) {
 }
 
 #[derive(Debug, Serialize)]
-struct SourceStatus {
-    source: &'static str,
+pub(crate) struct SourceStatus {
+    pub(crate) source: &'static str,
     /// When this source last reported anything. `null` means it has never been heard from, which for
     /// the extension is the answer to "why is nothing happening".
-    last_seen_at: Option<String>,
+    pub(crate) last_seen_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-struct DetectionStatus {
-    sources: Vec<SourceStatus>,
+pub(crate) struct DetectionStatus {
+    pub(crate) sources: Vec<SourceStatus>,
     /// Offers waiting to be answered.
     offers: usize,
     /// Whether a calendar connector is connected, which is the other half of detection.
-    calendar_connected: bool,
+    pub(crate) calendar_connected: bool,
     /// How long a lone calendar signal waits before it is worth mentioning, in seconds.
     grace_secs: i64,
     /// What this cannot see, stated rather than left to be discovered.
@@ -1380,7 +1380,9 @@ struct DetectionStatus {
 }
 
 /// What detection can currently see.
-async fn detection_status(State(state): State<Shared>) -> ApiResult<Json<DetectionStatus>> {
+pub(crate) async fn detection_status(
+    State(state): State<Shared>,
+) -> ApiResult<Json<DetectionStatus>> {
     let now = Utc::now();
 
     let (seen, offers) = {

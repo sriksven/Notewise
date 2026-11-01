@@ -456,7 +456,7 @@ async fn switch_backend(
 }
 
 /// The key under which the window's own settings live.
-const PREFERENCES_KEY: &str = "ui_preferences";
+pub(crate) const PREFERENCES_KEY: &str = "ui_preferences";
 
 /// Read the interface preferences.
 ///
@@ -2169,7 +2169,7 @@ async fn readiness(state: &AppState) -> ApiResult<crate::setup::SetupReadiness> 
 /// A local enum rather than re-exporting `CaptureKind`, because `audio-capture` is an
 /// optional dependency and this route table must compile without it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CaptureKindArg {
+pub(crate) enum CaptureKindArg {
     Microphone,
     SystemAudio,
 }
@@ -2194,7 +2194,10 @@ thread_local! {
 }
 
 /// Report one capability. `prompt` opens a device and may raise an OS dialog.
-fn permission_readiness(kind: CaptureKindArg, prompt: bool) -> crate::setup::PermissionReadiness {
+pub(crate) fn permission_readiness(
+    kind: CaptureKindArg,
+    prompt: bool,
+) -> crate::setup::PermissionReadiness {
     #[cfg(test)]
     if prompt {
         PROMPTS.with(|count| count.set(count.get() + 1));

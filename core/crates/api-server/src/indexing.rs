@@ -543,7 +543,7 @@ pub(crate) fn router() -> axum::Router<Arc<crate::state::AppState>> {
 ///
 /// Answers on a workspace that has never been indexed and on one with no Ollama at all — the
 /// UI needs to be able to say *why* semantic search is off, and "no response" says nothing.
-async fn index_status(
+pub(crate) async fn index_status(
     axum::extract::State(state): axum::extract::State<Arc<crate::state::AppState>>,
 ) -> axum::Json<IndexStatus> {
     let embedder = state.embedder().await;
