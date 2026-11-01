@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Mic, MicOff, MoreHorizontal, Square } from "lucide-react";
 
 interface Props {
@@ -31,6 +31,13 @@ interface Props {
   onImport: () => void;
   /** False when the engine cannot transcribe, or is already busy recording. */
   canImport: boolean;
+  /**
+   * Another floating control to sit in the dock's row, after the pill.
+   *
+   * Anything floated separately at the bottom of a meeting lands on the dock once the meeting
+   * column is narrow, so it shares the row instead.
+   */
+  beside?: ReactNode;
 }
 
 /** Elapsed time as mm:ss, or h:mm:ss once a meeting runs past an hour. */
@@ -62,6 +69,7 @@ export function RecordDock({
   canExport,
   onImport,
   canImport,
+  beside,
 }: Props) {
   const [, tick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -99,7 +107,7 @@ export function RecordDock({
   const word = busy ? "Working" : isRecording ? "Stop" : openMeeting ? "End" : "Record";
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
+    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex items-center justify-center gap-2">
       <div
         className="pointer-events-auto relative flex items-center gap-1 rounded-full
                    border border-hairline bg-surface px-2 py-2 shadow-dock"
@@ -248,6 +256,8 @@ export function RecordDock({
           </div>
         )}
       </div>
+
+      {beside && <div className="pointer-events-auto">{beside}</div>}
     </div>
   );
 }

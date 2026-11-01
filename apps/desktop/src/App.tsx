@@ -664,6 +664,21 @@ export default function App() {
     if (!askHere) setAskOpen(false);
   }, [askHere]);
 
+  /** The floating Ask's button. Where it sits depends on whether the record dock is showing. */
+  const askLauncher = (
+    <button
+      type="button"
+      onClick={() => setAskOpen(true)}
+      aria-label="Ask about everything you have"
+      title="Ask: answered from your own meetings and notes"
+      className="flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-2 text-[12.5px]
+                 font-medium text-accent-on shadow-dock transition hover:bg-accent-hover"
+    >
+      <Search size={13} aria-hidden />
+      Ask
+    </button>
+  );
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Offscreen rather than hidden: a `display:none` input cannot be opened by a click
@@ -878,20 +893,10 @@ export default function App() {
             {route.name === "about" && <AboutView health={health} />}
 
             {/* Bottom right of the screen being read, not of the window: with a side panel open it
-                stays beside the content instead of sitting on the panel. */}
-            {askHere && !askOpen && (
-              <button
-                type="button"
-                onClick={() => setAskOpen(true)}
-                aria-label="Ask about everything you have"
-                title="Ask — answered from your own meetings and notes"
-                className="absolute bottom-6 right-6 z-10 flex items-center gap-1.5 rounded-full bg-accent
-                           px-3.5 py-2 text-[12.5px] font-medium text-accent-on shadow-dock transition
-                           hover:bg-accent-hover"
-              >
-                <Search size={13} aria-hidden />
-                Ask
-              </button>
+                stays beside the content instead of sitting on the panel. A meeting has the record
+                dock along the bottom, so there it rides in the dock's row instead. */}
+            {askHere && !askOpen && !inWorkspace && (
+              <div className="absolute bottom-6 right-6 z-10">{askLauncher}</div>
             )}
           </main>
 
@@ -935,6 +940,7 @@ export default function App() {
               onExport={exportMeeting}
               onMirror={() => void mirrorMeeting()}
               canExport={selectedId !== null}
+              beside={askHere && !askOpen ? askLauncher : undefined}
             />
           )}
         </div>
