@@ -36,7 +36,7 @@ axum.workspace = true
 # in the keychain was silently discarded, which a round-trip test caught only because it is
 # `#[ignore]`d and nobody had run it.
 #
-# `linux-native` rather than the secret-service backends on purpose — those need libdbus at build
+# `linux-native` rather than the secret-service backends on purpose: those need libdbus at build
 # time, which CI does not install and which would turn a missing system package into a failed
 # engine build.
 [target.'cfg(target_os = "macos")'.dependencies]

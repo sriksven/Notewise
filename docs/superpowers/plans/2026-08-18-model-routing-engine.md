@@ -4,13 +4,13 @@
 
 **Goal:** Make `Router` choose a backend per request from ordered rules, so cheap work goes to a local model and expensive work goes to a good one.
 
-**Architecture:** Routing lives *inside* the existing `Router` rather than in a wrapper type, because `AppState` holds `Arc<Router>` — the concrete type — and a wrapper would break `Router`-only methods. `Router` gains a `routes: Vec<Route>` field; an empty vector is exactly today's behaviour, so no existing call site or test changes. Selection is a pure function over `RequestFacts` (task kind, estimated size, hour) with no model call and no network.
+**Architecture:** Routing lives *inside* the existing `Router` rather than in a wrapper type, because `AppState` holds `Arc<Router>`, the concrete type, and a wrapper would break `Router`-only methods. `Router` gains a `routes: Vec<Route>` field; an empty vector is exactly today's behaviour, so no existing call site or test changes. Selection is a pure function over `RequestFacts` (task kind, estimated size, hour) with no model call and no network.
 
 **Tech Stack:** Rust, `async-trait`, `serde` for rule serialization, `MockBackend` for tests. No new dependencies.
 
 **Spec:** [2026-08-18-model-routing-rules-design.md](../specs/2026-08-18-model-routing-rules-design.md)
 
-**Scope of this plan:** the `ai-router` engine only. Loading rules from settings, the explain endpoint, and the `LocalBackendHealthy` predicate (needs a probe cache) and `TranscriptMinutesOver` (needs meeting duration, which `TranscriptInput` does not carry) are a **second plan** — this one ends with a working, tested routing engine that ships with an empty policy.
+**Scope of this plan:** the `ai-router` engine only. Loading rules from settings, the explain endpoint, and the `LocalBackendHealthy` predicate (needs a probe cache) and `TranscriptMinutesOver` (needs meeting duration, which `TranscriptInput` does not carry) are a **second plan**: this one ends with a working, tested routing engine that ships with an empty policy.
 
 ---
 
@@ -40,8 +40,8 @@ Create `core/crates/ai-router/src/policy.rs` with only this:
 //! Per-request backend selection.
 //!
 //! Everything here is pure. Selection has to be cheap enough to run before every model call, so
-//! it looks only at facts already in hand — which trait method was invoked, how big the input is,
-//! what time it is — and never at a network or a model.
+//! it looks only at facts already in hand (which trait method was invoked, how big the input is,
+//! what time it is) and never at a network or a model.
 
 #[cfg(test)]
 mod tests {
@@ -72,7 +72,7 @@ mod policy;
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router policy::`
-Expected: FAIL to compile — `cannot find type TaskKind in this scope`.
+Expected: FAIL to compile, `cannot find type TaskKind in this scope`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -83,7 +83,7 @@ use serde::{Deserialize, Serialize};
 
 /// Which kind of work a request is.
 ///
-/// Derived from the `AiBackend` method being called, which makes it free and exact — the trait
+/// Derived from the `AiBackend` method being called, which makes it free and exact: the trait
 /// already separates a two-word title from a ninety-minute summary, and that separation is most
 /// of what routing exists to exploit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,7 +171,7 @@ Add inside `mod tests`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router policy::`
-Expected: FAIL to compile — `cannot find function estimate_tokens`.
+Expected: FAIL to compile, `cannot find function estimate_tokens`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -181,7 +181,7 @@ Add to `policy.rs` above the test module:
 /// Roughly how many tokens a string is, without a tokenizer.
 ///
 /// Four bytes per token. An exact count needs a tokenizer per model family, and the predicates
-/// this feeds exist to tell a title from a transcript — a decision no plausible tokenizer
+/// this feeds exist to tell a title from a transcript, a decision no plausible tokenizer
 /// disagreement changes.
 pub fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
@@ -310,7 +310,7 @@ Add inside `mod tests`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router policy::`
-Expected: FAIL to compile — `cannot find type Predicate`.
+Expected: FAIL to compile, `cannot find type Predicate`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -447,7 +447,7 @@ Add inside `mod tests`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router policy::`
-Expected: FAIL to compile — `cannot find type RouteSpec`.
+Expected: FAIL to compile, `cannot find type RouteSpec`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -476,7 +476,7 @@ impl RouteSpec {
 /// First match rather than best match: ordering is the semantics, and "why did this go to the
 /// expensive model" has to be answerable by reading the list from the top.
 /// Used by rule-set validation and the explain endpoint, which hold an owned slice. `Router`
-/// deliberately does not call this — see `Router::route_for` for why.
+/// deliberately does not call this. See `Router::route_for` for why.
 pub fn select_index(routes: &[RouteSpec], facts: &RequestFacts) -> Option<usize> {
     routes.iter().position(|r| r.matches(facts))
 }
@@ -566,7 +566,7 @@ Add inside `mod tests`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router policy::`
-Expected: FAIL to compile — `cannot find function unreachable_route`.
+Expected: FAIL to compile, `cannot find function unreachable_route`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -576,7 +576,7 @@ Add to `policy.rs`:
 /// Index of the first route that can never fire because an earlier one matches everything.
 ///
 /// Worth detecting at save time. A rule listed below a catch-all looks active in the UI and never
-/// runs, and the symptom — work going to the wrong model — points at the wrong rule.
+/// runs, and the symptom (work going to the wrong model) points at the wrong rule.
 pub fn unreachable_route(routes: &[RouteSpec]) -> Option<usize> {
     let catch_all = routes.iter().position(|r| r.when.is_empty())?;
     if catch_all + 1 < routes.len() {
@@ -663,7 +663,7 @@ Add to the existing `mod tests` in `router.rs`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router router::`
-Expected: FAIL to compile — `no method named route_names`.
+Expected: FAIL to compile, `no method named route_names`.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -757,7 +757,7 @@ pub use router::{BackendKind, Route, Router, RouterConfig};
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-ai-router`
-Expected: PASS. All 174 pre-existing tests still pass — this is the point of an empty default.
+Expected: PASS. All 174 pre-existing tests still pass; this is the point of an empty default.
 
 - [ ] **Step 5: Commit**
 
@@ -817,7 +817,7 @@ Add to `mod tests` in `router.rs`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router router::a_summary_takes`
-Expected: FAIL — either `no method named with_model_id`, or the assertion fails with `model == "default"` because selection is not wired in yet.
+Expected: FAIL, either `no method named with_model_id`, or the assertion fails with `model == "default"` because selection is not wired in yet.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -895,7 +895,7 @@ fn local_hour() -> u8 {
 
 Add `chrono = { workspace = true }` to `core/crates/ai-router/Cargo.toml` under `[dependencies]` if it is not already there.
 
-**Do not change** `probe`, `installed_models`, `model_id`, or `is_local` in this task — they are Task 8.
+**Do not change** `probe`, `installed_models`, `model_id`, or `is_local` in this task; they are Task 8.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -969,7 +969,7 @@ Add to `mod tests` in `router.rs`:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-ai-router router::a_policy_with_any_remote router::redaction_is_the_strictest`
-Expected: FAIL — `is_local` returns true and `effective_redaction` returns `Secrets`, because neither consults the routes yet.
+Expected: FAIL; `is_local` returns true and `effective_redaction` returns `Secrets`, because neither consults the routes yet.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -1030,7 +1030,7 @@ In `router.rs`, replace the bodies of `is_local` (the one on `impl Router` at li
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-ai-router`
-Expected: PASS. The pre-existing `redaction_defaults_to_masking_secrets`, `redaction_can_be_disabled_explicitly`, and `privacy_is_answerable_without_constructing_a_backend` tests must still pass — with no routes, `fold` returns the unchanged starting value.
+Expected: PASS. The pre-existing `redaction_defaults_to_masking_secrets`, `redaction_can_be_disabled_explicitly`, and `privacy_is_answerable_without_constructing_a_backend` tests must still pass: with no routes, `fold` returns the unchanged starting value.
 
 - [ ] **Step 5: Commit**
 
@@ -1115,7 +1115,7 @@ with `failure: Option<Box<dyn Fn() -> AiError + Send + Sync>>` on the struct, in
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p notewise-ai-router router::a_retryable_route router::a_non_retryable_route`
-Expected: FAIL — the retryable case surfaces the transport error instead of falling back.
+Expected: FAIL; the retryable case surfaces the transport error instead of falling back.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -1190,7 +1190,7 @@ Expected: every crate passes. `ai-router` should now be 174 + roughly 20 new tes
 - [ ] **Step 4: Confirm no caller changed**
 
 Run: `git diff --stat main -- core/crates/api-server apps/`
-Expected: **empty**. The whole architecture rests on this — if a call site had to change, `Router` was the wrong place for the policy and R4 needs revisiting.
+Expected: **empty**. The whole architecture rests on this; if a call site had to change, `Router` was the wrong place for the policy and R4 needs revisiting.
 
 - [ ] **Step 5: Commit**
 
@@ -1208,20 +1208,20 @@ Deliberately out of scope, for a second plan:
 - **Loading rules from settings.** `SettingsRepository` persistence under one JSON key, per the spec's R8, plus route-scoped credentials in `CredentialStore`.
 - **The explain endpoint.** `Router::explain` exists after Task 6; nothing exposes it over HTTP yet.
 - **The shipped default policy.** Until rules load from settings, every router has an empty policy and behaves exactly as today. That is the safe intermediate state.
-- **`LocalBackendHealthy`** — needs a cached probe result, which needs somewhere to cache it.
-- **`TranscriptMinutesOver`** — `TranscriptInput` carries `title`, `text` and `context`, and no duration. Adding one is a change to a type every backend consumes.
+- **`LocalBackendHealthy`**: needs a cached probe result, which needs somewhere to cache it.
+- **`TranscriptMinutesOver`**: `TranscriptInput` carries `title`, `text` and `context`, and no duration. Adding one is a change to a type every backend consumes.
 
 ## Self-review notes
 
 Checked against the spec:
 
-- R1 (task kind as primary signal) — Task 1, used in Task 7.
-- R2 (local evaluation, no LLM) — Task 3; no predicate makes a call.
-- R3 (routes carry their own redaction) — Task 6's `Route` holds `kind` and `redaction`; Task 8 uses them.
-- R4 / R4a (routing inside `Router`, conservative whole-router answers) — Tasks 6 and 8. Task 10 Step 4 verifies the no-caller-change claim.
-- R5 (`model_id` honesty) — **not implemented here.** `Router::model_id` still returns the default's id. `SummaryOutput.model` already carries the real per-call model, which is the value that gets stored, so nothing records a wrong attribution. Left for the second plan, where the settings UI needs a policy label.
-- R6 (`is_local`) — Task 8.
-- R7 (fallback once) — Task 9.
-- R8 (rule set as JSON) — serialization in Task 5; persistence is the second plan.
+- R1 (task kind as primary signal): Task 1, used in Task 7.
+- R2 (local evaluation, no LLM): Task 3; no predicate makes a call.
+- R3 (routes carry their own redaction): Task 6's `Route` holds `kind` and `redaction`; Task 8 uses them.
+- R4 / R4a (routing inside `Router`, conservative whole-router answers): Tasks 6 and 8. Task 10 Step 4 verifies the no-caller-change claim.
+- R5 (`model_id` honesty): **not implemented here.** `Router::model_id` still returns the default's id. `SummaryOutput.model` already carries the real per-call model, which is the value that gets stored, so nothing records a wrong attribution. Left for the second plan, where the settings UI needs a policy label.
+- R6 (`is_local`): Task 8.
+- R7 (fallback once): Task 9.
+- R8 (rule set as JSON): serialization in Task 5; persistence is the second plan.
 
 Type consistency: `RouteSpec { name, when }` is used identically in Tasks 4-9. `select_index(&[RouteSpec], &RequestFacts) -> Option<usize>` is defined in Task 4 and consumed in Task 6. `RequestFacts` fields are fixed in Task 2 and unchanged after.

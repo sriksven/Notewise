@@ -34,7 +34,7 @@ const API_VERSION: &str = "2023-06-01";
 
 /// Default model.
 ///
-/// Fixed ID with no date suffix — appending one produces a 404.
+/// Fixed ID with no date suffix; appending one produces a 404.
 const DEFAULT_MODEL: &str = "claude-opus-5";
 
 /// Output ceiling. Kept below the point where a non-streaming request risks an HTTP timeout;
@@ -96,7 +96,7 @@ impl AnthropicBackend {
         });
 
         // Structured outputs constrain the reply to a schema, which replaces the older
-        // trick of prefilling an assistant turn with `{` — that now returns a 400.
+        // trick of prefilling an assistant turn with `{`; that now returns a 400.
         if let Some(schema) = output_schema {
             body["output_config"] = json!({
                 "format": { "type": "json_schema", "schema": schema }
@@ -370,7 +370,7 @@ struct MessagesResponse {
 impl MessagesResponse {
     /// Concatenate the text blocks.
     ///
-    /// Located by `type`, never by position — thinking blocks can precede the text.
+    /// Located by `type`, never by position; thinking blocks can precede the text.
     fn text(&self) -> Option<String> {
         let text: String = self
             .content

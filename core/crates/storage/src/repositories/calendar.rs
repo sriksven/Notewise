@@ -1,6 +1,6 @@
 //! Calendar events and their attendees.
 //!
-//! An event is detail *owned by* an `external_items` row — it cascades from it, because the event
+//! An event is detail *owned by* an `external_items` row; it cascades from it, because the event
 //! only exists as a record of something in a calendar elsewhere. The association between a meeting
 //! and its event is a graph edge, not a column here; that split is what stops a migration the first
 //! time an event links to something other than a meeting.
@@ -46,7 +46,7 @@ pub struct CalendarEvent {
     pub id: Id,
     pub external_item_id: Id,
     pub calendar_id: String,
-    /// Which account it came from — `google`, `outlook`, `exchange`, `icloud`, `other`.
+    /// Which account it came from: `google`, `outlook`, `exchange`, `icloud`, `other`.
     pub provider_source: String,
     pub title: Option<String>,
     pub starts_at: DateTime<Utc>,
@@ -456,7 +456,7 @@ mod tests {
                 .expect("overlapping")
                 .len(),
             1,
-            "one event, updated — not two"
+            "one event, updated, not two"
         );
     }
 

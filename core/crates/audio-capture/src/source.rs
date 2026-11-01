@@ -9,9 +9,9 @@ use crate::{AudioFrame, CaptureError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureKind {
-    /// This machine's microphone — the local participant.
+    /// This machine's microphone: the local participant.
     Microphone,
-    /// System/loopback audio — the remote participants.
+    /// System/loopback audio: the remote participants.
     SystemAudio,
     /// Both, mixed. What a normal meeting recording needs.
     Combined,
@@ -54,7 +54,7 @@ impl CaptureConfig {
 /// A stream of audio frames.
 ///
 /// Pull-based rather than callback-based: the caller controls pacing and backpressure, and
-/// there is no risk of a slow consumer blocking an OS audio thread — which on most platforms
+/// there is no risk of a slow consumer blocking an OS audio thread, which on most platforms
 /// causes dropouts rather than merely lag.
 pub trait AudioSource: std::fmt::Debug + Send {
     fn format(&self) -> AudioFormat;
@@ -159,7 +159,7 @@ impl AudioSource for SyntheticSource {
 
 /// Audio read from a file.
 ///
-/// Backs the import path — a meeting recorded elsewhere and brought in afterward. Currently
+/// Backs the import path: a meeting recorded elsewhere and brought in afterward. Currently
 /// reads uncompressed 32-bit float WAV; compressed formats need a decoder dependency.
 #[derive(Debug)]
 pub struct FileSource {
@@ -239,7 +239,7 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
         return Err(CaptureError::BadFormat("not a RIFF/WAVE file".into()));
     }
 
-    // Walk the chunk list rather than assuming a fixed layout — real encoders insert
+    // Walk the chunk list rather than assuming a fixed layout: real encoders insert
     // LIST/fact chunks before the data.
     let mut offset = 12;
     let mut format = None;
@@ -313,8 +313,8 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, AudioFormat)> {
 /// Sample encodings found in the wild.
 ///
 /// Integer PCM is what almost every recorder, phone and `ffmpeg` default produces; 32-bit float
-/// is what this codebase uses internally. Accepting only the latter meant the common case — a
-/// perfectly ordinary 16-bit WAV — was rejected as malformed.
+/// is what this codebase uses internally. Accepting only the latter meant the common case (a
+/// perfectly ordinary 16-bit WAV) was rejected as malformed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Encoding {
     U8,
@@ -587,8 +587,8 @@ mod tests {
         out
     }
 
-    /// The bug: an ordinary 16-bit WAV — what almost every recorder and ffmpeg default
-    /// produces — was rejected as malformed, so importing a real file was impossible.
+    /// The bug: an ordinary 16-bit WAV (what almost every recorder and ffmpeg default
+    /// produces) was rejected as malformed, so importing a real file was impossible.
     #[test]
     fn sixteen_bit_integer_wav_is_accepted() {
         let mut data = Vec::new();
@@ -607,7 +607,7 @@ mod tests {
     }
 
     /// Each width must divide by its own maximum. Sharing one constant would make 16-bit audio
-    /// 48 dB too quiet — silence as far as the speech gate is concerned.
+    /// 48 dB too quiet: silence as far as the speech gate is concerned.
     #[test]
     fn every_integer_width_reaches_full_scale() {
         let cases: Vec<(u16, Vec<u8>)> = vec![

@@ -1,12 +1,12 @@
 //! Local storage for Notewise.
 //!
 //! This crate owns the SQLite schema, migrations, and encryption at rest. It is the only
-//! place in the codebase that writes SQL — everything else goes through repositories.
+//! place in the codebase that writes SQL; everything else goes through repositories.
 //!
 //! # Ownership vs association
 //!
 //! Columns here model **ownership**: a transcript segment belongs to exactly one meeting.
-//! **Association** — a note referencing a meeting, an action item linked to a ticket — is
+//! **Association** (a note referencing a meeting, an action item linked to a ticket) is
 //! modelled as typed edges by the `graph` crate, which builds on [`EdgeRepository`].
 //!
 //! # Example

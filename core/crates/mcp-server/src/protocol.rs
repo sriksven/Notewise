@@ -27,7 +27,7 @@ pub struct Request {
 }
 
 impl Request {
-    /// Whether this is a notification — no `id`, therefore no reply.
+    /// Whether this is a notification: no `id`, therefore no reply.
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
     }

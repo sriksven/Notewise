@@ -18,7 +18,7 @@ interface Props {
  * # Nothing here sends
  *
  * The engine has no send endpoint and neither does this. A draft can be generated, read, copied,
- * approved and discarded — approving records that a human read it, and moves no mail. The only way
+ * approved and discarded: approving records that a human read it, and moves no mail. The only way
  * one becomes an outgoing message is the user pasting it into their own mail client, deliberately.
  *
  * That is not caution for its own sake. A wrong auto-send reaches other people, cannot be recalled,
@@ -101,7 +101,7 @@ export function FollowUpDrafts({ meetingId, hasSource }: Props) {
         <Mail className="h-3.5 w-3.5" /> Follow-up email
       </h3>
       <p className="mb-3 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
-        Drafted from this meeting's summary. Nothing is sent — copy it into your own mail client when
+        Drafted from this meeting's summary. Nothing is sent. Copy it into your own mail client when
         you are happy with it.
       </p>
 
@@ -137,7 +137,7 @@ export function FollowUpDrafts({ meetingId, hasSource }: Props) {
         </div>
       ) : (
         <p className="text-[12.5px] text-ink-faint">
-          Summarize the meeting first — drafting from an empty meeting invents commitments.
+          Summarize the meeting first: drafting from an empty meeting invents commitments.
         </p>
       )}
 

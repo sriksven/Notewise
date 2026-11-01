@@ -10,7 +10,7 @@ function question(text: string, at_ms: number): ClarifyingQuestion {
 describe("the questions the panel shows", () => {
   /**
    * The window appends every question it receives for the length of the recording. Rendered as
-   * given, the newest question — the one about what was just said — sat at the bottom of an
+   * given, the newest question, the one about what was just said, sat at the bottom of an
    * ever-longer list.
    */
   it("puts the newest first and caps how many show", () => {

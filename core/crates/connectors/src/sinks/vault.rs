@@ -39,7 +39,7 @@ impl VaultSink {
     /// The one place this connector's name is written.
     ///
     /// It appears in the registry builder, in the API's list of ids it will accept, and in the
-    /// credential store's key — and it is persisted in `connector_outbox` and `external_items`,
+    /// credential store's key, and it is persisted in `connector_outbox` and `external_items`,
     /// so a rename is a breaking change to data already on disk. As three separate string
     /// literals that drift silently: the API accepts `POST /v1/connectors/vault`, writes the
     /// account row, and the registry never registers it. Named once, a rename is a compile
@@ -78,7 +78,7 @@ fn file_name(title: &str, node_id: &str) -> String {
     } else {
         trimmed
     };
-    // 12 hex characters, not 8. The id is a v4 UUID, so 8 characters is 32 bits — and a
+    // 12 hex characters, not 8. The id is a v4 UUID, so 8 characters is 32 bits, and a
     // collision here is silent, because one meeting's file simply overwrites another's and
     // `push` still reports success. At 2^32, a recurring "Standup" reaches a 1% chance of
     // collision by its 9,300th instance, which a daily meeting hits inside thirty years.
@@ -134,7 +134,7 @@ impl SinkConnector for VaultSink {
 
         // Never overwrite something the user wrote.
         //
-        // The whole promise of this connector is that the files are theirs — a vault lives in
+        // The whole promise of this connector is that the files are theirs: a vault lives in
         // Obsidian, and people annotate meeting notes. Blind writes make that promise false in
         // the one case where it matters, and silently: the edit is gone with no error and no
         // copy. So a file that no longer matches what we last put there is treated as theirs.
@@ -157,11 +157,11 @@ impl SinkConnector for VaultSink {
                 // Unchanged since our last write. Ours to rewrite.
                 Ok(_) => {}
                 // Gone. We wrote it and something removed it, so writing it again restores the
-                // mirror — there is no edit to lose.
+                // mirror: there is no edit to lose.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 // Readable in principle and not readable now: a permission change, a stalled sync
                 // client holding a lock, a decryption failure. Treated as diverged, because the
-                // failure mode of guessing "unchanged" is overwriting somebody's edit — the exact
+                // failure mode of guessing "unchanged" is overwriting somebody's edit, the exact
                 // bug `b6e9c3f` fixed. Refusing costs one paused mirror; guessing costs their work.
                 Err(e) => {
                     tracing::warn!(
@@ -215,7 +215,7 @@ mod tests {
 
     /// The literal is pinned here on purpose, and this is the only place it should be written
     /// besides the constant itself. It is persisted in `connector_outbox` and `external_items`,
-    /// so changing it orphans every row already on disk — a deliberate migration, never a
+    /// so changing it orphans every row already on disk: a deliberate migration, never a
     /// rename that compiled.
     #[test]
     fn the_id_is_a_stored_value_and_cannot_drift() {
@@ -302,7 +302,7 @@ mod tests {
         let reference = sink.push(&first).await.unwrap();
         std::fs::write(dir.path().join(&reference.external_id), "edited").unwrap();
 
-        // `existing` carries no version — the record predates this check.
+        // `existing` carries no version: the record predates this check.
         let second = Outbound {
             payload: serde_json::json!({"title": "Standup", "markdown": "v2"}),
             existing: Some(ExternalRef {

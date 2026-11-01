@@ -13,7 +13,7 @@
 //! # Why detection never starts a recording
 //!
 //! It creates a notification and waits to be clicked. Recording on a guess would mean capturing
-//! audio of other people because software inferred a meeting began — and a false positive there is a
+//! audio of other people because software inferred a meeting began, and a false positive there is a
 //! recording nobody knew about, which is a different category of failure from a missed meeting. One
 //! is lost value; the other is a breach of the thing the product sells. The asymmetry decides it.
 
@@ -51,7 +51,7 @@ impl Platform {
     /// A platform named outright by whoever knows.
     ///
     /// The extension knows which adapter matched the page, so it says so rather than sending a URL
-    /// for the engine to re-derive it from — one fewer thing on the wire and one fewer regex to keep
+    /// for the engine to re-derive it from: one fewer thing on the wire and one fewer regex to keep
     /// in step with a vendor's link format.
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name.trim().to_ascii_lowercase().as_str() {
@@ -173,7 +173,7 @@ pub struct Offer {
 impl Offer {
     /// What to call the meeting if this is accepted.
     ///
-    /// The calendar title when there is one, and a platform-shaped placeholder otherwise — "A Zoom
+    /// The calendar title when there is one, and a platform-shaped placeholder otherwise: "A Zoom
     /// call" beats "Meeting 2026-08-18", which is what pressing record by hand produces.
     pub fn suggested_title(&self, now: DateTime<Utc>) -> String {
         if let Some(title) = self.title.as_deref().filter(|t| !t.trim().is_empty()) {
@@ -196,7 +196,7 @@ impl Offer {
 pub const MAX_OFFERS: usize = 8;
 
 /// After this, an offer is stale. An offer to record a meeting that started half an hour ago cannot
-/// be kept — the recording would be missing the half hour that mattered.
+/// be kept: the recording would be missing the half hour that mattered.
 pub const OFFER_TTL_MINUTES: i64 = 10;
 
 /// Fuses signals and decides when to speak.
@@ -213,7 +213,7 @@ pub struct JoinTracker {
     ///
     /// For the settings screen and nothing else. "The extension has not been heard from" is the
     /// answer to "why is this not working", and without it the only way to find out is to read a
-    /// log — which means the answer is unavailable to the person who needs it.
+    /// log, which means the answer is unavailable to the person who needs it.
     last_seen: HashMap<SignalSource, DateTime<Utc>>,
 }
 
@@ -221,7 +221,7 @@ pub struct JoinTracker {
 struct Pending {
     first_seen: DateTime<Utc>,
     /// Distinct sources that have reported this key. Two weak sources agreeing is as good as one
-    /// strong one — they are independent observations of the same thing.
+    /// strong one: they are independent observations of the same thing.
     sources: Vec<SignalSource>,
     title: Option<String>,
     platform: Option<Platform>,
@@ -298,7 +298,7 @@ impl JoinTracker {
 
     /// Put an offer away.
     ///
-    /// Answers whether there is an offer with that id, so dismissing one twice succeeds twice — a
+    /// Answers whether there is an offer with that id, so dismissing one twice succeeds twice: a
     /// double click must not read as a failure. `false` means it expired or never existed, which is
     /// the same thing from the interface's side: the card should disappear either way.
     pub fn dismiss(&mut self, id: Id) -> bool {
@@ -346,7 +346,7 @@ impl JoinTracker {
             }
         }
 
-        // A meeting page open is deliberate — somebody navigated there. No waiting.
+        // A meeting page open is deliberate: somebody navigated there. No waiting.
         if signal.confidence == Confidence::Strong {
             self.notified.insert(key.clone(), now);
             self.pending.remove(&key);
@@ -366,7 +366,7 @@ impl JoinTracker {
         if !entry.sources.contains(&signal.source) {
             entry.sources.push(signal.source);
         }
-        // A later signal may know more than the first — a calendar poll that runs after the
+        // A later signal may know more than the first: a calendar poll that runs after the
         // extension has a title where the extension had none.
         if entry.title.is_none() {
             entry.title = signal.title.clone();
@@ -410,7 +410,7 @@ impl JoinTracker {
 /// The identity of a meeting occurrence, from the strongest thing available.
 ///
 /// Calendar id first, then the normalised URL, then platform plus a coarse time bucket. The bucket
-/// exists so two signals minutes apart about the same untitled Zoom call collapse — without it, a
+/// exists so two signals minutes apart about the same untitled Zoom call collapse; without it, a
 /// meeting with no identifiable reference would notify on every poll.
 pub fn dedup_key(signal: &JoinSignal) -> String {
     if let Some(reference) = signal.external_ref.as_deref() {
@@ -1083,7 +1083,7 @@ struct SignalResponse {
 
 /// Report that a meeting may have started.
 ///
-/// Never starts a recording. It queues a notification the shell delivers and the user clicks — see
+/// Never starts a recording. It queues a notification the shell delivers and the user clicks; see
 /// the module docs for why a false positive here must not be a recording nobody knew about.
 async fn report_signal(
     State(state): State<Shared>,
@@ -1116,7 +1116,7 @@ async fn report_signal(
             Confidence::Weak
         },
         // A URL identifies a meeting more precisely than a calendar id when both are present, but
-        // the calendar id survives a link being regenerated — so it wins.
+        // the calendar id survives a link being regenerated, so it wins.
         external_ref: body.external_id.clone().or_else(|| body.url.clone()),
         declined: body.declined,
         title: body.title.clone(),
@@ -1184,7 +1184,7 @@ async fn queue_offer(
         let db = state.db().await;
         NotificationRepository::new(&db).create(NewNotification {
             source_kind: "join_offer".into(),
-            // No meeting exists yet — that is the point, the user is being asked whether to make
+            // No meeting exists yet: that is the point, the user is being asked whether to make
             // one. A fresh id keeps the row well-formed without implying a link.
             source_id: Id::new(),
             recipient: "me".into(),
@@ -1237,7 +1237,7 @@ pub fn calendar_signal(
     mine: &[String],
     now: DateTime<Utc>,
 ) -> Option<JoinSignal> {
-    // An event with no link is not a meeting anybody joins — a birthday, a focus block, a holiday.
+    // An event with no link is not a meeting anybody joins: a birthday, a focus block, a holiday.
     let join_url = event
         .join_url
         .as_deref()
@@ -1254,7 +1254,7 @@ pub fn calendar_signal(
 
     // Declined by the user, as opposed to by somebody else. Comparing against the addresses the
     // connected accounts recorded is the only identity this engine has; without one the check
-    // cannot be made, and it is skipped rather than guessed — refusing every event because one
+    // cannot be made, and it is skipped rather than guessed: refusing every event because one
     // attendee declined would silence the feature for anybody with a large invite list.
     let declined = attendees.iter().any(|attendee| {
         matches!(
@@ -1272,7 +1272,7 @@ pub fn calendar_signal(
         confidence: Confidence::Weak,
         // The event's own id rather than its URL: a link can be regenerated, and this is what makes
         // the resulting recording linkable to the event directly instead of inferred from time
-        // overlap by a later reconciliation pass. Prefixed so the shape says where it came from —
+        // overlap by a later reconciliation pass. Prefixed so the shape says where it came from:
         // the extension's opaque key is deliberately not one of these.
         external_ref: Some(format!("cal:{}", event.id)),
         declined,
@@ -1425,7 +1425,7 @@ async fn detection_status(State(state): State<Shared>) -> ApiResult<Json<Detecti
         calendar_connected,
         grace_secs: TrackerConfig::default().grace.num_seconds(),
         blind_spot: "Meetings taken only in the desktop Zoom or Teams app, with nothing on your \
-                     calendar, are not detected — that needs to watch what is running on your \
+                     calendar, are not detected. That needs to watch what is running on your \
                      machine, which Notewise does not do.",
     }))
 }
@@ -1474,11 +1474,11 @@ async fn list_offers(State(state): State<Shared>) -> Json<Vec<OfferBody>> {
 
 #[derive(Debug, Serialize)]
 struct AcceptedOffer {
-    /// What to call the recording. The caller starts it — this endpoint does not.
+    /// What to call the recording. The caller starts it. This endpoint does not.
     title: String,
     /// The calendar event this belongs to, when the signal came from one.
     ///
-    /// A link that is *known* should never be guessed, and this is the one path where it is known —
+    /// A link that is *known* should never be guessed, and this is the one path where it is known;
     /// so it comes back here rather than being left for the reconciliation pass to infer from time
     /// overlap.
     calendar_event_id: Option<String>,
@@ -1525,7 +1525,7 @@ async fn accept_offer(
 
 /// Put an offer away without recording.
 ///
-/// Answers `dismissed: false` for one that had already expired, which is not an error — the user
+/// Answers `dismissed: false` for one that had already expired, which is not an error: the user
 /// clicking a stale card should see it disappear either way.
 async fn dismiss_offer(
     State(state): State<Shared>,

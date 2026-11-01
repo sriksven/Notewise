@@ -1,10 +1,12 @@
 /**
  * Setup readiness, and the decisions derived from it.
  *
- * Deliberately pure — no React, no fetch. Which steps exist, which one to show, and whether
+ * Deliberately pure: no React, no fetch. Which steps exist, which one to show, and whether
  * Finish enables are the only real branching in this feature, and they are worth testing
  * without mounting anything.
  */
+
+import type { SettingsSection } from "../lib/router";
 
 export type PermissionState = "not_requested" | "granted" | "denied" | "unavailable";
 
@@ -108,14 +110,14 @@ const CONSEQUENCE: Record<Exclude<StepId, "welcome">, string> = {
  * working meanwhile. Empty when nothing is broken.
  *
  * It used to say only "Summaries, chat and suggested questions will not run", which tells
- * someone what they have lost and not how to get it back — while the engine's probe knew all
+ * someone what they have lost and not how to get it back, while the engine's probe knew all
  * along that Ollama was simply not running. That reason is used whenever the engine gives one.
  */
 export function bannerProblems(readiness: SetupReadiness): string[] {
   return regressions(readiness).map((step) => {
     switch (step.id) {
       case "model":
-        return "No transcription model is downloaded, so meetings won't be transcribed. Download one in Settings → Models.";
+        return "No transcription model is downloaded, so meetings won't be transcribed. Download one in Settings → Transcription.";
       case "backend": {
         const detail = readiness.steps.backend.detail?.trim();
         return detail
@@ -128,11 +130,29 @@ export function bannerProblems(readiness: SetupReadiness): string[] {
   });
 }
 
+/** The page of Settings that fixes each step: the one the banner's copy names. */
+const FIXED_IN: Record<Exclude<StepId, "welcome">, SettingsSection> = {
+  model: "transcription",
+  backend: "models",
+  permissions: "recording",
+};
+
+/**
+ * Where "Fix in Settings" goes: the page that fixes the first thing the banner names.
+ *
+ * Settings is a set of pages now, and a button that says "fix" and then opens Appearance leaves
+ * the person to find Recording on their own.
+ */
+export function bannerSection(readiness: SetupReadiness): SettingsSection | undefined {
+  const [first] = regressions(readiness);
+  return first && FIXED_IN[first.id as keyof typeof FIXED_IN];
+}
+
 /**
  * What is given up by finishing setup now, in the user's terms. Empty when nothing is.
  *
- * Setup can always be finished. A required step the user cannot satisfy — a grant that belongs
- * to an administrator, a 3 GB download they do not want today — must not become a locked door
+ * Setup can always be finished. A required step the user cannot satisfy (a grant that belongs
+ * to an administrator, a 3 GB download they do not want today) must not become a locked door
  * on their own machine, and the parts of the app that need none of it still work.
  */
 export function skipConsequences(readiness: SetupReadiness): string[] {

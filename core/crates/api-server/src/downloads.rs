@@ -3,7 +3,7 @@
 //! # Why this is not just a blocking POST
 //!
 //! `large-v3` is 3.1 GB. A request that holds the connection open until it finishes will be
-//! killed by a proxy, a laptop sleeping, or a user who assumes the app has hung — and there is
+//! killed by a proxy, a laptop sleeping, or a user who assumes the app has hung, and there is
 //! no way to tell any of those apart from a download that is simply still going. Worse, a
 //! retried POST would start a *second* download of the same file.
 //!
@@ -55,7 +55,7 @@ pub struct DownloadState {
     pub kind: DownloadKind,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
-    /// Precomputed so every client does not reimplement the same division — including the
+    /// Precomputed so every client does not reimplement the same division, including the
     /// zero-total case, which is where that division goes wrong.
     pub percent: u8,
     pub status: DownloadStatus,
@@ -126,7 +126,7 @@ fn percent(downloaded: u64, total: u64) -> u8 {
 pub struct DownloadManager {
     /// `watch::Sender` is not `Clone`, so the map and the download task share one through an
     /// `Arc`. Subscribers come off the same sender, which is what lets a client attach after
-    /// a download has already started — or already finished.
+    /// a download has already started, or already finished.
     active: Mutex<HashMap<String, Arc<watch::Sender<DownloadState>>>>,
 }
 
@@ -147,7 +147,7 @@ impl DownloadManager {
     /// Start a download of any artifact, or return the one already running.
     ///
     /// Keyed by kind *and* name. Keying on name alone would let a speaker model and a Whisper
-    /// model of the same name share one entry — and since the two are watched through different
+    /// model of the same name share one entry, and since the two are watched through different
     /// routes, the wrong one would answer.
     pub async fn start_artifact(
         &self,
@@ -183,8 +183,8 @@ impl DownloadManager {
                 .fetch(&artifact, move |p| {
                     // `send_replace`, not `send`: `watch::Sender::send` fails when no receiver
                     // exists, leaving the stored value at whatever was last delivered. Progress
-                    // is read two ways — streamed to a subscriber *and* read back through
-                    // `borrow()` by `state`/`all` — so a state nobody is streaming must still be
+                    // is read two ways: streamed to a subscriber *and* read back through
+                    // `borrow()` by `state`/`all`, so a state nobody is streaming must still be
                     // recorded. With `send` a download that finished before anyone subscribed
                     // stayed "downloading, 0%" forever, and the idempotency guard then refused to
                     // restart it because that is not a terminal state.
@@ -340,14 +340,14 @@ mod tests {
     /// The two catalogues must not share an entry, or the wrong one answers.
     ///
     /// `state`/`subscribe` are the transcription-side lookups, so a speaker download of the same
-    /// name must be invisible to them — otherwise a client watching a Whisper model would be
+    /// name must be invisible to them; otherwise a client watching a Whisper model would be
     /// handed a speaker model's progress.
     #[tokio::test]
     async fn a_speaker_download_does_not_shadow_a_whisper_one() {
         let manager = DownloadManager::new();
         let dir = std::env::temp_dir().join(format!("notewise-shadow-{}", std::process::id()));
 
-        // Deliberately the same name in both catalogues — the collision this keys against.
+        // Deliberately the same name in both catalogues: the collision this keys against.
         manager
             .start_artifact(
                 unreachable("collide"),
@@ -384,7 +384,7 @@ mod tests {
     ///
     /// Regression, and the subtle one: `watch::Sender::send` returns `Err` when every receiver has
     /// been dropped, so with no subscriber the stored value never advanced past `starting`. The
-    /// entry sat at "downloading, 0%" forever — and because that is not terminal, the idempotency
+    /// entry sat at "downloading, 0%" forever, and because that is not terminal, the idempotency
     /// guard then refused to retry it, so the model could never be downloaded again either. It was
     /// invisible for Whisper models only because that UI always opens the progress stream.
     #[tokio::test]
@@ -401,7 +401,7 @@ mod tests {
             )
             .await;
 
-        // Deliberately no `subscribe()` — that is the condition being tested.
+        // Deliberately no `subscribe()`: that is the condition being tested.
         let mut waited = 0;
         loop {
             let state = manager.state("unreachable").await.expect("an entry");

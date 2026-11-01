@@ -3,14 +3,14 @@
 //! # Why text and not pixels
 //!
 //! Returning an image would push the vision-versus-OCR decision into every consumer and make the
-//! privacy question — what exactly left the machine — depend on which feature was calling. One
+//! privacy question (what exactly left the machine) depend on which feature was calling. One
 //! text-shaped contract means one answerable question.
 //!
 //! # Why structured text wins over recognised text
 //!
 //! The accessibility API returns what an application says its field contains. Optical recognition
 //! returns a guess about what some pixels look like. When both are available the first is correct
-//! and the second is approximate, so there is no case for blending them — and a prompt built from
+//! and the second is approximate, so there is no case for blending them, and a prompt built from
 //! recognised text when the real text was available is worse output for more effort.
 //!
 //! # Why an empty context is a success
@@ -88,7 +88,7 @@ impl ScreenContext {
     /// One block, for putting in front of a model.
     ///
     /// Empty when there is nothing to say, so a caller can pass it straight through without a
-    /// special case for "no context" — the model sees no context section rather than an empty one.
+    /// special case for "no context": the model sees no context section rather than an empty one.
     pub fn to_prompt(&self, limit: usize) -> String {
         let mut lines = Vec::new();
 
@@ -107,7 +107,7 @@ impl ScreenContext {
             let label = if self.selection.as_deref().is_some_and(|s| s == text) {
                 "Selected text"
             } else if self.is_recognised() {
-                // Labelled so a model — and anyone reading a trace — knows this is a guess.
+                // Labelled so a model (and anyone reading a trace) knows this is a guess.
                 "Text read from the screen (may contain recognition errors)"
             } else {
                 "Text in the focused field"
@@ -167,7 +167,7 @@ mod tests {
         assert!(with_both.to_prompt(PROMPT_LIMIT).contains("Selected text"));
     }
 
-    /// And when only pixels were available, the prompt says so — an answer grounded in recognised
+    /// And when only pixels were available, the prompt says so: an answer grounded in recognised
     /// text can be wrong because the recognition was.
     #[test]
     fn recognised_text_is_labelled_as_a_guess() {

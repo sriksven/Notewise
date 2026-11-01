@@ -52,7 +52,7 @@ pub enum BackendKind {
     /// Renamed explicitly because `rename_all = "snake_case"` would make this
     /// `open_ai_compatible`, while [`BackendKind::as_str`] says `openai_compatible`. Two spellings
     /// for one backend is a bug waiting to be found by whichever path serializes rather than
-    /// calling `as_str` — which is exactly how it was found.
+    /// calling `as_str`, which is exactly how it was found.
     #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
 }
@@ -137,7 +137,7 @@ impl BackendKind {
     /// Whether a user should ever be offered this backend.
     ///
     /// [`BackendKind::Mock`] is not. It exists so the seam stays testable, and it answers every
-    /// request with fixed text — a user who picks it out of a menu gets summaries and answers
+    /// request with fixed text; a user who picks it out of a menu gets summaries and answers
     /// that were never derived from their meeting, presented exactly like real ones. That is
     /// the worst failure this product can have, and it should not be one menu click away.
     ///
@@ -183,7 +183,7 @@ pub struct RouterConfig {
     pub endpoint: Option<String>,
     /// How much to mask before text leaves the machine.
     ///
-    /// Ignored for local backends — nothing leaves, so there is nothing to mask.
+    /// Ignored for local backends; nothing leaves, so there is nothing to mask.
     pub redaction: RedactionPolicy,
 }
 
@@ -284,7 +284,7 @@ fn policy_for(backend: &dyn AiBackend, configured: RedactionPolicy) -> Redaction
 /// Where a request is going, and what has to be masked before it gets there.
 ///
 /// The redaction travels with the choice on purpose. Computing it from the router's default
-/// backend would send an unmasked transcript to a remote route whenever the default is local —
+/// backend would send an unmasked transcript to a remote route whenever the default is local:
 /// silently, with no error, which is the worst failure this crate could have.
 struct Selected<'a> {
     backend: &'a dyn AiBackend,
@@ -296,7 +296,7 @@ struct Selected<'a> {
 /// A routing rule as it is stored, without any credential.
 ///
 /// One JSON document under a single settings key holds a `Vec` of these. Ordering *is* the
-/// semantics, so they are read and written as a set — decomposing them into rows would mean an
+/// semantics, so they are read and written as a set; decomposing them into rows would mean an
 /// index column and a rewrite on every reorder, for nothing.
 ///
 /// The api key is deliberately absent. A rule records which provider a route uses; the secret
@@ -328,7 +328,7 @@ pub struct Route {
 pub struct Router {
     backend: Box<dyn AiBackend>,
     kind: BackendKind,
-    /// The model and endpoint the default backend was configured with, exactly as given — `None`
+    /// The model and endpoint the default backend was configured with, exactly as given: `None`
     /// where the backend's own default applies. See [`Router::configured_model`].
     model: Option<String>,
     endpoint: Option<String>,
@@ -339,7 +339,7 @@ pub struct Router {
     /// Last probe of the default backend, and when it was taken.
     ///
     /// Only ever populated when a rule uses `Predicate::LocalBackendHealthy`. Probing needs a
-    /// network round trip, and selection runs before every model call — spending one to answer a
+    /// network round trip, and selection runs before every model call; spending one to answer a
     /// question no policy asks would be pure waste.
     health: Arc<tokio::sync::RwLock<Option<(Instant, bool)>>>,
 }
@@ -372,7 +372,7 @@ impl Router {
 
     /// The model this router was *asked* for, or `None` when it runs the backend's default.
     ///
-    /// Not [`Self::model_id`], which is the default backend's current answer — for a local daemon
+    /// Not [`Self::model_id`], which is the default backend's current answer; for a local daemon
     /// that is our own preference until the daemon has been asked. Rebuilding a router from
     /// `model_id()` turned that preference into a choice the user never made, and a chosen model
     /// is never substituted when it is missing.
@@ -393,7 +393,7 @@ impl Router {
 ///
 /// Split out of [`Router::from_config`] so a route target is built by exactly the same code as
 /// the default. Boxing a whole `Router` as a route would also have worked and would have applied
-/// its redaction a second time on top of the outer one — masking twice, confusingly, for no gain.
+/// its redaction a second time on top of the outer one: masking twice, confusingly, for no gain.
 fn build_backend(config: RouterConfig) -> Result<Box<dyn AiBackend>> {
     let kind = config.backend;
 
@@ -495,7 +495,7 @@ impl Router {
     /// What to show a human when asked which model is in use.
     ///
     /// Deliberately separate from [`AiBackend::model_id`], which stays the *default backend's*
-    /// model because that value is persisted and read back to construct a backend — it has to
+    /// model because that value is persisted and read back to construct a backend; it has to
     /// name a real model, not describe a policy.
     ///
     /// With no routes the two are identical, so nothing changes for an install that has not
@@ -508,7 +508,7 @@ impl Router {
     /// [`Self::model_label`], naming the model that will actually answer.
     ///
     /// The synchronous label is the default backend's *current* answer, and for a local daemon
-    /// that is our preference until something has asked the daemon — so a fresh launch reported
+    /// that is our preference until something has asked the daemon, so a fresh launch reported
     /// `llama3.1` on a machine that holds only `llama3.1:8b`, and the model picker highlighted
     /// nothing. This asks, once; after that the answer is cached by the backend.
     pub async fn resolved_model_label(&self) -> String {
@@ -526,11 +526,11 @@ impl Router {
     /// Build and attach every stored rule, in order.
     ///
     /// `key_for` supplies credentials, because a stored rule records *which* provider a route
-    /// uses and never the secret for it — the same split the single-backend path already makes.
+    /// uses and never the secret for it; the same split the single-backend path already makes.
     ///
     /// A rule whose backend cannot be constructed is **skipped with a warning**, not fatal. The
     /// alternative is an app that will not start because one routing rule lost its API key, which
-    /// turns an optimisation into an outage — the reasoning `indexing.rs` applies to a missing
+    /// turns an optimisation into an outage: the reasoning `indexing.rs` applies to a missing
     /// embedder. The remaining rules and the default still work.
     pub fn with_stored_routes(
         mut self,
@@ -588,7 +588,7 @@ impl Router {
     /// Whether the default backend is reachable, from a probe cached for [`HEALTH_TTL`].
     ///
     /// Returns `None` when no rule asks, so the probe is never spent on a policy that would ignore
-    /// it. A probe that errors is a definite "not reachable", which is the answer a rule wants —
+    /// it. A probe that errors is a definite "not reachable", which is the answer a rule wants;
     /// unlike "nobody checked", which must not satisfy anything.
     async fn local_healthy(&self) -> Option<bool> {
         if !self.routes.iter().any(|r| r.spec.needs_health()) {
@@ -618,7 +618,7 @@ impl Router {
     ///
     /// One hop, not a cascade. A chain of failing backends turns one slow call into four, and a
     /// user is better served by an error than by a ninety-second wait. A failure on the default
-    /// is never retried — it *is* the fallback — and a non-retryable error is not retried
+    /// is never retried (it *is* the fallback) and a non-retryable error is not retried
     /// anywhere, since the same input produces the same refusal.
     fn should_fall_back(&self, selected: &Selected<'_>, err: &AiError) -> bool {
         let retryable = selected.name.is_some() && err.is_retryable();
@@ -653,7 +653,7 @@ impl Router {
     /// Whether **everything** this router might do keeps data on the user's machine.
     ///
     /// Asks each backend rather than its kind, so a custom endpoint pointing at localhost is
-    /// correctly reported as local. False if any route is remote — see the trait impl for why
+    /// correctly reported as local. False if any route is remote; see the trait impl for why
     /// that has to be the answer rather than "the default is local".
     pub fn is_local(&self) -> bool {
         self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
@@ -684,7 +684,7 @@ impl Router {
     ///
     /// A local backend is always `Off`: nothing leaves the machine, so masking would only
     /// degrade the model's input for no benefit. This is why redaction lives on the router
-    /// rather than in each caller — the decision depends on which backend is active, which
+    /// rather than in each caller; the decision depends on which backend is active, which
     /// callers should not have to know.
     pub fn effective_redaction(&self) -> RedactionPolicy {
         // The strictest across every reachable destination. This is the whole-router answer, for
@@ -741,7 +741,7 @@ impl Router {
             text: text.into_owned(),
             context,
             // Carried through unmasked, deliberately. This is the user's own template prompt, not
-            // meeting material — redacting it would mangle an instruction they wrote, and there is
+            // meeting material: redacting it would mangle an instruction they wrote, and there is
             // no transcript content in it to protect.
             instructions: input.instructions.clone(),
             background,
@@ -779,8 +779,8 @@ impl Router {
             })
             .collect();
 
-        // The instruction too. Unlike a summary template it is often built from user content —
-        // the agent's task, the text on screen, the person's memories — so it is masked like the
+        // The instruction too. Unlike a summary template it is often built from user content:
+        // the agent's task, the text on screen, the person's memories, so it is masked like the
         // material it replaced.
         let system = request.system.as_deref().map(|s| {
             let (masked, r) = crate::redact::redact(s, policy);
@@ -818,8 +818,8 @@ impl AiBackend for Router {
         self.backend.is_local() && self.routes.iter().all(|r| r.backend.is_local())
     }
 
-    // Forwarded explicitly. Without these a router used as a `dyn AiBackend` — nested in another
-    // router, as routing allows — fell back to the trait defaults: a probe that always passes, and
+    // Forwarded explicitly. Without these a router used as a `dyn AiBackend`, nested in another
+    // router, as routing allows, fell back to the trait defaults: a probe that always passes, and
     // a model that is never resolved.
     async fn probe(&self) -> Result<()> {
         self.backend.probe().await
@@ -1110,8 +1110,8 @@ mod tests {
         );
     }
 
-    /// A request's own instruction is often built from user content — the text on screen, the
-    /// agent's task — so it is masked like the material it replaced, and it reaches the backend.
+    /// A request's own instruction is often built from user content: the text on screen, the
+    /// agent's task, so it is masked like the material it replaced, and it reaches the backend.
     #[tokio::test]
     async fn a_requests_own_instruction_is_carried_and_masked() {
         let spy = std::sync::Arc::new(SpyBackend::cloud());
@@ -1314,7 +1314,7 @@ mod tests {
     }
 
     /// The privacy-critical case. A local default with a remote route must mask for the *route*
-    /// that is actually being used — computing redaction from the default backend would send an
+    /// that is actually being used; computing redaction from the default backend would send an
     /// unmasked transcript to the remote one, silently and with no error.
     #[tokio::test]
     async fn a_remote_route_masks_even_when_the_default_is_local() {
@@ -1579,7 +1579,7 @@ mod tests {
         }
     }
 
-    /// No rule asks about health, so no probe is spent — and the predicate that would have needed
+    /// No rule asks about health, so no probe is spent, and the predicate that would have needed
     /// it is absent, so nothing is skipped either.
     #[tokio::test]
     async fn no_probe_is_taken_when_no_rule_asks() {
@@ -1776,7 +1776,7 @@ mod tests {
         );
     }
 
-    /// A backend whose answer to "which model" changes once it has asked — a local daemon.
+    /// A backend whose answer to "which model" changes once it has asked: a local daemon.
     #[derive(Debug)]
     struct Resolves;
 

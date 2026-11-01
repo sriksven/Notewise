@@ -13,7 +13,7 @@ interface Props {
  *
  * # Why the two vendors look nothing alike
  *
- * Microsoft is a sign-in. Google is five steps of pasting, and that asymmetry is not an oversight —
+ * Microsoft is a sign-in. Google is five steps of pasting, and that asymmetry is not an oversight:
  * it is the price of not paying Google. Every Gmail write scope is *restricted*, which means OAuth
  * verification plus an annually-billed third-party security assessment before a single line of
  * calendar code ships value. The way around it is a script the user deploys into their own account,
@@ -67,7 +67,7 @@ export function CalendarSetup({ connectors, onChanged }: Props) {
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
         Connecting a calendar gives meetings their real titles, links a recording to the event it
         belongs to, and turns attendees into names your transcripts can use. Notewise never writes to
-        your calendar, and never sends mail — a follow-up becomes a draft in your own mailbox that
+        your calendar, and never sends mail: a follow-up becomes a draft in your own mailbox that
         you send yourself.
       </p>
 
@@ -172,7 +172,7 @@ function MicrosoftCard({
       </p>
       <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">
         One sign-in. Notewise asks for read access to your calendar, and to write drafts only if you
-        tick the box — never to send.
+        tick the box, never to send.
       </p>
 
       {!connector.connected && (
@@ -192,7 +192,7 @@ function MicrosoftCard({
             <span className="mt-1 block text-[11px] leading-relaxed text-ink-faint">
               Notewise has no Microsoft app registration of its own yet, so this needs one of yours:
               Azure Portal → App registrations → New, with a <em>public client</em> redirect of{" "}
-              <code>http://localhost</code>. No secret — there is nothing to leak in a desktop app.
+              <code>http://localhost</code>. No secret: there is nothing to leak in a desktop app.
             </span>
           </label>
 
@@ -204,7 +204,7 @@ function MicrosoftCard({
               className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
             />
             <span className="text-[11.5px] leading-relaxed text-ink-muted">
-              Also let Notewise put follow-up drafts in my mailbox. Drafts only — the send endpoint
+              Also let Notewise put follow-up drafts in my mailbox. Drafts only: the send endpoint
               is not in the code.
             </span>
           </label>
@@ -226,7 +226,7 @@ function MicrosoftCard({
 
           {status === "pending" && (
             <p className="text-[11.5px] leading-relaxed text-ink-faint">
-              A page opened in your browser. Finish there and this will notice — you can close the
+              A page opened in your browser. Finish there and this will notice. You can close the
               tab afterwards.
             </p>
           )}

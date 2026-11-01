@@ -71,12 +71,20 @@ describe("parseRoute", () => {
     expect(parseRoute("#/help/nonsense")).toEqual({ name: "help", section: undefined });
   });
 
-  it("reads a settings section", () => {
+  it("reads a settings section, ignoring one it does not have", () => {
     expect(parseRoute("#/settings")).toEqual({ name: "settings", section: undefined });
     expect(parseRoute("#/settings/appearance")).toEqual({
       name: "settings",
       section: "appearance",
     });
+    expect(parseRoute("#/settings/models")).toEqual({ name: "settings", section: "models" });
+    expect(parseRoute("#/settings/transcription")).toEqual({
+      name: "settings",
+      section: "transcription",
+    });
+    expect(parseRoute("#/settings/summaries")).toEqual({ name: "settings", section: "summaries" });
+    expect(parseRoute("#/settings/tools")).toEqual({ name: "settings", section: "tools" });
+    expect(parseRoute("#/settings/nonsense")).toEqual({ name: "settings", section: undefined });
   });
 
   it("ignores a query string", () => {
@@ -107,7 +115,9 @@ describe("routeToHash", () => {
       { name: "help", section: undefined },
       { name: "help", section: "whats-new" },
       { name: "about" },
+      { name: "settings", section: undefined },
       { name: "settings", section: "appearance" },
+      { name: "settings", section: "speakers" },
     ];
 
     for (const route of routes) {

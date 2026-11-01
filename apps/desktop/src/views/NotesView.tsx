@@ -27,7 +27,7 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
 /**
  * The workspace's notes.
  *
- * `body` is opaque to the engine — storage treats it as text precisely so the editor format
+ * `body` is opaque to the engine: storage treats it as text precisely so the editor format
  * could change without a migration. It did: this is a block editor now, and the schema did not
  * notice, because what it writes is still Markdown.
  *
@@ -43,7 +43,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
    * The document, as blocks.
    *
    * Markdown is what is stored; blocks are what is edited. `lib/blocks.ts` explains why that
-   * way round — in short, the body is read by search, embedding, the agent and the vault
+   * way round: in short, the body is read by search, embedding, the agent and the vault
    * connector, and JSON in any of those is noise.
    */
   const [blocks, setBlocks] = useState<Block[]>(() => parse(""));
@@ -67,7 +67,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
   /**
    * What is on screen right now, for code that runs after it has been replaced.
    *
-   * Leaving a note by address — Back, a citation, ⌘N, ⌘K — never blurs the editor, so neither the
+   * Leaving a note by address (Back, a citation, ⌘N, ⌘K) never blurs the editor, so neither the
    * blur save nor the debounce gets to write the last few keystrokes: the effect that opens the
    * next note, or the unmount, runs first. Both read this to save what was being typed.
    */
@@ -118,11 +118,11 @@ export function NotesView({ noteId, onNavigate }: Props) {
     void flush(id, currentTitle, serialize(currentBlocks));
   }, [flush]);
 
-  // Leaving the screen altogether — ⌘K, or anything else that navigates without a click in here.
+  // Leaving the screen altogether (⌘K, or anything else that navigates without a click in here).
   useEffect(() => flushLatest, [flushLatest]);
 
   // Open whatever the address bar names, once the list has arrived. This is how a citation, an
-  // agent's finished note, and a link from a meeting all land on the right note — and how a
+  // agent's finished note, and a link from a meeting all land on the right note, and how a
   // reload stays on it.
   useEffect(() => {
     let cancelled = false;
@@ -135,7 +135,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
 
       // Fetched by id when it is not in the list, rather than only searched for in it. `load` asks
       // for the newest fifty, so a citation pointing at the fifty-first note found nothing and this
-      // effect returned without a word — the address bar naming a note and no note open. An agent
+      // effect returned without a word, the address bar naming a note and no note open. An agent
       // that has written enough notes would break its own links that way.
       let wanted = loaded.find((note) => note.id === noteId);
       if (!wanted) {
@@ -198,7 +198,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
   /**
    * Move a note to the trash.
    *
-   * No longer asks first, because it no longer destroys anything — the note is recoverable
+   * No longer asks first, because it no longer destroys anything: the note is recoverable
    * from the trash, and a confirm dialog in front of a reversible action is the one people
    * learn to click through without reading.
    */
@@ -243,7 +243,7 @@ export function NotesView({ noteId, onNavigate }: Props) {
 
         {notes.length === 0 ? (
           <p className="px-4 py-3 text-[12px] leading-relaxed text-ink-faint">
-            No notes yet. A note is a place to think — meeting pages will land here too.
+            No notes yet. A note is a place to think. Meeting pages will land here too.
           </p>
         ) : (
           <ul className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -322,34 +322,41 @@ export function NotesView({ noteId, onNavigate }: Props) {
                       ? "Not saved"
                       : ""}
               </span>
-
-              <button
-                type="button"
-                onClick={() => setAsking((open) => !open)}
-                aria-pressed={asking}
-                // Labelled, not just titled: the visible word is "Ask", which read on its own
-                // by a screen reader does not say what is being asked.
-                aria-label="Ask about this note"
-                title="Ask about this note"
-                className={`flex shrink-0 items-center gap-1 rounded-full border border-hairline
-                            px-2.5 py-1 text-[11.5px] transition hover:bg-overlay ${
-                              asking ? "border-note/60 bg-note/10 text-note" : "text-ink-muted hover:text-ink"
-                            }`}
-              >
-                <MessageCircleQuestion size={12} aria-hidden />
-                Ask
-              </button>
             </div>
 
-            <div
-              className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
-              onBlur={() => void flush(selectedId, title, serialize(blocks))}
-            >
-              <BlockEditor
-                blocks={blocks}
-                onChange={setBlocks}
-                placeholder="Type, or press / for blocks."
-              />
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              {/* Bottom padding so the last line can scroll clear of the floating Ask. */}
+              <div
+                className="min-h-0 flex-1 overflow-y-auto px-5 pb-16 pt-4"
+                onBlur={() => void flush(selectedId, title, serialize(blocks))}
+              >
+                <BlockEditor
+                  blocks={blocks}
+                  onChange={setBlocks}
+                  placeholder="Type, or press / for blocks."
+                />
+              </div>
+
+              {/* Where every other screen keeps its Ask, but this one opens the note's own chat
+                  beside it rather than the workspace panel, and wears the note's colour so the
+                  two are never mistaken for each other. Hidden while the chat is open: its close
+                  button is the way back. */}
+              {!asking && (
+                <button
+                  type="button"
+                  onClick={() => setAsking(true)}
+                  // Labelled, not just titled: the visible word is "Ask", which read on its own
+                  // by a screen reader does not say what is being asked.
+                  aria-label="Ask about this note"
+                  title="Ask about this note"
+                  className="absolute bottom-6 right-6 z-10 flex items-center gap-1.5 rounded-full bg-note
+                             px-3.5 py-2 text-[12.5px] font-medium text-note-on shadow-dock transition
+                             hover:bg-note-hover"
+                >
+                  <MessageCircleQuestion size={13} aria-hidden />
+                  Ask
+                </button>
+              )}
             </div>
           </>
         )}

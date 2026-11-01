@@ -10,7 +10,7 @@ interface Props {
    * The input and language chosen in the top bar, or null for the defaults.
    *
    * Passed through so a recording started from here captures from the same microphone as one
-   * started from the record button. Without them it always used the system default — the wrong
+   * started from the record button. Without them it always used the system default, the wrong
    * device for anyone who had picked their headset.
    */
   device: string | null;
@@ -34,7 +34,7 @@ const POLL_MS = 10_000;
  * # Why this exists next to the OS notification and not instead of it
  *
  * The notification is what reaches somebody looking at their meeting rather than at Notewise. But a
- * notification cannot be taken up if it was missed, dismissed, or never permitted — and notification
+ * notification cannot be taken up if it was missed, dismissed, or never permitted, and notification
  * permission is an OS grant a user may well have refused. A banner in the window costs nothing and
  * catches every case the notification does not.
  *

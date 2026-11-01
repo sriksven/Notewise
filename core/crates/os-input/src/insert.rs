@@ -7,7 +7,7 @@
 //!
 //! Clipboard paste is a real technique and a real hazard. It clobbers whatever the user had copied,
 //! and restoring it races with anything else reading the clipboard. So it is second, never first, and
-//! never silent — a caller can see which tier ran and tell the user their clipboard was borrowed.
+//! never silent: a caller can see which tier ran and tell the user their clipboard was borrowed.
 //!
 //! # Why refusing is a supported outcome
 //!
@@ -70,7 +70,7 @@ pub enum Tier {
 /// Whether the user has allowed the Accessibility grant.
 ///
 /// A separate input from the target's capabilities: an app whose field is writable is still
-/// unwritable without the permission, and the two produce different messages — one is a setting the
+/// unwritable without the permission, and the two produce different messages: one is a setting the
 /// user can change, the other is an application that will never work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessibilityGrant {
@@ -111,7 +111,7 @@ pub fn refusal_reason(grant: AccessibilityGrant, target: TargetCapabilities) -> 
     if !target.accepts_paste && !target.accessibility_writable {
         return "This application does not accept text from other apps.".into();
     }
-    "There is nowhere to put the text — no editable field is focused.".into()
+    "There is nowhere to put the text: no editable field is focused.".into()
 }
 
 /// What a caller should tell the user afterwards, if anything.
@@ -136,7 +136,7 @@ pub fn aftermath(outcome: &Insertion) -> Option<String> {
 pub struct ClipboardSnapshot {
     /// The plain text that was there. `None` for an empty clipboard, which restores by clearing.
     pub text: Option<String>,
-    /// Whether there was content the snapshot could not capture — an image, a file, rich text.
+    /// Whether there was content the snapshot could not capture: an image, a file, rich text.
     ///
     /// Recorded rather than ignored because putting the text back would *destroy* it, and a user
     /// whose copied screenshot silently vanished deserves to be told at the time rather than to
@@ -146,7 +146,7 @@ pub struct ClipboardSnapshot {
 
 /// Everything the insertion tiers need from the operating system.
 ///
-/// A trait so the tier machine — which is the part that can be wrong in an interesting way — runs
+/// A trait so the tier machine (which is the part that can be wrong in an interesting way) runs
 /// against a mock in CI. The real implementation needs the Accessibility grant, which a `cargo test`
 /// binary cannot hold; this way the decisions are checked even though the syscalls are not.
 pub trait TextTarget: std::fmt::Debug {
@@ -181,7 +181,7 @@ pub trait TextTarget: std::fmt::Debug {
 /// The order and the fallbacks are the whole design:
 ///
 /// - the accessibility API first, because nothing else on the machine is touched;
-/// - the clipboard second, and only after the first has been tried and failed — including when it
+/// - the clipboard second, and only after the first has been tried and failed, including when it
 ///   was available and *errored*, since a target that advertises a settable value and then refuses
 ///   the write is common enough to matter;
 /// - a refusal third, which is a supported outcome. Inserting into the wrong field is worse than
@@ -657,7 +657,7 @@ mod tests {
         assert_eq!(mock.log(), vec!["snapshot", "write", "paste", "restore"]);
     }
 
-    /// When it cannot be put back, the text is at least still reachable — and the message says so
+    /// When it cannot be put back, the text is at least still reachable, and the message says so
     /// rather than leaving the user with neither their text nor their clipboard.
     #[test]
     fn a_failed_paste_that_also_lost_the_clipboard_says_where_the_text_went() {
@@ -683,8 +683,8 @@ mod tests {
         assert_eq!(mock.log(), vec!["snapshot", "write"], "nothing was pasted");
     }
 
-    /// A clipboard that could not be read at all is borrowed anyway — the user asked for their
-    /// text — but the loss is reported rather than hidden.
+    /// A clipboard that could not be read at all is borrowed anyway (the user asked for their
+    /// text) but the loss is reported rather than hidden.
     #[test]
     fn an_unreadable_clipboard_is_still_borrowed_and_the_loss_is_reported() {
         let mock = Mock::new(false, true);

@@ -1,7 +1,7 @@
 //! Model registry and on-disk store.
 //!
 //! Real and tested: which models exist, where they live, whether one is present, and
-//! integrity verification. The download itself is real too — the network call is the only
+//! integrity verification. The download itself is real too: the network call is the only
 //! part a test cannot exercise, and it is marked `#[ignore]` rather than mocked away.
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ pub enum ModelSize {
     Tiny,
     Base,
     Small,
-    /// Large-class accuracy with a pruned decoder. Not a size so much as a different trade —
+    /// Large-class accuracy with a pruned decoder. Not a size so much as a different trade:
     /// see [`ModelSize::tradeoff`].
     Turbo,
     Medium,
@@ -39,7 +39,7 @@ impl ModelSize {
     ///
     /// These names come from Whisper and mean nothing to anyone who has not read its paper.
     /// A menu of `tiny.en / base / small.en / medium` with only megabytes beside each is not a
-    /// choice a user can make — it is a quiz. Every entry has to say what it is for.
+    /// choice a user can make; it is a quiz. Every entry has to say what it is for.
     ///
     /// Deliberately qualitative. Real throughput depends on the machine, the audio and whether
     /// Metal is compiled in, and a fabricated "16x realtime" would be a number we cannot stand
@@ -47,7 +47,7 @@ impl ModelSize {
     pub fn tradeoff(&self) -> &'static str {
         match self {
             ModelSize::Tiny => {
-                "Quickest and least accurate. Usable for a rough record — expect names, \
+                "Quickest and least accurate. Usable for a rough record: expect names, \
                  acronyms and technical terms to come out wrong."
             }
             ModelSize::Base => {
@@ -70,7 +70,7 @@ impl ModelSize {
             }
             ModelSize::Large => {
                 "The most accurate available. Wants a lot of memory and is by a wide margin \
-                 the slowest — worth it for a recording that matters, not for everyday use."
+                 the slowest: worth it for a recording that matters, not for everyday use."
             }
         }
     }
@@ -82,7 +82,7 @@ pub struct ModelInfo {
     pub name: String,
     pub size: ModelSize,
     pub url: String,
-    /// Expected file size. Cheap integrity check that catches the common failure —
+    /// Expected file size. Cheap integrity check that catches the common failure:
     /// a truncated download from an interrupted connection.
     pub bytes: u64,
     /// Whether this model handles languages other than English.
@@ -115,7 +115,7 @@ impl ModelInfo {
     ///
     /// The suffix is the least guessable part of the naming. `base` and `base.en` are the same
     /// size and differ only in what they were trained on, and the English-only one is the
-    /// better choice for an English meeting — which is the opposite of what "fewer languages"
+    /// better choice for an English meeting, which is the opposite of what "fewer languages"
     /// suggests.
     pub fn language_note(&self) -> &'static str {
         if self.multilingual {
@@ -137,7 +137,7 @@ impl ModelRegistry {
     pub fn all() -> Vec<ModelInfo> {
         // Real published artifact sizes, read from the CDN's Content-Length. These were
         // previously rounded approximations, which rejected every legitimately downloaded
-        // model — the check is only useful if the numbers are exact.
+        // model: the check is only useful if the numbers are exact.
         let entries = [
             ("tiny.en", ModelSize::Tiny, 77_704_715u64, false),
             ("tiny", ModelSize::Tiny, 77_691_713, true),
@@ -196,7 +196,7 @@ impl ModelRegistry {
 /// Extracted from [`ModelInfo`] so the same resumable, size-verified download can serve models
 /// this crate knows nothing about. A speaker-embedding network belongs to `diarization`, and
 /// giving it its own downloader would mean two implementations of resume-and-verify drifting
-/// apart — with the interesting failures (a server that ignores `Range`, a truncated file that
+/// apart, with the interesting failures (a server that ignores `Range`, a truncated file that
 /// looks installed) fixed in only one of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifact {
@@ -213,7 +213,7 @@ pub struct Artifact {
 pub struct DownloadProgress {
     pub downloaded_bytes: u64,
     /// Total size. Taken from `Content-Length` when the server sends one, otherwise the
-    /// registry's recorded size — a progress bar with no end is worse than a slightly wrong one.
+    /// registry's recorded size: a progress bar with no end is worse than a slightly wrong one.
     pub total_bytes: u64,
     pub done: bool,
 }
@@ -343,7 +343,7 @@ impl ModelStore {
     /// A partial file is resumed with a `Range` request. A multi-gigabyte download over hotel
     /// wifi will be interrupted, and restarting from zero every time means it may never finish.
     /// If the server ignores the range and replies `200`, the partial file is discarded and the
-    /// download restarts — appending to it would silently corrupt the model, and a corrupt
+    /// download restarts: appending to it would silently corrupt the model, and a corrupt
     /// model is far worse than a slow one.
     ///
     /// # Progress
@@ -377,7 +377,7 @@ impl ModelStore {
         let temp_path = final_path.with_extension("partial");
 
         // Resume only from a partial that is plausibly this model. Anything at or past the
-        // expected size is not a resumable prefix — it is junk from an interrupted write or a
+        // expected size is not a resumable prefix: it is junk from an interrupted write or a
         // different model, and continuing from it would produce a file that fails `verify`
         // after another multi-gigabyte transfer.
         let resume_from = match std::fs::metadata(&temp_path) {
@@ -711,7 +711,7 @@ mod tests {
         assert!(reports[0].done);
     }
 
-    /// A `.partial` at or past the expected size is not a resumable prefix — it is junk from
+    /// A `.partial` at or past the expected size is not a resumable prefix: it is junk from
     /// an interrupted write or a different model. Resuming from it would append onto garbage
     /// and produce a file that fails `verify` after another multi-gigabyte transfer.
     #[tokio::test]
@@ -759,7 +759,7 @@ mod tests {
 
         assert!(
             reports.len() > 5,
-            "expected streamed progress, got {} report(s) — this is buffering, not streaming",
+            "expected streamed progress, got {} report(s): this is buffering, not streaming",
             reports.len()
         );
         assert!(reports.last().expect("final").done);

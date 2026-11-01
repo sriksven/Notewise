@@ -19,8 +19,8 @@ notewise-mcp-client.workspace = true
 # The desktop assistant's foundation: hotkey validation, insertion tiers, screen-context reduction.
 #
 # Not optional, and the reason is worth stating because the spec's architecture says the engine
-# should not depend on this crate. With its `os-input` feature off — the default, and what CI
-# builds — it is pure logic: no platform SDK, no `unsafe`, no permission of any kind. What that
+# should not depend on this crate. With its `os-input` feature off (the default, and what CI
+# builds) it is pure logic: no platform SDK, no `unsafe`, no permission of any kind. What that
 # rule protects against is the assistant's *platform* requirements reaching an engine build, and a
 # feature that is off does not reach anything. Depending on it unconditionally is what lets the
 # dictation endpoints exist in every build and say honestly that they cannot run.
@@ -32,7 +32,7 @@ chrono-tz.workspace = true
 
 # Not optional, for the same reason `notewise-transcription` is not: the speaker-events endpoint
 # accepts a `SpeakerTimeline` and applies it to a stored meeting, which a build that cannot record
-# still needs to do — the browser extension reports who was speaking whether or not this engine
+# still needs to do: the browser extension reports who was speaking whether or not this engine
 # captured the audio. Neither crate pulls a platform SDK by default; only their inference and
 # capture backends are gated.
 notewise-diarization.workspace = true
@@ -70,7 +70,7 @@ default = []
 record = ["dep:notewise-audio-capture", "notewise-audio-capture/os-capture"]
 # Real transcription. Pulls a cmake build of whisper.cpp.
 #
-# `notewise-transcription` itself is not optional — the model catalogue and download endpoints
+# `notewise-transcription` itself is not optional: the model catalogue and download endpoints
 # need it whether or not this build can record. Only the inference backend is gated.
 whisper = ["notewise-transcription/whisper", "notewise-recorder/whisper"]
 whisper-metal = [
@@ -97,7 +97,7 @@ speaker-diarization-download = [
 # The desktop assistant's platform layer: global hotkeys, and typing into other applications.
 #
 # Off by default because it is the only thing in this crate that compiles `unsafe`, and because
-# every path behind it needs the Accessibility grant — which no CI machine can hold. Without it the
+# every path behind it needs the Accessibility grant, which no CI machine can hold. Without it the
 # dictation endpoints still exist and report why they cannot insert, which is the honest shape.
 assistant = ["notewise-os-input/os-input"]
 

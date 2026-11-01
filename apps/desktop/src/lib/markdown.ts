@@ -2,12 +2,12 @@
  * Just enough Markdown for what a summarizer writes.
  *
  * Models emit `**Decisions:**` and `* bullet` whether or not they were asked to, and rendering
- * that as plain text puts literal asterisks in front of the user — the one screen meant to read
+ * that as plain text puts literal asterisks in front of the user, the one screen meant to read
  * like a finished document instead looks like a bug.
  *
  * Deliberately not a Markdown library. This handles headings, bullets, numbered lists and bold,
  * which is the whole of what appears in practice; links, tables, images and raw HTML are not
- * supported and are left as text. Nothing here interprets HTML, so there is no injection path —
+ * supported and are left as text. Nothing here interprets HTML, so there is no injection path:
  * the output is spans of text with a flag, rendered by React as text.
  */
 

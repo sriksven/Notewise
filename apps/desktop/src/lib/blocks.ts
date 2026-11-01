@@ -6,7 +6,7 @@
  * The editor thinks in blocks; storage keeps Markdown. That is deliberate, and the reason is
  * not aesthetics.
  *
- * A note's body is opaque to the engine — but it is not unused. It is embedded for semantic
+ * A note's body is opaque to the engine, but it is not unused. It is embedded for semantic
  * search, indexed for full-text search, read by the agent, quoted in grounded answers, and
  * written out by the vault connector as a file someone opens in Obsidian. Storing
  * `[{"type":"paragraph","text":"..."}]` would put JSON syntax into every one of those: the
@@ -15,12 +15,12 @@
  *
  * Markdown costs one parse on load and one serialize on save, and keeps all of it working.
  * It also means every note written before this editor existed opens correctly, with no
- * migration — plain text is already valid Markdown.
+ * migration: plain text is already valid Markdown.
  *
  * # What round-tripping guarantees
  *
  * `parse(serialize(blocks))` returns the same blocks. `serialize(parse(text))` does *not*
- * always return the same text — `*` and `-` bullets both become `-`, and trailing whitespace
+ * always return the same text: `*` and `-` bullets both become `-`, and trailing whitespace
  * is dropped. That asymmetry is the right way round: the editor's state survives exactly, and
  * only cosmetic variation in hand-written Markdown is normalised.
  */
@@ -49,7 +49,7 @@ export interface Block {
   /**
    * Nesting level for list items, `0` at the top. Ignored for every other type.
    *
-   * Optional so that a block built before nesting existed — or by a test — is still a valid
+   * Optional so that a block built before nesting existed, or by a test, is still a valid
    * top-level block. {@link depthOf} is the only thing that should read it.
    */
   depth?: number;
@@ -72,7 +72,7 @@ let counter = 0;
 /**
  * A key for a block.
  *
- * Not persisted — ids exist only to keep React from re-mounting a row when its neighbour
+ * Not persisted: ids exist only to keep React from re-mounting a row when its neighbour
  * changes, which would move the caret. A counter rather than `crypto.randomUUID()` because it
  * is cheaper and nothing outside this module ever sees the value.
  */
@@ -106,7 +106,7 @@ export function isStructural(type: BlockType): boolean {
  * A table's cells, as a grid.
  *
  * Stored in the block's `text` as the Markdown table itself, so the body on disk stays a
- * document anything can read — the same reason the whole editor keeps Markdown rather than
+ * document anything can read, the same reason the whole editor keeps Markdown rather than
  * JSON. This parses that text into a grid when the editor needs one and writes it back after.
  *
  * The first row is the header. Markdown tables have no way to express a table without one.
@@ -119,7 +119,7 @@ export function tableRows(block: Block): string[][] {
     .map((line) =>
       line
         // Only *unescaped* pipes delimit a cell. Splitting on every `|` first would cut a cell
-        // containing `\|` in two and leave a stray backslash behind — which is what happened.
+        // containing `\|` in two and leave a stray backslash behind, which is what happened.
         .replace(/^\|/, "")
         .replace(/(?<!\\)\|$/, "")
         .split(/(?<!\\)\|/)
@@ -203,8 +203,8 @@ const CHECKED = /^[ \t]*[-*]\s+\[[xX]\]/;
 /**
  * Nesting level implied by a line's leading whitespace.
  *
- * Two spaces per level, with a tab counting as one level. Four-space indentation — the other
- * common convention, and what many editors insert — reads as two levels here, and is then
+ * Two spaces per level, with a tab counting as one level. Four-space indentation, the other
+ * common convention, and what many editors insert, reads as two levels here, and is then
  * brought back to one by the skipped-level clamp in {@link parse}, since nothing precedes it at
  * that depth. The pair works out: either convention opens with the shape its author intended.
  */
@@ -221,8 +221,8 @@ const DIVIDER = /^\s*([-*_])(\s*\1){2,}\s*$/;
  * Read Markdown into blocks.
  *
  * Deliberately a *line* parser, not a Markdown implementation. It understands the block
- * structure the editor can produce and leaves everything inside a line — bold, links, inline
- * code — as literal text, which is what the editor shows and what round-trips exactly. A full
+ * structure the editor can produce and leaves everything inside a line (bold, links, inline
+ * code) as literal text, which is what the editor shows and what round-trips exactly. A full
  * Markdown parser here would let the editor mangle documents it does not know how to render.
  */
 export function parse(markdown: string): Block[] {
@@ -235,7 +235,7 @@ export function parse(markdown: string): Block[] {
   while (index < lines.length) {
     const line = lines[index];
 
-    // Fenced code, taken whole. Its contents are not parsed — a `# comment` inside a shell
+    // Fenced code, taken whole. Its contents are not parsed: a `# comment` inside a shell
     // snippet is a comment, not a heading.
     if (/^```/.test(line.trim())) {
       const body: string[] = [];
@@ -284,13 +284,13 @@ export function parse(markdown: string): Block[] {
 
       // A level may only be entered one at a time. A file indenting straight from top level to
       // four is describing a shape no editor can produce, and honouring it would render a list
-      // item with no parent — so it is clamped to one deeper than what precedes it.
+      // item with no parent, so it is clamped to one deeper than what precedes it.
       const previous = blocks[blocks.length - 1];
       const ceiling = previous && isListItem(previous.type) ? depthOf(previous) + 1 : 0;
       const depth = isListItem(rule.type) ? Math.min(indentOf(line), ceiling) : 0;
 
       // Only carried when it is not zero. Stamping `depth: 0` onto every block would change
-      // the shape of every block the editor has ever produced, for no information — `depthOf`
+      // the shape of every block the editor has ever produced, for no information: `depthOf`
       // already reads a missing depth as top level.
       const nesting = depth > 0 ? { depth } : {};
 
@@ -345,7 +345,7 @@ function marker(block: Block): string {
  * typed: a list a user has reordered should read 1, 2, 3, and Markdown renderers renumber
  * anyway, so keeping the original digits would make the file disagree with every view of it.
  *
- * Consecutive list items are not separated by blank lines — that would break the list in most
+ * Consecutive list items are not separated by blank lines: that would break the list in most
  * renderers. Everything else is.
  */
 export function serialize(blocks: Block[]): string {
@@ -372,7 +372,7 @@ export function serialize(blocks: Block[]): string {
     if (!next) return;
 
     // Blank lines break a list in most renderers. Consecutive items stay together when they are
-    // the same kind, *or* when the level changes — a bullet nested under a numbered item is a
+    // the same kind, *or* when the level changes: a bullet nested under a numbered item is a
     // continuation of that list, and a blank line there would detach it from its parent. Two
     // different kinds at the *same* level are genuinely separate lists and do get a break.
     const continuesList =
@@ -389,8 +389,8 @@ export function serialize(blocks: Block[]): string {
 /**
  * A stored body as the editor would write it back untouched.
  *
- * What an autosave has to compare against. `serialize(parse(text))` is not always `text` — see the
- * round-trip note at the top of this file — so comparing the editor's output with the stored text
+ * What an autosave has to compare against. `serialize(parse(text))` is not always `text` (see the
+ * round-trip note at the top of this file), so comparing the editor's output with the stored text
  * reported a change on any note not written by this editor, and merely opening one saved it:
  * rewriting its Markdown and moving its "last edited" to now without a keystroke.
  */
@@ -402,7 +402,7 @@ export function canonical(markdown: string): string {
  * Whether the block at `index` may be nested one level deeper.
  *
  * Only a list item can nest, and only under a list item that is already at least as deep. The
- * first item of a list has nothing to nest under, so it cannot be indented — which is what
+ * first item of a list has nothing to nest under, so it cannot be indented, which is what
  * stops a document from starting at depth 3 with no parent anywhere.
  */
 export function canIndent(blocks: Block[], index: number): boolean {
@@ -463,7 +463,7 @@ export function isListItem(type: BlockType): boolean {
  * The Markdown shortcut a line's opening characters imply, if any.
  *
  * Applied as the user types, so `# ` at the start of an empty paragraph turns it into a
- * heading and disappears. Only fires on a paragraph — retyping `- ` inside a bullet should
+ * heading and disappears. Only fires on a paragraph: retyping `- ` inside a bullet should
  * insert a literal dash, not nest anything.
  */
 export function shortcutFor(text: string): { type: BlockType; rest: string } | null {
@@ -490,7 +490,7 @@ export function shortcutFor(text: string): { type: BlockType; rest: string } | n
  * What pressing Enter at the end of this block should produce.
  *
  * Continuing a list is the behaviour people expect from every editor. Headings and quotes do
- * not continue — one heading is rarely followed by another — and an empty list item ends the
+ * not continue (one heading is rarely followed by another) and an empty list item ends the
  * list instead of adding a third empty one, which is how a list is escaped without reaching
  * for the mouse.
  */

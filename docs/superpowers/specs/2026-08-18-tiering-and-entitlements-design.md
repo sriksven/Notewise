@@ -1,4 +1,4 @@
-# Tiering and entitlements — design
+# Tiering and entitlements - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -15,7 +15,7 @@ implicit question nobody has answered: is this free?
 
 Answering it late is expensive. A feature built without knowing produces an entitlement check
 retrofitted into ten call sites, or worse, a capability shipped free that the business later needs
-to claw back — which is the one product change users genuinely resent.
+to claw back, which is the one product change users genuinely resent.
 
 ## The competitive data point
 
@@ -25,8 +25,8 @@ every LLM provider, agents, MCP, scheduled jobs, and self-hosting are all free w
 limits.
 
 They charge for *ambient convenience*, not for the core product and not for access to your own
-data. That is the right instinct and it is worth copying, because the alternative — metering the
-core — is what makes users of a local-first tool feel cheated.
+data. That is the right instinct and it is worth copying, because the alternative, metering the
+core, is what makes users of a local-first tool feel cheated.
 
 ## Goals
 
@@ -46,7 +46,7 @@ core — is what makes users of a local-first tool feel cheated.
 
 ## Decisions
 
-### T1 — The free/paid line is the MIT/BSL line that already exists
+### T1 - The free/paid line is the MIT/BSL line that already exists
 
 `core/` and `apps/` are MIT. `cloud/` is BSL 1.1. `CLAUDE.md` already treats moving code between
 them as a relicensing event requiring deliberate thought.
@@ -55,7 +55,7 @@ That boundary is already exactly where the monetization boundary belongs: **anyt
 the user's machine is free; anything that runs on our infrastructure is paid.** No new taxonomy is
 needed, and the rule is checkable by looking at which directory the code is in.
 
-This is not a coincidence so much as a consequence — the things that cost us money to operate are
+This is not a coincidence so much as a consequence: the things that cost us money to operate are
 the things that run on our servers.
 
 It also settles the specs in this program cleanly:
@@ -74,7 +74,7 @@ It also settles the specs in this program cleanly:
 | Memory (Spec 8) | `core/` | Free |
 | Document import, vault divergence (Spec 10) | `core/` | Free |
 | Audio retention (Spec 11) | `core/` | Free |
-| Desktop assistant and dictation (Spec 9) | `core/` + shell | Free — see T2 |
+| Desktop assistant and dictation (Spec 9) | `core/` + shell | Free - see T2 |
 | Cloud sync | `cloud/sync-service` | **Pro** |
 | Hosted STT and LLM inference | `cloud/hosted-inference` | **Pro** |
 | Team workspace, comments, external access | `cloud/` | **Team** |
@@ -83,58 +83,58 @@ It also settles the specs in this program cleanly:
 The user's own API key going to Anthropic is free: that call costs us nothing, and metering someone
 else's key would be indefensible.
 
-### T2 — No metered quotas on local compute
+### T2 - No metered quotas on local compute
 
 AnythingLLM meters its Magic features by daily usage. Notewise does not, for one reason: their
-transcription and completion can route through their infrastructure, and ours cannot — Spec 9's
+transcription and completion can route through their infrastructure, and ours cannot; Spec 9's
 dictation runs on the user's own CPU with a model on the user's own disk.
 
 Charging per use of someone's own hardware is a position that cannot be defended in a support
 thread. If Spec 9 ships, it ships free.
 
-**Rejected — quota-limiting local features to drive conversions.** It is the obvious revenue lever
+**Rejected: quota-limiting local features to drive conversions.** It is the obvious revenue lever
 and it directly contradicts the product's central claim. A local-first tool that counts your
 transcriptions is not local-first in any sense the user cares about.
 
-### T3 — Entitlement checks gate cloud calls only, and never local ones
+### T3 - Entitlement checks gate cloud calls only, and never local ones
 
 The check sits at the boundary where a request would leave the machine: `sync-client` before it
 syncs, the hosted-inference backend before it calls. Nowhere else.
 
 No local feature has an entitlement check anywhere in its path. Not disabled-when-unlicensed, not
-degraded, not even read. This is a structural rule, not a policy — a local feature that *reads*
+degraded, not even read. This is a structural rule, not a policy: a local feature that *reads*
 entitlement state is one refactor away from depending on it.
 
 Consequence: an expired subscription means sync stops and hosted inference stops. Recording,
 transcription, summaries, search, and every connector keep working forever. The user's data stays
 fully usable and fully exportable via the vault sink.
 
-### T4 — Entitlement is a cached grant with a long offline grace, and it fails open
+### T4 - Entitlement is a cached grant with a long offline grace, and it fails open
 
 The client holds a signed entitlement with an expiry, refreshed opportunistically when online. If
 refresh fails, the cached grant continues to be honoured for a long grace period.
 
 A local-first product must work on a plane, in a basement, and during our outage. An entitlement
-system that fails closed turns our infrastructure problem into the user's lost afternoon —
+system that fails closed turns our infrastructure problem into the user's lost afternoon,
 including for the paid features they are current on, which is the worst possible failure.
 
 Fail-open has an obvious abuse story: someone stays offline to keep using Pro past expiry. That is
 an acceptable loss. The alternative punishes every honest user for the behaviour of a few, and the
-features at stake require our servers anyway — sync with nothing to sync to is not much of a theft.
+features at stake require our servers anyway; sync with nothing to sync to is not much of a theft.
 
-### T5 — Free is a product, not a funnel
+### T5 - Free is a product, not a funnel
 
 The roadmap already commits to this: "the free local product is genuinely useful with nothing
 connected." T1 makes that structural rather than aspirational.
 
 Stated as a rule for future specs: **a free feature is never degraded to create demand for a paid
 one.** If a paid tier needs a reason to exist, it earns it by doing something the local machine
-cannot — syncing across devices, running a model the laptop cannot hold, sharing with a team.
+cannot: syncing across devices, running a model the laptop cannot hold, sharing with a team.
 
-### T6 — Entitlement state lives in one small module, and its shape is boring
+### T6 - Entitlement state lives in one small module, and its shape is boring
 
 A single module in `sync-client` owns fetching, caching, verifying, and answering. It exposes one
-question — is this capability granted — over a closed enum of paid capabilities.
+question: is this capability granted, over a closed enum of paid capabilities.
 
 An enum rather than strings so a typo is a compile error, and a closed set so the list of things
 that can be gated is auditable in one place. If a capability is not in the enum, it cannot be
@@ -164,7 +164,7 @@ gated, which is the property T3 depends on.
 
 `sync-client` is already the crate that owns talking to our infrastructure, so entitlement lives
 there rather than in a new crate. Nothing in `storage`, `graph`, `ai-router`, `connectors`,
-`recorder`, `transcription`, or `diarization` imports it — and that absence is worth a test.
+`recorder`, `transcription`, or `diarization` imports it, and that absence is worth a test.
 
 ```rust
 pub enum PaidCapability {
@@ -221,7 +221,7 @@ No network needed; grants are constructed in tests.
 ## Risks and open questions
 
 - **The paid tier may be too thin.** Sync and hosted inference are the whole offer, and both are
-  things a technical user can route around — which is the cost of T1 and T5 being honest.
+  things a technical user can route around, which is the cost of T1 and T5 being honest.
 - **Fail-open is exploitable** by staying offline. Accepted in T4.
 - **Grant issuance is unspecified** here; it lives in `cloud/` under BSL and needs its own design
   alongside billing.

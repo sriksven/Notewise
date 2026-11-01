@@ -3,7 +3,7 @@
 //! # Written twice on purpose
 //!
 //! `mcp-server/src/protocol.rs` has the same envelope types. `CLAUDE.md` rule 2 says surfaces never
-//! depend on each other, and `mcp-server` is a surface — so the duplication is accepted rather than
+//! depend on each other, and `mcp-server` is a surface, so the duplication is accepted rather than
 //! resolved by extracting a shared crate mid-spec. The design doc records it as the obvious
 //! follow-up.
 //!
@@ -70,7 +70,7 @@ fn params_of(params: Value) -> Option<Value> {
 ///
 /// Every field is optional because this is what arrives from someone else's implementation. A
 /// server-initiated notification has no `id`, a response has no `method`, and both turn up on the
-/// same pipe — see [`Incoming::is_reply_to`].
+/// same pipe: see [`Incoming::is_reply_to`].
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Incoming {
     #[serde(default)]
@@ -170,7 +170,7 @@ pub(crate) fn check_initialize(server: &str, result: &Value) -> Result<String> {
 ///
 /// A tool whose entry cannot be decoded is dropped rather than failing the whole listing: one
 /// malformed tool must not hide the other nine, and a tool that is not listed simply cannot be
-/// proposed — which is the safe direction.
+/// proposed, which is the safe direction.
 pub(crate) fn parse_tools(result: &Value) -> Vec<ToolDef> {
     let Some(tools) = result.get("tools").and_then(Value::as_array) else {
         return Vec::new();
@@ -216,7 +216,7 @@ pub(crate) fn parse_tool_result(tool: &str, result: Value) -> Result<Value> {
 
 /// Flatten the `content` array's text parts into one string, for showing a human.
 ///
-/// Non-text content — an image, an embedded resource — is described rather than rendered, because
+/// Non-text content (an image, an embedded resource) is described rather than rendered, because
 /// the alternative is a base64 blob in a results panel.
 pub fn text_of(result: &Value) -> Option<String> {
     let content = result.get("content").and_then(Value::as_array)?;

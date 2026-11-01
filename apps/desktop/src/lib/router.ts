@@ -9,7 +9,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
  * moved. A hash is owned entirely by the document.
  *
  * Small enough to own rather than take a routing library for. What is needed is a location, a
- * way to change it, and the back button — all of which the browser already provides.
+ * way to change it, and the back button, all of which the browser already provides.
  */
 
 export type Route =
@@ -35,7 +35,7 @@ export type Route =
    */
   | { name: "overlay" }
   | { name: "help"; section?: HelpSection }
-  | { name: "settings"; section?: string }
+  | { name: "settings"; section?: SettingsSection }
   | { name: "about" };
 
 export type MeetingTab = "transcript" | "summary" | "notes" | "ask";
@@ -46,6 +46,33 @@ const MEETING_TABS: MeetingTab[] = ["transcript", "summary", "notes", "ask"];
 export type HelpSection = "docs" | "support" | "whats-new" | "shortcuts";
 
 const HELP_SECTIONS: HelpSection[] = ["docs", "support", "whats-new", "shortcuts"];
+
+/**
+ * The pages under Settings. Named so the setup banner and Help can open the one that fixes
+ * something, rather than the first.
+ */
+export type SettingsSection =
+  | "appearance"
+  | "recording"
+  | "transcription"
+  | "models"
+  | "summaries"
+  | "assistant"
+  | "tools"
+  | "search"
+  | "speakers";
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  "appearance",
+  "recording",
+  "transcription",
+  "models",
+  "summaries",
+  "assistant",
+  "tools",
+  "search",
+  "speakers",
+];
 
 /** Parse a hash into a route. Anything unrecognised is home, never a blank screen. */
 export function parseRoute(hash: string): Route {
@@ -95,7 +122,12 @@ export function parseRoute(hash: string): Route {
           : undefined,
       };
     case "settings":
-      return { name: "settings", section: parts[1] };
+      return {
+        name: "settings",
+        section: SETTINGS_SECTIONS.includes(parts[1] as SettingsSection)
+          ? (parts[1] as SettingsSection)
+          : undefined,
+      };
     case "about":
       return { name: "about" };
     default:
@@ -137,7 +169,7 @@ function snapshot(): string {
  * The current route, and a way to change it.
  *
  * `navigate` assigns the hash, so the browser records history and the back button works without
- * this module keeping a stack of its own. `replace` is for corrections — landing on a meeting
+ * this module keeping a stack of its own. `replace` is for corrections: landing on a meeting
  * that has since been deleted should not leave a broken entry to go back to.
  */
 export function useRoute(): {

@@ -23,7 +23,7 @@ interface Props {
  * say so in words.
  *
  * The same conversation also opens as a panel from any screen (`AskPanel`) and as a note's own Ask
- * (`NoteChat`). All three are one implementation — `lib/ask` and `AskThread` — so they behave the
+ * (`NoteChat`). All three are one implementation, `lib/ask` and `AskThread`, so they behave the
  * same and differ only in reach.
  *
  * # Citations are the whole point
@@ -56,7 +56,7 @@ export function AskView({ onNavigate }: Props) {
         onNavigate={onNavigate}
         intro={
           <>
-            Answered only from your own meetings and notes — never from what the model happens to
+            Answered only from your own meetings and notes, never from what the model happens to
             know. Every claim carries a reference you can open and check.
           </>
         }

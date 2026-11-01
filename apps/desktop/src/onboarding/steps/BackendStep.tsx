@@ -54,7 +54,7 @@ export function BackendStep({ satisfied, detail, onChanged }: BackendStepProps) 
   };
 
   // The backend actually running, matched by kind. Matching on `is_local` instead would find
-  // whichever local backend happens to come first in the list — labelling a live Ollama as
+  // whichever local backend happens to come first in the list, labelling a live Ollama as
   // "Mock (no model)".
   const running = backends.find((b) => b.kind === active?.kind);
   const isLocal = active?.is_local ?? true;
@@ -104,7 +104,7 @@ export function BackendStep({ satisfied, detail, onChanged }: BackendStepProps) 
                 />
                 <span className={satisfied ? "text-ok-text" : "text-warn-text"}>
                   {satisfied
-                    ? `Reachable — ${active?.model ?? "ready"}`
+                    ? `Reachable: ${active?.model ?? "ready"}`
                     : (detail ?? "Not reachable. Is it running?")}
                 </span>
               </div>
@@ -114,7 +114,7 @@ export function BackendStep({ satisfied, detail, onChanged }: BackendStepProps) 
                   product cannot afford. */}
               <p className="mt-2 text-[12px] text-ink-muted">
                 {isLocal
-                  ? "Nothing leaves this machine. Notewise does not install or update this — start it, then re-check."
+                  ? "Nothing leaves this machine. Notewise does not install or update this; start it, then re-check."
                   : "Transcripts are sent to this provider. Switch in Settings if you would rather keep them local."}
               </p>
             </div>

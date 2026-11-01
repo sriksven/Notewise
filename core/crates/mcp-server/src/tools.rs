@@ -124,7 +124,7 @@ fn read_only_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "find_related",
-            "description": "Find everything connected to an entity — the notes, summaries, \
+            "description": "Find everything connected to an entity: the notes, summaries, \
                             decisions, and tickets that reference it or came from it. Use this \
                             to gather context around a meeting rather than searching blindly.",
             "inputSchema": {
@@ -195,7 +195,7 @@ fn read_only_definitions() -> Vec<Value> {
 /// Deliberately no delete tools, at any access level. An agent that files a wrong ticket
 /// costs a user thirty seconds; an agent that deletes a meeting's action items costs them
 /// work they cannot recover. Deletion stays on the HTTP surface, where a human is driving.
-/// Nothing here removes anything — every tool below either creates a row or changes a
+/// Nothing here removes anything; every tool below either creates a row or changes a
 /// status field.
 fn mutating_definitions() -> Vec<Value> {
     vec![
@@ -230,7 +230,7 @@ fn mutating_definitions() -> Vec<Value> {
         json!({
             "name": "promote_action_item",
             "description": "Turn an action item into a tracked ticket, linking the two. The \
-                            action item is kept — it is the record that the meeting produced \
+                            action item is kept; it is the record that the meeting produced \
                             this work. Calling twice returns the existing ticket rather than \
                             filing a duplicate.",
             "inputSchema": {
@@ -474,7 +474,7 @@ fn create_ticket(db: &Database, args: &Value) -> Result<Value> {
 
     // Resolved before the ticket exists. A malformed id used to be rejected *after* the ticket was
     // filed, so the agent was told the call failed while a ticket sat in the workspace; and an id
-    // naming no meeting was stored as an edge to nothing — the edge table has no foreign keys.
+    // naming no meeting was stored as an edge to nothing; the edge table has no foreign keys.
     let meeting_id = match args.get("meeting_id").and_then(Value::as_str) {
         Some(raw) => {
             let id: Id = raw
@@ -567,7 +567,7 @@ fn get_summary(db: &Database, args: &Value) -> Result<Value> {
 
     let repo = SummaryRepository::new(db);
     let Some(summary) = repo.latest_for_meeting(meeting_id)? else {
-        // Not an error — an unsummarized meeting is a normal state, and telling the agent
+        // Not an error: an unsummarized meeting is a normal state, and telling the agent
         // so is more useful than an error it has to interpret.
         return Ok(json!({
             "meeting_id": meeting_id.to_string(),
@@ -932,7 +932,7 @@ mod tests {
     ///
     /// This is the original guard, kept with its original meaning: adding a mutating tool
     /// should be a deliberate act, not a side effect of adding a handler. What changed is
-    /// that mutating tools now exist — so the assertion moved from "no such tool exists" to
+    /// that mutating tools now exist, so the assertion moved from "no such tool exists" to
     /// "no such tool is reachable without an explicit opt-in", which is the property the
     /// trust story actually rests on.
     #[test]
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     /// `MUTATING_TOOLS` gates `call`, and `mutating_definitions` decides what is offered.
-    /// If they drift, a tool is either unreachable or ungated — the second being the
+    /// If they drift, a tool is either unreachable or ungated, the second being the
     /// dangerous direction.
     #[test]
     fn the_mutating_list_matches_the_mutating_definitions() {

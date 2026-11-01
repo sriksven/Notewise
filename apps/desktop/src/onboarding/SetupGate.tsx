@@ -2,16 +2,18 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api } from "../lib/api";
-import { bannerProblems, type SetupReadiness } from "./readiness";
+import { bannerProblems, bannerSection, type SetupReadiness } from "./readiness";
 import { SetupBanner } from "./SetupBanner";
 import { SetupFlow } from "./SetupFlow";
 
 /**
  * Asks the app to show its settings screen.
  *
- * A window event because the banner lives outside the app's own tree — the gate wraps it — and
+ * A window event because the banner lives outside the app's own tree (the gate wraps it), and
  * lifting the whole navigation state into the gate to let one button work would put routing in
  * the component whose only job is deciding between the wizard and the app.
+ *
+ * Its `detail` is the page of Settings to open, when the banner knows which one fixes things.
  */
 export const OPEN_SETTINGS_EVENT = "notewise:open-settings";
 
@@ -50,8 +52,8 @@ export function SetupGate({ children }: SetupGateProps) {
     readiness && readiness.completed_at !== null && !dismissed ? bannerProblems(readiness) : [];
   const showing = problems.length > 0;
 
-  // While the banner is up, look again: when the window comes back to the front — which is the
-  // moment after someone has gone and opened Ollama — and every 15 seconds. It used to be read
+  // While the banner is up, look again: when the window comes back to the front, which is the
+  // moment after someone has gone and opened Ollama, and every 15 seconds. It used to be read
   // once at launch, so it went on saying Ollama was down after it had been started.
   useEffect(() => {
     if (!showing) return;
@@ -80,7 +82,13 @@ export function SetupGate({ children }: SetupGateProps) {
     <div className="flex h-full flex-col">
       <SetupBanner
         problems={problems}
-        onOpenSettings={() => window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT))}
+        onOpenSettings={() =>
+          window.dispatchEvent(
+            new CustomEvent(OPEN_SETTINGS_EVENT, {
+              detail: readiness ? bannerSection(readiness) : undefined,
+            }),
+          )
+        }
         onDismiss={() => setDismissed(true)}
       />
       <div className="min-h-0 flex-1">{children}</div>

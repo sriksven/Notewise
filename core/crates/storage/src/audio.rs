@@ -3,25 +3,25 @@
 //! # Why this is off by default, and why that is the whole design
 //!
 //! Retaining audio means holding a recording of other people's voices on disk. Every other
-//! privacy-shaped capability in this engine ships off — voiceprints, acoustic separation, the
-//! `voice_print` columns that exist and are deliberately never written — and this is the most
+//! privacy-shaped capability in this engine ships off: voiceprints, acoustic separation, the
+//! `voice_print` columns that exist and are deliberately never written, and this is the most
 //! sensitive of them. A user who updates must not discover later that the app started keeping
 //! recordings.
 //!
 //! What it buys is two things that are otherwise impossible: hearing the moment a line was said,
 //! and re-transcribing with a better model when the first pass invented something. The second is
-//! the stronger reason — the `eval` crate exists because a real recording came back with four
+//! the stronger reason: the `eval` crate exists because a real recording came back with four
 //! invented segments, and without the audio there is no recourse.
 //!
 //! # Encryption: what this does not claim
 //!
 //! An earlier draft of the design said audio would use "the database's existing at-rest mechanism".
-//! That mechanism is SQLCipher, which encrypts *the database file* — there is no primitive here for
+//! That mechanism is SQLCipher, which encrypts *the database file*; there is no primitive here for
 //! encrypting a separate file, and no key to borrow.
 //!
 //! So retained audio is written in the clear, and the protections are the ones that do not need
 //! cryptography: it is off unless chosen, bounded by a retention window, and really deleted. On a
-//! default install that is consistent with everything else — the database holding the full
+//! default install that is consistent with everything else; the database holding the full
 //! transcript is unencrypted too.
 //!
 //! What is *not* acceptable is silently weakening a choice the user made. If the database was opened
@@ -63,8 +63,8 @@ impl Default for RetentionPolicy {
 
 /// The window used when a user asks for days without saying how many.
 ///
-/// Thirty, because the value of audio decays fast — seek and re-transcription are both used soon
-/// after a meeting — and an unbounded default would quietly consume tens of gigabytes a year.
+/// Thirty, because the value of audio decays fast; seek and re-transcription are both used soon
+/// after a meeting, and an unbounded default would quietly consume tens of gigabytes a year.
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;
 
 impl RetentionPolicy {
@@ -79,7 +79,7 @@ impl RetentionPolicy {
     /// Parse a stored value.
     ///
     /// Anything unrecognised is [`RetentionPolicy::Off`]. A corrupt setting must not be read as
-    /// permission to keep recordings — the safe direction is unambiguous here.
+    /// permission to keep recordings; the safe direction is unambiguous here.
     pub fn parse(raw: &str) -> Self {
         let raw = raw.trim();
         if raw == "until_deleted" {
@@ -114,12 +114,12 @@ pub fn retention_policy(db: &Database) -> RetentionPolicy {
 ///
 /// Refuses to enable retention on an encrypted database. Writing plaintext audio beside an
 /// encrypted transcript would silently undo the protection the user chose, and choosing for them is
-/// not this function's call — so it says no and explains why.
+/// not this function's call, so it says no and explains why.
 pub fn set_retention_policy(db: &Database, policy: RetentionPolicy) -> Result<()> {
     if policy.keeps_anything() && db.is_encrypted() {
         return Err(StorageError::Refused(
             "this workspace is encrypted, and retained audio would be written unencrypted beside \
-             it — which would defeat the encryption. Audio encryption is not implemented."
+             it, which would defeat the encryption. Audio encryption is not implemented."
                 .into(),
         ));
     }
@@ -181,11 +181,11 @@ pub struct ExpiredAudio {
 
 /// Meetings whose audio the policy no longer covers.
 ///
-/// Pure with respect to time — `now` is passed in — so every boundary is testable without waiting.
+/// Pure with respect to time (`now` is passed in) so every boundary is testable without waiting.
 ///
 /// [`RetentionPolicy::UntilDeleted`] returns nothing: those files go when the meeting is purged,
 /// which `MeetingRepository::delete` handles. [`RetentionPolicy::Off`] returns *everything*, because
-/// turning retention off has to clear what was already kept — leaving it would mean a user who
+/// turning retention off has to clear what was already kept; leaving it would mean a user who
 /// switched the feature off still had the recordings.
 pub fn expired(
     db: &Database,
@@ -253,7 +253,7 @@ pub struct SweepReport {
 ///
 /// The file is unlinked *before* the pointer is cleared. A crash between the two leaves a pointer to
 /// a missing file, which reads as "no audio" and is corrected by the next sweep. The other order
-/// would leave a file with no pointer — an orphan nothing will ever clean up, holding a recording
+/// would leave a file with no pointer: an orphan nothing will ever clean up, holding a recording
 /// the user believes is gone.
 pub fn sweep(db: &Database, policy: RetentionPolicy, now: DateTime<Utc>) -> Result<SweepReport> {
     let mut report = SweepReport::default();

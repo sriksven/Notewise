@@ -85,7 +85,7 @@ impl GeminiBackend {
             // A header, never the `?key=` query parameter Gemini also accepts. A URL is not a
             // secret: reqwest writes it into every error it produces ("error sending request for
             // url (…?key=AIza…)"), and those errors are shown to the user and logged at error
-            // level — so a dropped connection used to put the key in both.
+            // level, so a dropped connection used to put the key in both.
             .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
@@ -223,7 +223,7 @@ impl AiBackend for GeminiBackend {
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
         let raw = self
             .send(self.body(
-                "Extract the decisions reached in this meeting — things settled, not tasks. \
+                "Extract the decisions reached in this meeting: things settled, not tasks. \
                  Reply with JSON only: {\"decisions\": [{\"text\": \"...\", \
                  \"reasoning\": \"...\" or null}]}. Return an empty list if nothing was decided.",
                 user_turn(transcript_prompt(input, "")),
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn a_blocked_prompt_deserializes_with_its_reason() {
-        // Arrives as HTTP 200 with no candidates — reading candidates first would
+        // Arrives as HTTP 200 with no candidates; reading candidates first would
         // report this as an empty answer.
         let parsed: GenerateResponse = serde_json::from_value(json!({
             "promptFeedback": { "blockReason": "SAFETY" }

@@ -11,7 +11,7 @@ import { relativeTime } from "../lib/format";
  * propagate rather than sit in a local limbo nothing else can see.
  *
  * Nothing here expires on a timer. A trash that empties itself after thirty days is a deadline
- * a user did not agree to, and this is their own machine — the only thing that destroys
+ * a user did not agree to, and this is their own machine: the only thing that destroys
  * anything is someone pressing the button that says so.
  */
 interface Props {
@@ -19,7 +19,7 @@ interface Props {
    * A meeting came back out of the trash.
    *
    * The library, home and the meeting column all read the window's own meeting list, which this
-   * screen cannot reach — so a restored meeting stayed missing from every one of them until the
+   * screen cannot reach, so a restored meeting stayed missing from every one of them until the
    * window was reloaded, which reads as the restore having failed.
    */
   onMeetingRestored?: () => void;

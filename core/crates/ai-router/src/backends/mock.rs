@@ -1,6 +1,6 @@
 //! Deterministic in-process backend.
 //!
-//! This is not a test fixture that leaked into the public API — it is what keeps the
+//! This is not a test fixture that leaked into the public API; it is what keeps the
 //! `AiBackend` seam testable. Without it, every test touching summarization would need a GPU
 //! or a paid API key, those tests would get skipped, and the boundary would erode. It is also
 //! genuinely useful for UI development and demos with no model available.
@@ -21,7 +21,7 @@ pub struct MockBackend {
     /// Lets callers exercise their own failure handling without a live provider.
     failure: Option<String>,
     /// When set, every method fails with this error instead. Separate from `failure` because
-    /// that one is always `InvalidRequest`, which is not retryable — and a caller testing its
+    /// that one is always `InvalidRequest`, which is not retryable, and a caller testing its
     /// own retry path needs an error that is.
     retryable_status: Option<u16>,
     /// Reported model id. `None` means `"mock"`, so `Default` keeps the historical value and
@@ -53,7 +53,7 @@ impl MockBackend {
     ///
     /// `failing` produces `InvalidRequest`, which `AiError::is_retryable` correctly reports as
     /// not worth retrying. A caller exercising a fallback path needs the opposite, and a 5xx
-    /// `Provider` error is the simplest thing that qualifies — a real `Transport` error would
+    /// `Provider` error is the simplest thing that qualifies; a real `Transport` error would
     /// mean fabricating a `reqwest::Error`, which reqwest gives no way to construct.
     pub fn failing_retryably() -> Self {
         Self {

@@ -8,7 +8,7 @@
 //! The design said a separate `notewise-calendar` crate, on the grounds that `connectors` is
 //! plumbing and this is domain logic. The first half of that is right and the conclusion is not:
 //! `api-server` already depends on `storage` and `graph` and already hosts exactly this kind of
-//! module — `indexing`, `retrieval`, `speakers`, `agent`. A new crate would need both dependencies
+//! module: `indexing`, `retrieval`, `speakers`, `agent`. A new crate would need both dependencies
 //! handed to it for no isolation benefit, which is the argument the scheduled-jobs design already
 //! makes for keeping its scheduler here.
 //!
@@ -188,7 +188,7 @@ fn link_series(db: &Database, report: &mut ReconcileReport) -> ApiResult<()> {
     let graph = Graph::new(db);
 
     // Every linked event that belongs to a recurrence, grouped by its key. This is what replaces
-    // matching a series by title — two standups three months apart are the same series only if the
+    // matching a series by title: two standups three months apart are the same series only if the
     // provider says so.
     for event in calendar.between(
         Utc::now() - Duration::days(365),

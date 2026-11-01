@@ -4,7 +4,7 @@
 //!
 //! The number of speakers in a meeting is not known in advance, which rules out k-means and
 //! anything else that takes `k` as input. Asking the user how many people are in their own
-//! meeting is not an answer either — they will get it wrong when someone joins late, and the
+//! meeting is not an answer either: they will get it wrong when someone joins late, and the
 //! whole transcript is then mislabelled.
 //!
 //! Agglomerative clustering with a **distance threshold** instead of a cluster count is the
@@ -13,7 +13,7 @@
 //!
 //! Distance is cosine, on L2-normalised embeddings, because speaker embedding networks are
 //! trained with angular margin losses (AAM-softmax and relatives). The geometry they learn is
-//! angular — magnitude carries loudness and channel, not identity — so Euclidean distance on
+//! angular (magnitude carries loudness and channel, not identity) so Euclidean distance on
 //! raw embeddings measures partly the wrong thing.
 //!
 //! # Average linkage
@@ -37,7 +37,7 @@ pub struct ClusterConfig {
     /// 0.41 is measured, not borrowed. On CAM++ embeddings of two speakers saying two
     /// utterances each, the worst same-speaker distance was 0.397 and the best
     /// different-speaker distance 0.422; this sits between them. The margin is thin and the
-    /// sample is small, so treat it as a starting point rather than a constant — the
+    /// sample is small, so treat it as a starting point rather than a constant: the
     /// `print_the_distance_matrix` diagnostic in `embedding.rs` regenerates these numbers for
     /// any model or corpus.
     pub threshold: f32,
@@ -45,7 +45,7 @@ pub struct ClusterConfig {
     /// Never produce more than this many speakers.
     ///
     /// A backstop against a noisy recording fragmenting into dozens of "speakers", which is
-    /// worse than useless — it makes the transcript unreadable. Meetings with more than this
+    /// worse than useless: it makes the transcript unreadable. Meetings with more than this
     /// many active speakers exist, but a wrong 12 is more likely than a real 12.
     pub max_speakers: usize,
 
@@ -104,7 +104,7 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
 /// Group embeddings into speakers.
 ///
 /// Returns one cluster index per input, in input order. Indices are assigned by first
-/// appearance, so the first person to speak is always speaker 0 — stable labels matter,
+/// appearance, so the first person to speak is always speaker 0: stable labels matter,
 /// because a transcript whose speaker numbering changes between runs cannot be diffed or
 /// referred to.
 pub fn cluster(embeddings: &[Vec<f32>], config: ClusterConfig) -> Vec<usize> {
@@ -135,7 +135,7 @@ pub fn cluster(embeddings: &[Vec<f32>], config: ClusterConfig) -> Vec<usize> {
 
         let Some((i, j, distance)) = best else { break };
 
-        // Stop when the closest pair no longer looks like one person — unless there are still
+        // Stop when the closest pair no longer looks like one person; unless there are still
         // more clusters than allowed, in which case merging the closest pair is the least-bad
         // way down to the cap.
         if distance >= config.threshold && members.len() <= config.max_speakers {
@@ -273,7 +273,7 @@ mod tests {
         assert!((cosine_distance(&a, &b) - 2.0).abs() < 1e-6);
     }
 
-    /// Cosine must ignore magnitude — that is the whole reason for using it. Loudness and
+    /// Cosine must ignore magnitude: that is the whole reason for using it. Loudness and
     /// channel gain live in the magnitude; identity does not.
     #[test]
     fn distance_ignores_magnitude() {

@@ -6,7 +6,7 @@
 //!
 //! - **Too little audio.** A 300 ms segment does not contain enough of a voice to place it.
 //! - **Two people at once.** An embedding of overlapped speech lands between both speakers and
-//!   belongs to neither, which is worse than having no embedding at all — it pulls two real
+//!   belongs to neither, which is worse than having no embedding at all: it pulls two real
 //!   clusters together.
 //! - **The edges of a turn.** The start and end of a run border silence and hand-offs, and
 //!   carry breath, hesitation, and the tail of whoever spoke before.
@@ -17,7 +17,7 @@
 //!
 //! # Credit
 //!
-//! The approach — merge, subtract overlaps, clip to the middle, rank by duration — is adapted
+//! The approach (merge, subtract overlaps, clip to the middle, rank by duration) is adapted
 //! from the `voiceprint` crate of Hyprnote (<https://github.com/fastrepl/hyprnote>),
 //! Copyright (c) 2023-present Fastrepl, Inc., MIT licensed.
 
@@ -63,7 +63,7 @@ impl Span {
 /// Tuning for [`select_spans`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpanConfig {
-    /// Gaps up to this long do not break a run — when merging is needed at all.
+    /// Gaps up to this long do not break a run, when merging is needed at all.
     ///
     /// Above a within-sentence breath, below a hand-off: the same reasoning as a turn
     /// threshold, but used only to decide what audio to embed together, never to decide who
@@ -99,10 +99,10 @@ impl Default for SpanConfig {
 /// # Merging is only for audio too short to embed
 ///
 /// Close spans merge when at least one of them is shorter than
-/// [`SpanConfig::min_span_ms`] — a breath-split phrase put back together — or when they overlap.
+/// [`SpanConfig::min_span_ms`] (a breath-split phrase put back together) or when they overlap.
 /// Two spans long enough to stand alone are kept apart however small the gap, because nothing
-/// here knows whether the same person said both. Transcription segments abut by construction —
-/// Whisper's tile a buffer, and buffers tile the recording — so merging every close pair joined
+/// here knows whether the same person said both. Transcription segments abut by construction:
+/// Whisper's tile a buffer, and buffers tile the recording, so merging every close pair joined
 /// the whole of a conversation into one run, which was then clipped to its middle ten seconds
 /// and embedded once: two speakers alternating every five seconds came back as one speaker.
 pub fn select_spans(segments: &[Span], config: &SpanConfig) -> Vec<Span> {
@@ -137,7 +137,7 @@ pub fn select_spans(segments: &[Span], config: &SpanConfig) -> Vec<Span> {
 
 /// Remove any part of `span` that another speaker was also talking over.
 ///
-/// Used when attribution is already known from somewhere else — separate channels, say — and
+/// Used when attribution is already known from somewhere else (separate channels, say) and
 /// what is wanted is clean audio per speaker.
 pub fn subtract_overlaps(span: Span, others: &[Span]) -> Vec<Span> {
     let mut pieces = vec![span];
@@ -184,7 +184,7 @@ fn clip_to_middle(span: Span, max_span_ms: i64) -> Span {
 /// Cut a span's samples out of a recording.
 ///
 /// Returns `None` when the span falls outside the audio, which happens if timings and samples
-/// come from different recordings — better caught here than embedded as whatever noise
+/// come from different recordings, better caught here than embedded as whatever noise
 /// happened to be at those indices.
 pub fn samples_for(span: &Span, samples: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
     if sample_rate == 0 {
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!((spans[0].start_ms, spans[0].end_ms), (0, 3_100));
     }
 
-    /// The defect: abutting segments, each long enough to embed, were merged into one run — and a
+    /// The defect: abutting segments, each long enough to embed, were merged into one run, and a
     /// conversation of such segments became one clipped embedding and one speaker.
     #[test]
     fn spans_long_enough_to_embed_are_never_merged_however_close() {

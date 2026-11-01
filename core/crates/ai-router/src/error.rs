@@ -49,7 +49,7 @@ pub enum AiError {
 
     /// The provider returned a well-formed response declining to answer.
     ///
-    /// This is a successful HTTP call, not a transport failure — surfaced separately so
+    /// This is a successful HTTP call, not a transport failure, surfaced separately so
     /// callers can show the user something useful instead of "request failed".
     #[error(
         "{} declined to answer this{}.",
@@ -63,8 +63,8 @@ pub enum AiError {
 
     /// The configured model is not present on the provider.
     ///
-    /// Separate from [`AiError::Provider`] because the raw provider message — "model
-    /// 'llama3.1' not found" — names the problem and not the fix, and the fix is a choice only
+    /// Separate from [`AiError::Provider`] because the raw provider message ("model
+    /// 'llama3.1' not found") names the problem and not the fix, and the fix is a choice only
     /// this error can offer: the backend is the one thing that knows what *is* installed.
     ///
     /// The trap is specific to tags. Ollama resolves a bare `llama3.1` to `llama3.1:latest`,
@@ -168,7 +168,7 @@ fn rejected(backend: &str, status: u16, message: &str) -> String {
         // Anthropic's "overloaded" is a 529, so the whole range rather than a list.
         500..=599 => format!("{who} is having trouble right now. Try again in a minute."),
         // Anything else is most often the provider explaining itself in words meant for a
-        // person — "Your credit balance is too low…", "prompt is too long" — so it is passed on.
+        // person ("Your credit balance is too low…", "prompt is too long") so it is passed on.
         _ => match message.trim() {
             "" => format!("{who} turned the request down."),
             said => format!("{who} turned the request down: {said}"),
@@ -208,7 +208,7 @@ pub type Result<T> = std::result::Result<T, AiError>;
 impl AiError {
     /// Whether retrying the identical request could plausibly succeed.
     ///
-    /// A refusal is deliberately **not** retryable — the same input produces the same
+    /// A refusal is deliberately **not** retryable; the same input produces the same
     /// refusal, so retrying just burns quota.
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -309,7 +309,7 @@ mod tests {
     }
 
     /// The message this rewrite exists for. It read "could not reach the ollama backend: error
-    /// sending request for url (http://localhost:11434/api/chat)" — a URL, not the fix.
+    /// sending request for url (http://localhost:11434/api/chat)": a URL, not the fix.
     #[tokio::test]
     async fn a_stopped_ollama_says_to_open_it() {
         let err = AiError::Transport {

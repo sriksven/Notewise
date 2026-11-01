@@ -5,7 +5,7 @@
 //! At the boundary where a request would leave the machine, and nowhere else. `sync-client` before
 //! it syncs; a hosted-inference backend before it calls out. That is the whole list.
 //!
-//! No local feature has an entitlement check anywhere in its path — not disabled-when-unlicensed,
+//! No local feature has an entitlement check anywhere in its path: not disabled-when-unlicensed,
 //! not degraded, not even *read*. A local feature that reads entitlement state is one refactor away
 //! from depending on it, and the promise being protected is that recording, transcription,
 //! summaries, search and every connector keep working forever regardless of what has been paid.
@@ -17,12 +17,12 @@
 //!
 //! A local-first product has to work on a plane, in a basement, and during our outage. An
 //! entitlement system that fails closed converts our infrastructure problem into the user's lost
-//! afternoon — and it does so for the paid features they are current on, which is the worst possible
+//! afternoon, and it does so for the paid features they are current on, which is the worst possible
 //! moment to be wrong.
 //!
 //! So a cached grant is honoured while it is valid, and for a long grace period after refresh stops
 //! working. Somebody could stay offline to keep Pro past expiry; that is an acceptable loss.
-//! Punishing every honest user for it is not, and the features at stake need our servers anyway —
+//! Punishing every honest user for it is not, and the features at stake need our servers anyway;
 //! sync with nothing to sync to is not much of a theft.
 //!
 //! # Why the capability list is a closed enum
@@ -48,7 +48,7 @@ pub const GRACE: Duration = Duration::days(30);
 
 /// Something the user pays for.
 ///
-/// Every variant is a thing that runs on our infrastructure. That is not a coincidence — it is the
+/// Every variant is a thing that runs on our infrastructure. That is not a coincidence; it is the
 /// rule: anything running on the user's machine is free, so it cannot appear here. A local
 /// capability added to this enum would be a bug visible in review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -131,7 +131,7 @@ impl Entitlements {
 
     /// Verify a grant and hold it.
     ///
-    /// A grant that does not verify is treated as no grant at all — never as active. The failure is
+    /// A grant that does not verify is treated as no grant at all, never as active. The failure is
     /// returned so a caller can log it, but the resulting `Entitlements` is safe either way.
     pub fn verify(signed: &SignedGrant, key: &VerifyingKey) -> Result<Self> {
         let raw = hex::decode(signed.signature.trim())
@@ -179,8 +179,8 @@ impl Entitlements {
 
     /// The state as of `now`.
     ///
-    /// `now` is passed in rather than read here, so every boundary — the day before expiry, the day
-    /// after, the last day of grace — is testable without waiting for it.
+    /// `now` is passed in rather than read here, so every boundary (the day before expiry, the day
+    /// after, the last day of grace) is testable without waiting for it.
     pub fn state_at(&self, now: DateTime<Utc>) -> EntitlementState {
         let Some(grant) = &self.grant else {
             return EntitlementState::Unlicensed;
@@ -207,7 +207,7 @@ impl Entitlements {
 
     /// Whether a paid capability is available as of `now`.
     ///
-    /// True during grace, which is the whole point of grace — see the module docs on failing open.
+    /// True during grace, which is the whole point of grace; see the module docs on failing open.
     pub fn granted_at(&self, capability: PaidCapability, now: DateTime<Utc>) -> bool {
         let Some(grant) = &self.grant else {
             return false;
@@ -351,7 +351,7 @@ mod tests {
         let mut signed = grant(&signing, &[PaidCapability::Sync], at(0), at(30));
 
         // The obvious attack: widen the grant and keep the old signature. Tampering is asserted
-        // rather than assumed — an earlier version of this test "forged" a payload it had not
+        // rather than assumed: an earlier version of this test "forged" a payload it had not
         // actually changed, and passed for the wrong reason.
         let original = signed.payload.clone();
         signed.payload = signed

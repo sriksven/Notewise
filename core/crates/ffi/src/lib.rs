@@ -1,7 +1,7 @@
 //! C ABI over the Notewise engine, for Swift and Kotlin.
 //!
 //! Exists so iOS and Android link the compiled core rather than reimplementing storage and
-//! the graph per platform — three implementations of the same schema is three places for it
+//! the graph per platform; three implementations of the same schema is three places for it
 //! to drift.
 //!
 //! # Contract for callers

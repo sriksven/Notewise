@@ -3,7 +3,7 @@
 //! # Why this is a separate module
 //!
 //! `routes.rs` is already several thousand lines. Routing has its own validation rules, its own
-//! failure modes, and one endpoint whose whole purpose is to be readable by a human — it earns a
+//! failure modes, and one endpoint whose whole purpose is to be readable by a human: it earns a
 //! file.
 //!
 //! # Why the explain endpoint exists
@@ -223,7 +223,7 @@ async fn audio_info(
 /// every seek would read all of it into memory on both sides. With them, the player fetches the few
 /// hundred kilobytes around the moment asked for.
 ///
-/// Only the bytes asked for are read from disk — the file is never loaded whole, whatever the
+/// Only the bytes asked for are read from disk: the file is never loaded whole, whatever the
 /// request.
 async fn serve_audio(
     State(state): State<Shared>,
@@ -311,7 +311,7 @@ fn parse_byte_range(raw: &str, total: u64) -> Option<(u64, u64)> {
     let last = total - 1;
 
     match (from.trim(), to.trim()) {
-        // `bytes=-500` — the final 500 bytes.
+        // `bytes=-500`: the final 500 bytes.
         ("", suffix) => {
             let len: u64 = suffix.parse().ok()?;
             if len == 0 {
@@ -319,7 +319,7 @@ fn parse_byte_range(raw: &str, total: u64) -> Option<(u64, u64)> {
             }
             Some((total.saturating_sub(len), last))
         }
-        // `bytes=500-` — from 500 to the end.
+        // `bytes=500-`: from 500 to the end.
         (start, "") => {
             let start: u64 = start.parse().ok()?;
             (start <= last).then_some((start, last))
@@ -498,7 +498,7 @@ async fn delete_template(
 /// An empty name or prompt is refused here rather than stored.
 ///
 /// A template with no prompt would summarise with an empty instruction, which is not an error the
-/// model reports — it just returns something worse, and the user has no way to tell why.
+/// model reports: it just returns something worse, and the user has no way to tell why.
 fn validated_template(body: &TemplateInput) -> ApiResult<(String, String)> {
     let name = body.name.trim();
     let prompt = body.prompt.trim();
@@ -578,7 +578,7 @@ fn parse_storage_id(raw: &str) -> ApiResult<notewise_storage::Id> {
 #[derive(Debug, Serialize)]
 struct PendingNotification {
     id: String,
-    /// What triggered it, matching `graph::NodeKind` naming — `meeting`, `action_item`, and so on.
+    /// What triggered it, matching `graph::NodeKind` naming: `meeting`, `action_item`, and so on.
     ///
     /// A `Notification` has no title field, and inventing one here would mean this endpoint
     /// deciding wording that belongs to whatever displays it. The kind plus the body is what the
@@ -598,7 +598,7 @@ struct PendingNotification {
 /// notification, and `apps/desktop/src-tauri` is excluded from the workspace on purpose so engine
 /// CI never pulls a GUI toolchain.
 ///
-/// So the split is the same one `connector_outbox` already uses — the engine decides *that*
+/// So the split is the same one `connector_outbox` already uses: the engine decides *that*
 /// something should be delivered, and the surface that can actually deliver it drains the queue
 /// and says so. Here that surface is the frontend, using the browser notification API, which works
 /// in the Tauri webview and in a browser. That also makes it testable, which a Tauri-only plugin
@@ -627,7 +627,7 @@ async fn pending_notifications(
 /// Record that a notification was actually shown.
 ///
 /// Called by whoever displayed it, not by whoever queued it. A row marked delivered before anything
-/// appeared would be a queue that silently drops things — the failure mode hardest to notice,
+/// appeared would be a queue that silently drops things, the failure mode hardest to notice,
 /// because the evidence is the absence of a notification nobody was expecting.
 async fn mark_delivered(
     State(state): State<Shared>,
@@ -672,7 +672,7 @@ struct MergeResponse {
 /// Fold another workspace into this one, or report what that would move.
 ///
 /// `dry_run` defaults to true. This is the only endpoint here that changes a user's data in a way
-/// nothing else undoes, and a caller that omits a field should get the harmless behaviour — the
+/// nothing else undoes, and a caller that omits a field should get the harmless behaviour: the
 /// opposite default would make a forgotten parameter destructive.
 async fn merge_workspace(
     State(state): State<Shared>,
@@ -840,7 +840,7 @@ struct ExplainResponse {
 
 /// Where a request with these characteristics would go, and why.
 ///
-/// A dry run. Nothing is sent to any provider — the whole point is to answer the cost question
+/// A dry run. Nothing is sent to any provider: the whole point is to answer the cost question
 /// without incurring the cost.
 async fn explain(
     State(state): State<Shared>,
@@ -902,7 +902,7 @@ struct InstallDefaultBody {
 ///
 /// Offered as an action rather than seeded automatically. Seeding it at first launch would mean a
 /// fresh install silently acquiring a rule that sends transcripts to a provider the user has not
-/// chosen — and with no cloud backend configured the rules would collapse to local anyway, so it
+/// chosen, and with no cloud backend configured the rules would collapse to local anyway, so it
 /// would be a no-op that only confuses the settings page.
 async fn install_default(
     State(state): State<Shared>,
@@ -931,7 +931,7 @@ async fn install_default(
     }];
 
     // One rule, not two. The spec described "summaries to quality, everything else local", and the
-    // second half is what the default backend already does — expressing it as a catch-all rule
+    // second half is what the default backend already does: expressing it as a catch-all rule
     // would add something that can never change the outcome and would make every later rule
     // unreachable.
     put_rules(State(state), Json(PutRulesBody { rules })).await
@@ -1135,7 +1135,7 @@ mod tests {
         assert_eq!(parse_byte_range("bytes=500-", total), Some((500, 999)));
         // Suffix: the last N bytes.
         assert_eq!(parse_byte_range("bytes=-100", total), Some((900, 999)));
-        // Past the end is clamped, not refused — every browser asks for this on the last chunk.
+        // Past the end is clamped, not refused: every browser asks for this on the last chunk.
         assert_eq!(parse_byte_range("bytes=900-5000", total), Some((900, 999)));
         assert_eq!(parse_byte_range("bytes=0-0", total), Some((0, 0)));
 
@@ -1347,7 +1347,7 @@ mod tests {
         }
     }
 
-    /// `off` is a real policy and must be accepted — it is how a user turns the feature back off.
+    /// `off` is a real policy and must be accepted: it is how a user turns the feature back off.
     #[tokio::test]
     async fn off_is_accepted_and_sweeps() {
         let app = app();
@@ -1428,7 +1428,7 @@ mod tests {
         assert_eq!(after.as_array().expect("array").len(), 3);
     }
 
-    /// An empty prompt is not an error the model reports — it just answers worse, and the user has
+    /// An empty prompt is not an error the model reports: it just answers worse, and the user has
     /// no way to tell why.
     #[tokio::test]
     async fn a_template_with_no_prompt_or_no_name_is_refused() {
@@ -1459,7 +1459,7 @@ mod tests {
         .await;
 
         // The status, not just "not OK". `assert_ne!(status, OK)` is what this said, and a 500
-        // satisfies it — which is exactly what the endpoint returned until `StorageError::Refused`
+        // satisfies it, which is exactly what the endpoint returned until `StorageError::Refused`
         // was mapped. A refusal the product intends has to be a 4xx, or callers cannot tell a rule
         // from an outage and the message gets logged as a server fault.
         assert_eq!(status, StatusCode::CONFLICT, "{body}");

@@ -11,12 +11,12 @@
 //!
 //! So embedding is its own thing and it is local-only. There is no hosted embedder and no
 //! configuration that would produce one. If Ollama is not running, the workspace is not
-//! embedded and search stays lexical — a degradation, not a prompt to send data somewhere.
+//! embedded and search stays lexical: a degradation, not a prompt to send data somewhere.
 //!
 //! # Why the model name travels with every vector
 //!
 //! Cosine distance between vectors from two different models is not a small error, it is
-//! meaningless — and the bytes do not say which model produced them. Without recording it, a
+//! meaningless, and the bytes do not say which model produced them. Without recording it, a
 //! user switching from `nomic-embed-text` to `bge-m3` gets confident nonsense rather than an
 //! obvious failure. [`Embedder::model`] is stored alongside every vector and checked before
 //! anything is compared.
@@ -40,7 +40,7 @@ const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/embed";
 /// pulled is not a default, it is a failure with an extra step.
 ///
 /// Untagged, and therefore a *family* rather than a model. Ollama expands a bare name to
-/// `:latest`, so sending this string unchanged asserts the user pulled that exact tag — true
+/// `:latest`, so sending this string unchanged asserts the user pulled that exact tag: true
 /// on most machines and false on any that pulled a pinned version. [`Embedder::available`]
 /// already answered the question by family; the request did not, so the two could disagree
 /// about the same daemon. Resolution happens in [`Embedder::wire_model`].
@@ -72,7 +72,7 @@ pub fn is_embedding_model(tag: &str) -> bool {
 /// The task prefixes a model expects, as `(query, document)`.
 ///
 /// Several embedding models are trained with an instruction prefix that tells them whether the
-/// text is a search query or a document being indexed, and they are *asymmetric* — the two get
+/// text is a search query or a document being indexed, and they are *asymmetric*; the two get
 /// different prefixes on purpose, because a question and the passage answering it do not look
 /// alike. Omitting them does not fail; it just uses the model off-distribution and returns
 /// worse-calibrated similarities.
@@ -121,7 +121,7 @@ impl Embedder {
     ///
     /// # Why this is async, and why that is the whole point
     ///
-    /// Resolution has to ask the daemon. Doing it lazily — on the first embed — means
+    /// Resolution has to ask the daemon. Doing it lazily (on the first embed) means
     /// [`Self::model`] returns one thing before a request and another after, and since that value
     /// both labels stored vectors *and* decides which chunks are still pending, the label written
     /// would stop matching the label queried and every run would re-embed the workspace.
@@ -129,7 +129,7 @@ impl Embedder {
     /// Resolving at construction removes the flip-flop instead of working around it: the value is
     /// fixed before anything can read it, and stays fixed for this embedder's lifetime.
     ///
-    /// If the daemon cannot be reached the requested name is kept, which is stable too — and
+    /// If the daemon cannot be reached the requested name is kept, which is stable too, and
     /// embedding needs the daemon anyway, so nothing gets stored under the wrong label.
     pub async fn connect(model: impl Into<String>) -> Self {
         Self::new(model).resolved().await
@@ -137,7 +137,7 @@ impl Embedder {
 
     /// Resolve this embedder's tag against the daemon it points at.
     ///
-    /// A method rather than a second constructor so it composes with [`Self::with_endpoint`] —
+    /// A method rather than a second constructor so it composes with [`Self::with_endpoint`];
     /// `Embedder::new(m).with_endpoint(url).resolved().await` resolves against *that* daemon.
     /// A `connect(model, endpoint)` constructor would have had to grow a parameter for every
     /// builder method that already exists.
@@ -200,7 +200,7 @@ impl Embedder {
     /// the batch, so this is also where most of the speed comes from.
     ///
     /// Returns vectors in the same order as `texts`, and errors if the daemon returns a
-    /// different number than were asked for — a mismatched batch would silently attach each
+    /// different number than were asked for; a mismatched batch would silently attach each
     /// vector to the wrong chunk, which is worse than failing.
     pub async fn embed_documents(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let (_, prefix) = prefixes(&self.model);
@@ -368,8 +368,8 @@ struct TagEntry {
 /// Cosine similarity, in `[-1, 1]`.
 ///
 /// Returns 0 for a length mismatch or a zero vector rather than `NaN`. Both are real
-/// possibilities — the first when vectors from two models are compared despite the model
-/// check, the second from a degenerate embedding — and a `NaN` propagates silently through a
+/// possibilities: the first when vectors from two models are compared despite the model
+/// check, the second from a degenerate embedding, and a `NaN` propagates silently through a
 /// sort into an arbitrary ranking, while a 0 simply ranks last.
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
@@ -402,7 +402,7 @@ mod tests {
     /// names stored vectors *and* decides which chunks are pending, so a value that moved would
     /// make the label written stop matching the label queried, forever.
     ///
-    /// The property is *stability*, not which name is used — which is why resolving eagerly in
+    /// The property is *stability*, not which name is used, which is why resolving eagerly in
     /// `connect` is safe and resolving lazily was not.
     #[test]
     fn an_unresolved_embedder_keeps_the_name_it_was_given() {
@@ -500,7 +500,7 @@ mod tests {
         assert!(!is_embedding_model(""));
     }
 
-    /// Getting these backwards is silent — retrieval simply gets worse — so they are asserted
+    /// Getting these backwards is silent (retrieval simply gets worse) so they are asserted
     /// rather than trusted.
     #[test]
     fn nomic_gets_its_asymmetric_task_prefixes() {

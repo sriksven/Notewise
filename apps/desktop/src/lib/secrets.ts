@@ -2,7 +2,7 @@
  * Reading credentials out of a text box.
  *
  * A stdio MCP server takes environment variables and an HTTP one takes headers, and those are
- * written differently everywhere else in the world — `KEY=value` in a shell, `Name: value` on the
+ * written differently everywhere else in the world: `KEY=value` in a shell, `Name: value` on the
  * wire. Making someone translate one into the other is a way to get it wrong silently, so both are
  * accepted and the shape is inferred per line.
  *
@@ -13,7 +13,7 @@
  * Parse `KEY=value` or `Name: value` lines into an object.
  *
  * Blank lines and `#` comments are skipped. A line with no separator, or one starting with the
- * separator, is skipped rather than producing an empty key — a credential stored under `""` is a
+ * separator, is skipped rather than producing an empty key: a credential stored under `""` is a
  * credential nobody can find again.
  */
 export function parseSecrets(text: string): Record<string, string> {

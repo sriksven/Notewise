@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the seam every external service hides behind — direction-split connector traits with an idempotent delivery outbox — plus two local sinks that prove it works without an OAuth app.
+**Goal:** Build the seam every external service hides behind: direction-split connector traits with an idempotent delivery outbox, plus two local sinks that prove it works without an OAuth app.
 
 **Architecture:** A new MIT crate `core/crates/connectors` depends on `storage` and `graph` and on no surface. `SourceConnector` pulls, `SinkConnector` pushes; capability is which trait you implement, not a runtime flag. Outbound work is enqueued to a `connector_outbox` table with an idempotency key, drained by a `Dispatcher` that classifies failures into retry, backoff, or dead-letter, and records results as `ExternalItem` nodes joined by `SyncedTo` edges.
 
@@ -14,7 +14,7 @@
 > `git commit -m "..." -- <paths>`, with the paths repeated after `--`. That is not
 > redundancy. `git add <paths>` scopes only the *index*; a bare `git commit` then commits
 > the entire index, including anything another session happened to have staged at that
-> moment. Scoping the `add` is not enough — the index is shared state even when the paths
+> moment. Scoping the `add` is not enough; the index is shared state even when the paths
 > are not. This has already happened once on this branch in the other direction, sweeping
 > four half-written files of ours into an unrelated commit.
 
@@ -22,7 +22,7 @@
 
 ## File Structure
 
-**`core/crates/storage/`** — owns SQL, per rule 3.
+**`core/crates/storage/`**: owns SQL, per rule 3.
 
 | File | Responsibility |
 |---|---|
@@ -38,7 +38,7 @@
 |---|---|
 | `src/kinds.rs` | `NodeKind::ExternalItem`, `EdgeKind::SyncedTo` |
 
-**`core/crates/connectors/`** — new crate.
+**`core/crates/connectors/`**: new crate.
 
 | File | Responsibility |
 |---|---|
@@ -115,14 +115,14 @@ Add to the `tests` module at the bottom of `core/crates/storage/src/migrations.r
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-storage v5_creates_connector_tables`
-Expected: FAIL — `missing table external_items`
+Expected: FAIL, `missing table external_items`
 
 - [ ] **Step 3: Append migration v5**
 
-Append to the `MIGRATIONS` array in `core/crates/storage/src/migrations.rs`, after the v3 entry. Migrations are append-only — do not edit v1–v3. `SUPPORTED_VERSION` derives from `MIGRATIONS.len()`, so it updates itself.
+Append to the `MIGRATIONS` array in `core/crates/storage/src/migrations.rs`, after the v3 entry. Migrations are append-only; do not edit v1-v3. `SUPPORTED_VERSION` derives from `MIGRATIONS.len()`, so it updates itself.
 
 ```rust
-    // v5 — the connector seam: external artifact records, per-connector account state, and
+    // v5, the connector seam: external artifact records, per-connector account state, and
     // the outbound delivery queue. No tokens live here; credentials go to the OS keychain.
     r#"
     CREATE TABLE external_items (
@@ -272,7 +272,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-storage external_item`
-Expected: FAIL to compile — `cannot find type ExternalItemRepository`
+Expected: FAIL to compile, `cannot find type ExternalItemRepository`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -281,7 +281,7 @@ Prepend to `core/crates/storage/src/repositories/external_item.rs`:
 ```rust
 //! Records of artifacts that live in another system.
 //!
-//! An external item is owned by nothing in Notewise — it is a record of a thing elsewhere.
+//! An external item is owned by nothing in Notewise; it is a record of a thing elsewhere.
 //! So it carries no owning foreign key; association to a meeting or action item is a
 //! `synced_to` edge in the `graph` crate. Identity is `(connector_id, external_id)`, which
 //! is what makes re-pushing update a ticket rather than file a second one.
@@ -414,7 +414,7 @@ pub use external_item::{ExternalItem, ExternalItemRepository, NewExternalItem};
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-storage external_item`
-Expected: PASS — 3 tests.
+Expected: PASS, 3 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -517,7 +517,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-storage connector_account`
-Expected: FAIL to compile — `cannot find type ConnectorAccountRepository`
+Expected: FAIL to compile, `cannot find type ConnectorAccountRepository`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -695,7 +695,7 @@ pub use connector_account::{AccountStatus, ConnectorAccount, ConnectorAccountRep
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-storage connector_account`
-Expected: PASS — 5 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -706,7 +706,7 @@ git commit -m "feat(storage): add the connector account repository"
 
 ---
 
-## Task 4: OutboxRepository — enqueue and idempotency
+## Task 4: OutboxRepository - enqueue and idempotency
 
 **Files:**
 - Create: `core/crates/storage/src/repositories/outbox.rs`
@@ -779,7 +779,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-storage outbox`
-Expected: FAIL to compile — `cannot find type OutboxRepository`
+Expected: FAIL to compile, `cannot find type OutboxRepository`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -877,7 +877,7 @@ impl<'a> OutboxRepository<'a> {
     /// Queue a delivery, or return the existing row for this idempotency key.
     ///
     /// Returning the existing row rather than erroring is what lets a caller re-enqueue
-    /// freely — re-summarizing a meeting should not double-post it.
+    /// freely: re-summarizing a meeting should not double-post it.
     pub fn enqueue(&self, new: NewOutboxEntry) -> Result<OutboxRecord> {
         if let Some(existing) = self.find_by_key(&new.idempotency_key)? {
             return Ok(existing);
@@ -950,7 +950,7 @@ pub use outbox::{NewOutboxEntry, OutboxRecord, OutboxRepository, OutboxStatus};
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-storage outbox`
-Expected: PASS — 3 tests.
+Expected: PASS, 3 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -961,7 +961,7 @@ git commit -m "feat(storage): add outbox enqueue with idempotency"
 
 ---
 
-## Task 5: OutboxRepository — claim, complete, fail
+## Task 5: OutboxRepository - claim, complete, fail
 
 **Files:**
 - Modify: `core/crates/storage/src/repositories/outbox.rs`
@@ -1065,7 +1065,7 @@ Add to the `tests` module in `core/crates/storage/src/repositories/outbox.rs`:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-storage outbox`
-Expected: FAIL to compile — `no method named claim_ready`
+Expected: FAIL to compile, `no method named claim_ready`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -1177,7 +1177,7 @@ Widen the chrono import at the top of `core/crates/storage/src/repositories/outb
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-storage outbox`
-Expected: PASS — 9 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1215,7 +1215,7 @@ In the `tests` module of `core/crates/graph/src/kinds.rs`, change the two assert
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-graph kinds`
-Expected: FAIL — `no variant named ExternalItem found for enum NodeKind`
+Expected: FAIL, `no variant named ExternalItem found for enum NodeKind`
 
 - [ ] **Step 3: Add the variants**
 
@@ -1224,7 +1224,7 @@ In `core/crates/graph/src/kinds.rs`, make four edits.
 Add to the `NodeKind` enum after `Notification`:
 
 ```rust
-    /// An artifact that lives in another system — a Linear issue, a calendar event, a file
+    /// An artifact that lives in another system: a Linear issue, a calendar event, a file
     /// in a user's vault. Notewise records it but does not own it.
     ExternalItem,
 ```
@@ -1251,7 +1251,7 @@ Add `EdgeKind::SyncedTo,` to the end of `EdgeKind::ALL`, and this arm to `EdgeKi
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-graph`
-Expected: PASS — including the existing round-trip and uniqueness tests, which now cover the new variants automatically.
+Expected: PASS, including the existing round-trip and uniqueness tests, which now cover the new variants automatically.
 
 - [ ] **Step 5: Commit**
 
@@ -1262,7 +1262,7 @@ git commit -m "feat(graph): add external_item nodes and synced_to edges"
 
 ---
 
-## Task 7: The connectors crate — errors and types
+## Task 7: The connectors crate - errors and types
 
 **Files:**
 - Create: `core/crates/connectors/Cargo.toml`
@@ -1348,7 +1348,7 @@ mod tests {
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors`
-Expected: FAIL — the crate has no `lib.rs` yet.
+Expected: FAIL; the crate has no `lib.rs` yet.
 
 - [ ] **Step 4: Write the error type**
 
@@ -1539,8 +1539,8 @@ Create `core/crates/connectors/src/lib.rs`:
 ```rust
 //! The connector seam.
 //!
-//! Every external service — a markdown vault, a webhook receiver, a calendar, a ticket
-//! tracker — reaches Notewise through the traits in this crate. Nothing above it imports a
+//! Every external service (a markdown vault, a webhook receiver, a calendar, a ticket
+//! tracker) reaches Notewise through the traits in this crate. Nothing above it imports a
 //! vendor SDK, for the same reason nothing above `notewise-ai-router` imports a model SDK.
 //!
 //! # Direction is a type, not a flag
@@ -1577,12 +1577,12 @@ pub use sinks::{MockConnector, VaultSink, WebhookSink};
 pub use types::{Cursor, ExternalRef, Health, Inbound, Operation, Outbound, PullBatch};
 ```
 
-The modules referenced here are created in Tasks 8–13. Until then the crate will not compile — that is expected; Step 7 runs only the error tests once `connector.rs`, `credentials.rs`, `keychain.rs`, `registry.rs`, `dispatcher.rs`, and `sinks/` exist. To keep this task independently verifiable, temporarily comment out every `mod` and `pub use` line except `error`, `types`, and their re-exports, then uncomment each as its task lands.
+The modules referenced here are created in Tasks 8-13. Until then the crate will not compile, which is expected; Step 7 runs only the error tests once `connector.rs`, `credentials.rs`, `keychain.rs`, `registry.rs`, `dispatcher.rs`, and `sinks/` exist. To keep this task independently verifiable, temporarily comment out every `mod` and `pub use` line except `error`, `types`, and their re-exports, then uncomment each as its task lands.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors error`
-Expected: PASS — 4 tests.
+Expected: PASS, 4 tests.
 
 - [ ] **Step 8: Commit**
 
@@ -1655,7 +1655,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors mock`
-Expected: FAIL to compile — `cannot find type MockConnector`
+Expected: FAIL to compile, `cannot find type MockConnector`
 
 - [ ] **Step 3: Write the traits**
 
@@ -1671,7 +1671,7 @@ use crate::types::{Cursor, ExternalRef, Health, Outbound, PullBatch};
 
 /// What every connector has, regardless of direction.
 ///
-/// `Send + Sync` so one instance can be shared across the async runtime — the dispatcher
+/// `Send + Sync` so one instance can be shared across the async runtime; the dispatcher
 /// holds a registry and drains several connectors concurrently.
 #[async_trait]
 pub trait Connector: Send + Sync + std::fmt::Debug {
@@ -1701,7 +1701,7 @@ pub trait SourceConnector: Connector {
 #[async_trait]
 pub trait SinkConnector: Connector {
     /// Deliver one unit of work. Implementations must treat `outbound.existing`
-    /// as "this was already pushed — update it" rather than creating a second artifact.
+    /// as "this was already pushed: update it" rather than creating a second artifact.
     async fn push(&self, outbound: &Outbound) -> Result<ExternalRef>;
 }
 ```
@@ -1812,12 +1812,12 @@ mod mock;
 pub use mock::MockConnector;
 ```
 
-Uncomment `mod connector;`, `mod sinks;`, and their `pub use` lines in `lib.rs` — but leave `VaultSink` and `WebhookSink` out of the `sinks` re-export until Tasks 12 and 13.
+Uncomment `mod connector;`, `mod sinks;`, and their `pub use` lines in `lib.rs`, but leave `VaultSink` and `WebhookSink` out of the `sinks` re-export until Tasks 12 and 13.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors mock`
-Expected: PASS — 3 tests.
+Expected: PASS, 3 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1828,7 +1828,7 @@ git commit -m "feat(connectors): add the Connector traits and a mock sink"
 
 ---
 
-## Task 9: Credentials — Secret, CredentialStore, MemoryStore
+## Task 9: Credentials - Secret, CredentialStore, MemoryStore
 
 **Files:**
 - Create: `core/crates/connectors/src/credentials.rs`
@@ -1898,7 +1898,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors credentials`
-Expected: FAIL to compile — `cannot find type Secret`
+Expected: FAIL to compile, `cannot find type Secret`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -1909,7 +1909,7 @@ Prepend to `core/crates/connectors/src/credentials.rs`:
 //!
 //! A long-lived refresh token has a different risk profile from a meeting summary: it grants
 //! standing access to someone's calendar or tracker, and it is exactly the kind of value that
-//! ends up inside a support bundle. So credentials do not go in the database — they go behind
+//! ends up inside a support bundle. So credentials do not go in the database; they go behind
 //! this trait, whose production implementation is the OS keychain.
 
 use std::collections::HashMap;
@@ -1990,7 +1990,7 @@ Uncomment `mod credentials;` and its `pub use` line in `lib.rs`.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors credentials`
-Expected: PASS — 5 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2041,7 +2041,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors keychain`
-Expected: FAIL to compile — `cannot find type KeychainStore`
+Expected: FAIL to compile, `cannot find type KeychainStore`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2051,7 +2051,7 @@ Prepend to `core/crates/connectors/src/keychain.rs`:
 //! `CredentialStore` over the platform keychain.
 //!
 //! macOS Keychain, Windows Credential Manager, and Secret Service on Linux, via the
-//! `keyring` crate. A missing entry is `Ok(None)` rather than an error — "not connected yet"
+//! `keyring` crate. A missing entry is `Ok(None)` rather than an error: "not connected yet"
 //! is the normal state for most connectors, not a failure.
 
 use keyring::Entry;
@@ -2110,7 +2110,7 @@ Uncomment `mod keychain;` and its `pub use` line in `lib.rs`.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors keychain`
-Expected: PASS — 1 passed, 1 ignored. The ignored test must state its reason; a green CI run must not imply the real keychain was exercised.
+Expected: PASS, 1 passed, 1 ignored. The ignored test must state its reason; a green CI run must not imply the real keychain was exercised.
 
 - [ ] **Step 5: Commit**
 
@@ -2168,7 +2168,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors registry`
-Expected: FAIL to compile — `cannot find type ConnectorRegistry`
+Expected: FAIL to compile, `cannot find type ConnectorRegistry`
 
 - [ ] **Step 3: Write the registry**
 
@@ -2185,7 +2185,7 @@ use crate::error::{ConnectorError, Result};
 
 /// The set of connectors available to the dispatcher and the surfaces.
 ///
-/// `BTreeMap` rather than `HashMap` so `sink_ids()` is stable — a UI listing connectors in
+/// `BTreeMap` rather than `HashMap` so `sink_ids()` is stable: a UI listing connectors in
 /// a different order on every launch is a bug report waiting to happen.
 #[derive(Debug, Default)]
 pub struct ConnectorRegistry {
@@ -2317,7 +2317,7 @@ mod tests {
 
         dispatcher.drain(&db).await.unwrap();
 
-        // A genuinely new enqueue for the same node — not a retry.
+        // A genuinely new enqueue for the same node, not a retry.
         queued(&db, node_id, "k2");
         dispatcher.drain(&db).await.unwrap();
 
@@ -2408,7 +2408,7 @@ mod tests {
 - [ ] **Step 5: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors dispatcher`
-Expected: FAIL to compile — `cannot find type Dispatcher`
+Expected: FAIL to compile, `cannot find type Dispatcher`
 
 - [ ] **Step 6: Write the dispatcher**
 
@@ -2419,7 +2419,7 @@ Prepend to `core/crates/connectors/src/dispatcher.rs`:
 //!
 //! The dispatcher is the only thing that calls a sink. It classifies each failure into
 //! retry-with-backoff or dead-letter, and on success records the resulting artifact as an
-//! `external_item` joined to its source node by a `synced_to` edge — so a pushed action item
+//! `external_item` joined to its source node by a `synced_to` edge, so a pushed action item
 //! is reachable from `find_related` rather than through a connector-specific lookup.
 
 use chrono::{Duration, Utc};
@@ -2496,7 +2496,7 @@ impl Dispatcher {
 
     /// Claim and deliver one batch.
     ///
-    /// Returns `Ok` even when individual deliveries fail — a failed push is recorded on its
+    /// Returns `Ok` even when individual deliveries fail; a failed push is recorded on its
     /// row, not propagated, because one broken connector must not stop the others.
     pub async fn drain(&self, db: &Database) -> Result<DispatchReport> {
         let claimed = OutboxRepository::new(db)
@@ -2546,7 +2546,7 @@ impl Dispatcher {
     /// The artifact this node already has in this connector, if any.
     ///
     /// Without this, `Outbound::existing` would always be `None` and a second push would file
-    /// a second ticket — the exact failure the outbox exists to prevent, reintroduced one
+    /// a second ticket, the exact failure the outbox exists to prevent, reintroduced one
     /// layer up. The outbox stops a *retry* from duplicating; this stops a genuinely new
     /// enqueue for an already-synced node from duplicating.
     fn existing_ref(
@@ -2636,7 +2636,7 @@ Uncomment `mod registry;`, `mod dispatcher;`, and their `pub use` lines in `lib.
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors`
-Expected: PASS — registry 3 tests, dispatcher 7 tests, plus earlier tasks'.
+Expected: PASS, registry 3 tests, dispatcher 7 tests, plus earlier tasks'.
 
 - [ ] **Step 8: Commit**
 
@@ -2739,7 +2739,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors vault`
-Expected: FAIL to compile — `cannot find type VaultSink`
+Expected: FAIL to compile, `cannot find type VaultSink`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2867,7 +2867,7 @@ In `core/crates/connectors/src/sinks/mod.rs`, add `mod vault;` and `pub use vaul
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors vault`
-Expected: PASS — 6 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3010,7 +3010,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors webhook`
-Expected: FAIL to compile — `cannot find type WebhookSink`
+Expected: FAIL to compile, `cannot find type WebhookSink`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -3019,7 +3019,7 @@ Prepend to `core/crates/connectors/src/sinks/webhook.rs`:
 ```rust
 //! POST Notewise events to a URL the user controls.
 //!
-//! One connector that covers the automation long tail — Zapier, Make, n8n, or a script —
+//! One connector that covers the automation long tail (Zapier, Make, n8n, or a script)
 //! without a bespoke integration per destination.
 //!
 //! Deliveries are signed with HMAC-SHA256 over the raw body. A receiver otherwise has no way
@@ -3148,7 +3148,7 @@ In `core/crates/connectors/src/sinks/mod.rs`, add `mod webhook;` and `pub use we
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors webhook`
-Expected: PASS — 7 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Run the full workspace check**
 
@@ -3223,7 +3223,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-api-server connectors`
-Expected: FAIL to compile — `cannot find function describe_connectors`
+Expected: FAIL to compile, `cannot find function describe_connectors`
 
 - [ ] **Step 3: Write the handlers**
 
@@ -3234,7 +3234,7 @@ Prepend to `core/crates/api-server/src/connectors.rs`:
 ```rust
 //! Connector status and outbox inspection.
 //!
-//! Read-only. Connecting an account is a separate, deliberate flow — this surface exists so a
+//! Read-only. Connecting an account is a separate, deliberate flow; this surface exists so a
 //! user can see what is configured and what failed to deliver, because a queue whose failures
 //! are invisible is worse than no queue.
 
@@ -3314,14 +3314,14 @@ pub async fn list_failed_deliveries(
 ```
 
 `ApiResult` and the `StorageError` conversion already exist in
-`core/crates/api-server/src/error.rs` — the `?` above needs no new `From` impl.
+`core/crates/api-server/src/error.rs`: the `?` above needs no new `From` impl.
 
 > **Do not hold the database guard across an `.await`.** `Database` is `Send` but not
 > `Sync`, so a handler that keeps the `state.db().await` guard alive across any subsequent
 > `.await` produces a non-`Send` future, and axum rejects it with an opaque
 > `the trait bound `Handler<_, _>` is not satisfied` that points at the route, not the
 > cause. Every handler in Tasks 14 and 15 is written so the guard is only held across
-> synchronous calls — keep it that way. If you need to await something, drop the guard
+> synchronous calls. Keep it that way. If you need to await something, drop the guard
 > first or split the async part out from the synchronous apply.
 
 - [ ] **Step 4: Hold the registry in AppState**
@@ -3355,7 +3355,7 @@ And add the accessors:
             .clone()
     }
 
-    /// Replace the registry — used when a connector is connected or disconnected.
+    /// Replace the registry, used when a connector is connected or disconnected.
     pub fn set_connectors(&self, registry: notewise_connectors::ConnectorRegistry) {
         *self
             .connectors
@@ -3379,7 +3379,7 @@ In `core/crates/api-server/src/routes.rs`, add `mod connectors;` to the crate ro
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-api-server connectors`
-Expected: PASS — 2 tests.
+Expected: PASS, 2 tests.
 
 - [ ] **Step 7: Full workspace verification**
 
@@ -3486,7 +3486,7 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p notewise-connectors config`
-Expected: FAIL to compile — `cannot find function build_registry`
+Expected: FAIL to compile, `cannot find function build_registry`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -3516,7 +3516,7 @@ pub const SIGNING_KEY: &str = "signing_secret";
 
 /// A fresh shared secret for signing webhook deliveries.
 ///
-/// Two v4 UUIDs, hex, for 244 bits of entropy — well past what an HMAC key needs, and it
+/// Two v4 UUIDs, hex, for 244 bits of entropy, well past what an HMAC key needs, and it
 /// avoids taking a dependency on an RNG crate for one call site.
 pub fn generate_signing_secret() -> Secret {
     Secret::new(format!(
@@ -3571,7 +3571,7 @@ pub use config::{build_registry, generate_signing_secret, SIGNING_KEY};
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-connectors config`
-Expected: PASS — 6 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Write the failing handler test**
 
@@ -3633,7 +3633,7 @@ Add to the `tests` module in `core/crates/api-server/src/connectors.rs`:
 - [ ] **Step 6: Run test to verify it fails**
 
 Run: `cargo test -p notewise-api-server connectors`
-Expected: FAIL to compile — `cannot find function apply_connect`
+Expected: FAIL to compile, `cannot find function apply_connect`
 
 - [ ] **Step 7: Write the handlers**
 
@@ -3656,7 +3656,7 @@ pub struct ConnectRequest {
 #[derive(Debug, Serialize)]
 pub struct ConnectResponse {
     pub id: String,
-    /// Returned exactly once, at connect time. Notewise cannot show it again — it lives in
+    /// Returned exactly once, at connect time. Notewise cannot show it again; it lives in
     /// the OS keychain, and a receiver that loses it must reconnect to get a new one.
     pub signing_secret: Option<String>,
 }
@@ -3756,7 +3756,7 @@ Register it **after** `/v1/connectors/failures`, so the literal path is matched 
 - [ ] **Step 9: Run tests to verify they pass**
 
 Run: `cargo test -p notewise-api-server connectors`
-Expected: PASS — 5 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 10: Full workspace verification**
 

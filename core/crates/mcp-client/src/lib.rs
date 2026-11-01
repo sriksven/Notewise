@@ -11,8 +11,8 @@
 //!
 //! There is no auto-execute, no "always allow this tool", and no batch execute. An external tool can
 //! send a message, file a ticket, or charge a card, and nothing here can tell which. So the gate
-//! moves from "which tools are safe" — which is what `MUTATING_TOOLS` can be, for a list somebody
-//! wrote — to "a person looked at this call."
+//! moves from "which tools are safe", which is what `MUTATING_TOOLS` can be, for a list somebody
+//! wrote, to "a person looked at this call."
 //!
 //! A remembered per-tool allow would collapse into auto-execute within a week of use, which is why
 //! it is absent rather than defaulted off. The product has no send path anywhere by design, and this
@@ -25,7 +25,7 @@
 //! JSON-RPC to a real server over stdio or streamable HTTP.
 //!
 //! Persistence is not here. This crate manages child processes and a protocol; what was proposed,
-//! confirmed, and returned is the caller's to store — and `api-server` does store it, because the
+//! confirmed, and returned is the caller's to store, and `api-server` does store it, because the
 //! effect of a call is outside Notewise and "did that already run?" has to be answerable after a
 //! restart.
 
@@ -61,7 +61,7 @@ pub enum McpError {
     #[error("'{server}' is not running; start it to use its tools")]
     NotStarted { server: String },
 
-    /// The configuration cannot work — an empty command, a URL that is not one.
+    /// The configuration cannot work: an empty command, a URL that is not one.
     ///
     /// Separate from [`Self::SpawnFailed`] because this is caught before the operating system is
     /// involved, and the message can name the field the user has to fix.
@@ -84,7 +84,7 @@ pub enum McpError {
     #[error("'{server}' rejected the request: {detail}")]
     Rpc { server: String, detail: String },
 
-    /// Enabled, but this server does not publish it — an upgrade removed it, most likely.
+    /// Enabled, but this server does not publish it; an upgrade removed it, most likely.
     #[error("'{server}' does not publish a tool called '{tool}'")]
     UnknownTool { server: String, tool: String },
 
@@ -230,7 +230,7 @@ impl Allowlist {
 ///
 /// `AiBackend` has no tool-calling method, and adding one would mean implementing it for every
 /// backend including a local model whose support depends on the GGUF somebody downloaded. The local
-/// path is the one the product's promise rests on, so the protocol is text — the same trade the
+/// path is the one the product's promise rests on, so the protocol is text; the same trade the
 /// agent already made.
 ///
 /// This costs accuracy and buys working identically on Ollama and Anthropic.
@@ -251,7 +251,7 @@ pub fn parse_proposal(reply: &str) -> Result<Proposal> {
 /// Pull the first balanced JSON object out of a string.
 ///
 /// Brace counting rather than a regex, and string-aware, because a JSON argument value can itself
-/// contain braces — an email body with `{` in it would otherwise truncate the object at the wrong
+/// contain braces: an email body with `{` in it would otherwise truncate the object at the wrong
 /// place and produce a confusing parse error instead of a working call.
 fn extract_json(text: &str) -> Option<String> {
     let bytes: Vec<char> = text.chars().collect();

@@ -4,11 +4,11 @@
 //!
 //! A browser extension running in the user's own meeting tab. Meet, Zoom, and Teams all display
 //! who is speaking, because they route the audio and therefore know; a content script reads that
-//! and posts it. The desktop app already has the audio, so this carries **only identity** — a few
+//! and posts it. The desktop app already has the audio, so this carries **only identity**: a few
 //! hundred bytes a minute, not a media stream.
 //!
 //! That split is what makes named speakers affordable. The alternative reading of "capture
-//! everyone's audio" — a bot that joins the call to obtain a stream we already have — pays for the
+//! everyone's audio" (a bot that joins the call to obtain a stream we already have) pays for the
 //! expensive half to get the cheap half.
 //!
 //! # Two rules this endpoint enforces
@@ -20,7 +20,7 @@
 //!
 //! **Accumulate now, apply at the end.** Posting does not relabel anything. The timeline is applied
 //! once the meeting ends, for the same reason the rest of the pipeline works that way: speaker
-//! evidence keeps arriving, and a name written from partial evidence cannot be corrected later —
+//! evidence keeps arriving, and a name written from partial evidence cannot be corrected later:
 //! refinement only replaces a channel label, and a segment already named no longer carries one.
 
 use std::collections::HashMap;
@@ -70,7 +70,7 @@ pub struct SpeakerEvents {
 
     /// Which participant is the user at this machine, when the producer can tell.
     ///
-    /// Their turns are dropped before the remote channel is refined — the system audio tap records
+    /// Their turns are dropped before the remote channel is refined: the system audio tap records
     /// what the machine plays, which is everyone *except* them. See
     /// [`SpeakerTimeline::excluding`].
     #[serde(default)]
@@ -88,7 +88,7 @@ pub struct AcceptedEvents {
 ///
 /// Rejects a turn naming a participant absent from the roster. The producer sends the roster in the
 /// same request, so a mismatch is a producer bug, and storing the turn would leave a hole that a
-/// later pass might fill from a neighbour — attributing words to whoever happened to be adjacent.
+/// later pass might fill from a neighbour, attributing words to whoever happened to be adjacent.
 pub async fn post_speaker_events(
     State(state): State<Shared>,
     Path(id): Path<String>,
@@ -141,7 +141,7 @@ pub async fn post_speaker_events(
 /// One voice in a meeting, as the UI sees it.
 #[derive(Debug, Serialize)]
 pub struct SpeakerView {
-    /// `null` for segments no diarizer labelled — nameable like any other.
+    /// `null` for segments no diarizer labelled: nameable like any other.
     pub label: Option<String>,
     pub segments: u32,
     pub speaking_ms: i64,
@@ -149,7 +149,7 @@ pub struct SpeakerView {
     /// Whether this label came from a diarizer rather than a person.
     ///
     /// The UI leads with "who is this?" for anonymous clusters and leaves named ones alone.
-    /// Inferred from the label's shape because nothing records provenance per segment — which
+    /// Inferred from the label's shape because nothing records provenance per segment, which
     /// is a real limitation: someone who genuinely types "Speaker 2" as a name gets prompted
     /// about it. The cost of being wrong is a prompt, so shape is good enough.
     pub anonymous: bool,
@@ -217,7 +217,7 @@ pub struct RenamedSpeaker {
     pub speakers: Vec<SpeakerView>,
 }
 
-/// Rename a speaker — which is also how two are merged.
+/// Rename a speaker, which is also how two are merged.
 ///
 /// Renaming `Speaker 3` to a fresh name renames. Renaming it to `Dana` when `Dana` already
 /// exists merges the two, which is the fix for a clustering pass having split one person in
@@ -233,7 +233,7 @@ pub async fn rename_speaker(
     repo.get(meeting_id)?;
 
     // Read before writing, so "did this merge?" is answered by what was there rather than by
-    // comparing counts afterwards — a rename onto an existing name and a rename of two separate
+    // comparing counts afterwards: a rename onto an existing name and a rename of two separate
     // labels can both reduce the speaker count.
     let before = repo.speakers(meeting_id)?;
     let target = body.to.trim();
@@ -243,8 +243,8 @@ pub async fn rename_speaker(
 
     let segments_changed = repo.rename_speaker(meeting_id, body.from.as_deref(), &body.to)?;
     if segments_changed == 0 {
-        // The label named nothing here. Usually a stale view — someone renamed it in another
-        // window — so it is the request that is out of date, not the meeting.
+        // The label named nothing here. Usually a stale view: someone renamed it in another
+        // window, so it is the request that is out of date, not the meeting.
         return Err(ApiError::NotFound(match body.from.as_deref() {
             Some(from) => format!("no speaker labelled '{from}' in this meeting"),
             None => "every segment in this meeting is already attributed".into(),
@@ -258,7 +258,7 @@ pub async fn rename_speaker(
         .collect();
 
     // The speaker is part of a meeting's indexed text, so a rename changes what the index should
-    // hold — asking "what did Dana say about pricing" has to find the lines just renamed.
+    // hold: asking "what did Dana say about pricing" has to find the lines just renamed.
     drop(db);
     crate::indexing::touch(std::sync::Arc::clone(&state));
 
@@ -285,7 +285,7 @@ pub struct PendingTimeline {
 /// Timelines awaiting the end of their meeting.
 ///
 /// Keyed by meeting and drained by [`apply_pending_timeline`], so an entry's lifetime is its
-/// recording's. Nothing else clears this map — a meeting that never ends keeps its timeline, which
+/// recording's. Nothing else clears this map: a meeting that never ends keeps its timeline, which
 /// is the intended behaviour and also the thing to watch if it ever grows.
 pub type PendingTimelines = tokio::sync::Mutex<HashMap<Id, PendingTimeline>>;
 
@@ -302,7 +302,7 @@ pub async fn take_pending(pending: &PendingTimelines, meeting_id: Id) -> Option<
 /// Name the speakers on a meeting's remote channel from posted events.
 ///
 /// Returns how many segments gained a name. Synchronous, so it can run while the database guard is
-/// held — see [`take_pending`].
+/// held; see [`take_pending`].
 ///
 /// # Only the remote channel
 ///

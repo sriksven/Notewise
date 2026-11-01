@@ -1,4 +1,4 @@
-//! Repositories — the only way to reach stored data from outside this crate.
+//! Repositories: the only way to reach stored data from outside this crate.
 //!
 //! Each repository borrows the [`Database`](crate::Database) rather than owning it, so a
 //! caller can hold several at once without cloning connections.

@@ -1,4 +1,4 @@
-//! Source implementations — the connectors that read.
+//! Source implementations: the connectors that read.
 //!
 //! Counterpart to `sinks`. The direction split is the trait, so a connector that both reads and
 //! writes implements both and is registered in both maps; `google` is exactly that, pulling a

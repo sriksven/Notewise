@@ -1,6 +1,6 @@
 # CLI
 
-> **Status: implemented.** The engine, linked directly — no desktop app or running server
+> **Status: implemented.** The engine, linked directly: no desktop app or running server
 > required, which is what makes scripting and headless use possible.
 
 ```sh
@@ -36,13 +36,13 @@ Recording is behind feature flags because each pulls a heavy toolchain.
 | `record` | Microphone capture via cpal | Platform audio SDK |
 | `whisper` | whisper.cpp inference (CPU) | cmake + clang build |
 | `whisper-metal` | GPU on Apple silicon | as above |
-| `full` | `record` + `whisper-metal` | — |
+| `full` | `record` + `whisper-metal` | - |
 
 ```sh
 cargo run -p notewise-cli --features full -- record --seconds 60
 ```
 
-Ctrl-C stops a recording cleanly — the transcript is flushed and diarization still runs, so
+Ctrl-C stops a recording cleanly: the transcript is flushed and diarization still runs, so
 stopping never loses the tail of a meeting.
 
 ## Environment
@@ -61,5 +61,5 @@ With nothing set, the backend is **local**.
 
 ## One detail if you are scripting `mcp`
 
-Logs go to **stderr**, always. Stdout carries the JSON-RPC stream and nothing else — a stray
+Logs go to **stderr**, always. Stdout carries the JSON-RPC stream and nothing else: a stray
 line there corrupts the protocol.

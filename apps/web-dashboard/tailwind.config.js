@@ -41,7 +41,7 @@ export default {
           line: "var(--danger-line)",
         },
 
-        // Recording is red in every theme. If it is red, audio is being captured — that has to
+        // Recording is red in every theme. If it is red, audio is being captured: that has to
         // be true regardless of which accent someone picked.
         record: { DEFAULT: "var(--record)", hover: "var(--record-hover)" },
       },

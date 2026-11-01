@@ -4,7 +4,7 @@
  * # Read-only is enforced here, not assumed
  *
  * Every function in this module issues a `GET`. There is no `POST`, `PUT`, `PATCH` or
- * `DELETE` — not disabled, not gated behind a flag: absent. A dashboard is for looking at a
+ * `DELETE`, not disabled, not gated behind a flag: absent. A dashboard is for looking at a
  * workspace, and the way a read-only surface stays read-only is by not containing the code
  * that would write.
  *
@@ -12,7 +12,7 @@
  *
  * Same-origin, through Vite's proxy in development and through whatever serves the built
  * files otherwise. `API_BASE` exists so this can later be pointed at a hosted API without
- * every call site changing — see the README for why that day is not today.
+ * every call site changing. See the README for why that day is not today.
  */
 
 const API_BASE = "";

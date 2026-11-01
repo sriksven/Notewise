@@ -107,7 +107,7 @@ impl<'a> MeetingRepository<'a> {
             .collect()
     }
 
-    /// Meetings still recording — `ended_at` is null.
+    /// Meetings still recording: `ended_at` is null.
     pub fn list_active(&self) -> Result<Vec<Meeting>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
@@ -151,7 +151,7 @@ impl<'a> MeetingRepository<'a> {
     /// Move a meeting to the trash. Reversible with [`Self::restore`].
     ///
     /// The v10 trigger takes its transcript out of the search index as a side effect, so a
-    /// trashed meeting stops answering questions — including through the agent, which reads
+    /// trashed meeting stops answering questions, including through the agent, which reads
     /// search results.
     pub fn trash(&self, id: Id) -> Result<Meeting> {
         self.db.conn().execute(
@@ -197,11 +197,11 @@ impl<'a> MeetingRepository<'a> {
     /// Destroy a meeting and everything that cascades from it: transcript, summaries,
     /// decisions, action items, participants.
     ///
-    /// Callers must detach its graph edges and drop its embeddings first — neither cascades,
+    /// Callers must detach its graph edges and drop its embeddings first; neither cascades,
     /// because neither table has a foreign key that could.
     /// Destroy a meeting and everything that cascades from it.
     ///
-    /// Retained audio is unlinked first. It is a file rather than a row, so nothing cascades to it —
+    /// Retained audio is unlinked first. It is a file rather than a row, so nothing cascades to it;
     /// deleting the row without deleting the file would leave a recording on disk that the user
     /// believes is gone and that no sweep will ever find, because the pointer to it went with the
     /// row. This is the irreversible half of the trash; the reversible half is [`Self::trash`],
@@ -358,7 +358,7 @@ impl<'a> MeetingRepository<'a> {
     /// Which meeting each of these segments belongs to.
     ///
     /// Exists for search. A hit on a transcript segment is only useful if it can be opened, and
-    /// what a user wants to open is the meeting it was said in — the segment id on its own
+    /// what a user wants to open is the meeting it was said in; the segment id on its own
     /// names a row nothing in the product can navigate to.
     ///
     /// Batched rather than looked up one at a time: a search returns up to a hundred hits, and
@@ -413,11 +413,11 @@ impl<'a> MeetingRepository<'a> {
     ///
     /// The semantic index does not. `indexing` decides staleness by comparing an entity's
     /// `updated_at` against the newest chunk stored for it, and `transcript_segments` has no such
-    /// column — so an edited segment would keep its old vector for ever, and search would keep
+    /// column, so an edited segment would keep its old vector for ever, and search would keep
     /// finding the text the user just corrected.
     ///
     /// So the segment's embedding is deleted in the same transaction. A missing vector is already a
-    /// state the indexing pass handles — it is what a never-indexed entity looks like — so the next
+    /// state the indexing pass handles (it is what a never-indexed entity looks like) so the next
     /// pass rebuilds it and nothing new has to be understood.
     ///
     /// Adding `updated_at` to the table is the more general fix and was rejected: it would be
@@ -435,8 +435,8 @@ impl<'a> MeetingRepository<'a> {
             return Err(StorageError::not_found("TranscriptSegment", segment_id));
         }
 
-        // The semantic index embeds a meeting's whole transcript under the *meeting* — see
-        // `indexing::collect_pending` — so that is the vector that still holds the old line. This
+        // The semantic index embeds a meeting's whole transcript under the *meeting*; see
+        // `indexing::collect_pending`, so that is the vector that still holds the old line. This
         // used to delete only vectors keyed by the segment, which nothing writes: the meeting kept
         // its stale vector, `collect_pending` judged it current (a meeting's staleness is its end
         // time, which an edit does not move), and answers kept quoting the mis-transcription.
@@ -454,8 +454,8 @@ impl<'a> MeetingRepository<'a> {
 
     /// Drop a meeting's vectors so the next indexing pass embeds it again.
     ///
-    /// For the edits that change the text a meeting is embedded as — its title, and the speaker
-    /// labels the chunks carry — without moving the end time `collect_pending` judges staleness by.
+    /// For the edits that change the text a meeting is embedded as: its title, and the speaker
+    /// labels the chunks carry, without moving the end time `collect_pending` judges staleness by.
     fn forget_vectors(&self, meeting_id: Id) -> Result<()> {
         self.db.conn().execute(
             "DELETE FROM embeddings WHERE entity_kind = 'meeting' AND entity_id = ?1",
@@ -485,7 +485,7 @@ impl<'a> MeetingRepository<'a> {
     pub fn speakers(&self, meeting_id: Id) -> Result<Vec<SpeakerSummary>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            // The two-argument MAX is the scalar one — it floors durations at zero so a
+            // The two-argument MAX is the scalar one; it floors durations at zero so a
             // segment with inverted timings cannot subtract from a speaker's total.
             "SELECT speaker, COUNT(*), SUM(MAX(end_ms - start_ms, 0)), MIN(start_ms)
              FROM transcript_segments WHERE meeting_id = ?1
@@ -508,7 +508,7 @@ impl<'a> MeetingRepository<'a> {
     /// # Renaming and merging are the same operation
     ///
     /// Renaming `Speaker 3` to a name nobody else has renames. Renaming it to `Dana` when
-    /// `Dana` already exists *merges* the two — which is the fix for clustering having split
+    /// `Dana` already exists *merges* the two, which is the fix for clustering having split
     /// one person in two, and the more common of the two actions in practice. Both are one
     /// `UPDATE`, so they cannot disagree with each other, and the caller does not have to know
     /// which one it is asking for.
@@ -522,7 +522,7 @@ impl<'a> MeetingRepository<'a> {
     /// confidently attribute one person's words to another. Recognising a voice *across*
     /// meetings is what voiceprints are for, and that is opt-in for its own reasons.
     ///
-    /// Returns how many segments changed. Zero means `from` labelled nothing here — reported
+    /// Returns how many segments changed. Zero means `from` labelled nothing here: reported
     /// rather than raised, so the boundary can decide whether a stale label is a 404 or a no-op.
     pub fn rename_speaker(&self, meeting_id: Id, from: Option<&str>, to: &str) -> Result<usize> {
         let to = to.trim();
@@ -753,7 +753,7 @@ mod tests {
         );
     }
 
-    /// The vector the indexer actually writes is the *meeting's* — one per meeting, its whole
+    /// The vector the indexer actually writes is the *meeting's*: one per meeting, its whole
     /// transcript chunked under `entity_kind = 'meeting'`. The test above plants a segment-keyed
     /// vector nothing produces, which is how this went unnoticed: correcting a line, renaming a
     /// speaker or the meeting left the real vector in place, and since the indexer judges a
@@ -1108,7 +1108,7 @@ mod tests {
         assert_eq!(speakers[0].first_at_ms, 0);
     }
 
-    /// Speaking time sums the segments rather than spanning first to last — someone who said
+    /// Speaking time sums the segments rather than spanning first to last; someone who said
     /// two words an hour apart spoke for two seconds, not an hour.
     #[test]
     fn speaking_time_sums_segments_rather_than_spanning_them() {
@@ -1260,7 +1260,7 @@ mod tests {
     }
 
     /// Migration v9 put the speaker in the search index. A rename that did not reach the index
-    /// would leave the old name findable and the new one invisible — the sort of drift nobody
+    /// would leave the old name findable and the new one invisible: the sort of drift nobody
     /// notices until a search for a colleague returns nothing.
     #[test]
     fn renaming_a_speaker_updates_the_search_index() {

@@ -22,7 +22,7 @@ permissions:
   # Required by actions/deploy-pages to mint the deployment token.
   id-token: write
 
-# One deploy at a time, and never cancel one midway — a half-finished publish would leave the
+# One deploy at a time, and never cancel one midway: a half-finished publish would leave the
 # site serving a mix of two builds.
 concurrency:
   group: pages

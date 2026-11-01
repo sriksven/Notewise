@@ -8,7 +8,7 @@ use crate::error::{ConnectorError, Result};
 
 /// The set of connectors available to the dispatcher and the surfaces.
 ///
-/// `BTreeMap` rather than `HashMap` so `sink_ids()` is stable — a UI listing connectors in
+/// `BTreeMap` rather than `HashMap` so `sink_ids()` is stable: a UI listing connectors in
 /// a different order on every launch is a bug report waiting to happen.
 #[derive(Debug, Default)]
 pub struct ConnectorRegistry {

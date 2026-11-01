@@ -62,7 +62,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             "/v1/meetings/:id/speakers/rename",
             post(crate::speakers::rename_speaker),
         )
-        // Acoustic separation: the setting, and the model it needs. Off by default — see
+        // Acoustic separation: the setting, and the model it needs. Off by default; see
         // `crate::diarization` for why a guess is not the default answer to "who spoke".
         .route(
             "/v1/diarization",
@@ -129,7 +129,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             post(import_upload).layer(axum::extract::DefaultBodyLimit::max(4 << 30)),
         )
         .route("/v1/search", get(search))
-        // Drafting only. There is deliberately no route that sends one — see `draft_emails`.
+        // Drafting only. There is deliberately no route that sends one; see `draft_emails`.
         .route(
             "/v1/meetings/:id/emails",
             get(list_email_drafts).post(draft_emails),
@@ -170,7 +170,7 @@ pub(crate) fn router(state: Shared) -> AxumRouter {
             post(crate::connectors::connect_connector)
                 .delete(crate::connectors::disconnect_connector),
         )
-        // Workspace writes — notes, tickets, action items, decisions, people, series.
+        // Workspace writes: notes, tickets, action items, decisions, people, series.
         // Kept in their own module so this table stays readable.
         .merge(crate::workspace::router())
         // Grounded question answering over a note or the whole workspace.
@@ -222,8 +222,8 @@ async fn health(State(state): State<Shared>) -> ApiResult<Json<Health>> {
         ai_local: state.ai().is_local(),
         // The policy-aware label, not `model_id()`. A user with routing configured is not using
         // one model, and this field is read by a human. Resolved, because before anything had
-        // asked the daemon the label was our preference — `llama3.1` on a machine holding only
-        // `llama3.1:8b` — and the top bar named a model that was not installed.
+        // asked the daemon the label was our preference (`llama3.1` on a machine holding only
+        // `llama3.1:8b`) and the top bar named a model that was not installed.
         ai_model: state.ai().resolved_model_label().await,
         // Recording also needs a file-backed database, so an `--ephemeral` engine correctly
         // reports that it cannot record even in a build that otherwise could.
@@ -302,7 +302,7 @@ struct DeviceBody {
 async fn list_devices() -> Json<serde_json::Value> {
     use notewise_audio_capture::{CaptureKind, PermissionStatus};
 
-    // Asked before enumerating, because enumerating without the grant does not fail — it
+    // Asked before enumerating, because enumerating without the grant does not fail: it
     // *hangs*. CoreAudio waits on a TCC decision that never arrives, the request never
     // answers, and the picker sits empty forever showing "no devices found" while the real
     // answer is "macOS will not tell you until you allow the microphone".
@@ -437,7 +437,7 @@ async fn switch_backend(
     // fabricated summaries of a real meeting that look exactly like real ones.
     if !kind.is_selectable() {
         return Err(ApiError::BadRequest(format!(
-            "'{}' cannot be selected at runtime — it does not run a model and would return \
+            "'{}' cannot be selected at runtime: it does not run a model and would return \
              invented answers",
             kind.as_str()
         )));
@@ -503,7 +503,7 @@ struct ApiKeyBody {
 /// each platform designed to hold this.
 ///
 /// This is a deliberate relaxation of an earlier rule that keys could only come from the
-/// engine's environment. That rule protected against a key crossing HTTP — but it also meant
+/// engine's environment. That rule protected against a key crossing HTTP, but it also meant
 /// the only way to use a provider was to edit a shell profile and restart, which is not a thing
 /// a desktop app can ask of someone. The request is loopback-only, the value is never written to
 /// a log, and it is never readable back through the API.
@@ -571,7 +571,7 @@ async fn delete_api_key(Path(kind): Path<String>) -> ApiResult<axum::http::Statu
 ///
 /// Exists because a default model id is a guess. The engine ships pointing at `llama3.1`; a
 /// machine with `llama3.1:8b` pulled answers every request with a 404, and until now there was
-/// no way to correct that from inside the app — the backend picker chose a *provider*, never a
+/// no way to correct that from inside the app: the backend picker chose a *provider*, never a
 /// model. Asking the daemon is the only way to know the exact tags.
 ///
 /// Never fails the request. A stopped daemon is a normal state, not an error, and the picker
@@ -589,7 +589,7 @@ async fn list_backend_models(Path(kind): Path<String>) -> ApiResult<Json<serde_j
     }
 
     // Built for the question and dropped. Listing what Ollama holds must not require switching
-    // the running backend to it first — that would mean breaking summarization to find out
+    // the running backend to it first: that would mean breaking summarization to find out
     // whether a model exists.
     let probe = match AiRouter::from_config(RouterConfig::new(kind)) {
         Ok(router) => router,
@@ -735,7 +735,7 @@ async fn import_upload(
             .get("x-notewise-filename")
             .and_then(|v| v.to_str().ok())
             // Percent-encoded by the client, because a header may only carry ASCII and a file
-            // name may not — "Réunion.wav" would otherwise arrive mangled or be dropped.
+            // name may not: "Réunion.wav" would otherwise arrive mangled or be dropped.
             .map(percent_decode)
             .map(|n| n.rsplit(['/', '\\']).next().unwrap_or(&n).to_string())
             .filter(|n| !n.trim().is_empty());
@@ -746,7 +746,7 @@ async fn import_upload(
             .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()) && ext.len() <= 8)
             .unwrap_or_else(|| "wav".to_string());
 
-        // Written to a temp file the OS will clean up, then transcribed from disk — the decoder
+        // Written to a temp file the OS will clean up, then transcribed from disk: the decoder
         // reads a file, and buffering a gigabyte of audio in memory to avoid one local write
         // would be the worse trade.
         let dir = std::env::temp_dir().join("notewise-imports");
@@ -845,7 +845,7 @@ async fn import_upload(
 ///
 /// `POST /v1/emails/:id/sent` is also absent even though the storage layer has `mark_sent`.
 /// Exposing it would let a client record a message as sent when nothing sent it, which is worse
-/// than not tracking the state at all — it would put a lie in the user's audit trail.
+/// than not tracking the state at all: it would put a lie in the user's audit trail.
 #[derive(Debug, Deserialize)]
 struct DraftEmailsBody {
     /// Which tones to draft. Defaults to a single concise draft.
@@ -990,21 +990,21 @@ async fn list_email_drafts(
 
 /// Mark a draft approved.
 ///
-/// Approval is not sending. It records that a human read this text and considers it correct —
+/// Approval is not sending. It records that a human read this text and considers it correct:
 /// the prerequisite the state machine enforces before anything could ever send it.
 /// Approve a draft, and put it in the user's mailbox if a vendor with mail access is connected.
 ///
 /// # What approving does and does not mean
 ///
 /// It moves the draft to `Approved` and creates a *provider-side draft*. It does not send anything,
-/// and `mark_sent` is not called here — creating a Gmail draft is not sending, and recording it as
+/// and `mark_sent` is not called here: creating a Gmail draft is not sending, and recording it as
 /// sent would corrupt the one state machine the email module was built around. The user opens the
 /// draft in Gmail or Outlook and presses send themselves.
 ///
 /// # Why the mailbox hop is best effort
 ///
 /// The approval is the user's decision and it has already been recorded. A vendor being unreachable,
-/// or not connected, or connected without mail access, must not undo it — the draft is still in
+/// or not connected, or connected without mail access, must not undo it: the draft is still in
 /// Notewise and still readable. So a failure is reported in the response rather than returned as an
 /// error.
 async fn approve_email_draft(
@@ -1020,7 +1020,7 @@ async fn approve_email_draft(
 
     if let Err(e) = crate::connectors::enqueue_mail_draft(&state, &draft).await {
         // Logged rather than returned: see above. The interface shows the draft either way, and the
-        // outbox row — when one was made — carries its own failure for the connectors screen.
+        // outbox row (when one was made) carries its own failure for the connectors screen.
         tracing::info!(error = %e, "the draft was approved but not put in a mailbox");
     }
 
@@ -1029,7 +1029,7 @@ async fn approve_email_draft(
 
 /// A draft as a file any mail client can open.
 ///
-/// The path for a user with neither Google nor Microsoft connected — which is most people, and all of
+/// The path for a user with neither Google nor Microsoft connected, which is most people, and all of
 /// them on a first run. Opening the file puts the draft in front of them with recipients and subject
 /// filled in, which is the same end state the connectors reach by a route that needs no vendor, no
 /// token, and no review.
@@ -1120,7 +1120,7 @@ fn parse_tones(names: Option<&[String]>) -> ApiResult<Vec<EmailTone>> {
         .map(|name| {
             EmailTone::parse(name).ok_or_else(|| {
                 ApiError::BadRequest(format!(
-                    "unknown tone '{name}' — expected one of: {}",
+                    "unknown tone '{name}': expected one of: {}",
                     EmailTone::ALL
                         .iter()
                         .map(|t| t.as_str())
@@ -1148,7 +1148,7 @@ struct StartRecordingBody {
     /// Also capture system audio, as a second channel. Defaults to on.
     ///
     /// On a call this separates you from everyone else exactly, with no guessing. Where the
-    /// platform will not provide it — no Screen Recording grant, or not macOS — the recording
+    /// platform will not provide it (no Screen Recording grant, or not macOS) the recording
     /// quietly falls back to the microphone alone.
     capture_system_audio: Option<bool>,
 }
@@ -1335,7 +1335,7 @@ async fn create_meeting(
         started_at: body.started_at.unwrap_or_else(Utc::now),
     })?;
 
-    // A meeting inside a project is contained by it — record that as an edge so the
+    // A meeting inside a project is contained by it: record that as an edge so the
     // project's rollup is a traversal rather than a bespoke query.
     if let Some(project_id) = meeting.project_id {
         Graph::new(&db).connect(
@@ -1377,7 +1377,7 @@ async fn end_meeting(
 
 /// Apply any accumulated speaker events to a meeting that has just ended.
 ///
-/// Both end paths call this — a recording stopping and a meeting being closed directly — because
+/// Both end paths call this (a recording stopping and a meeting being closed directly) because
 /// events can be posted for either, including for a meeting this engine never recorded.
 async fn name_speakers(state: &Shared, meeting_id: Id) -> Option<usize> {
     // Drained before the database lock is taken, never while holding it: the guard is not `Sync`,
@@ -1458,7 +1458,7 @@ async fn append_segments(
     )?;
 
     // During a live recording this fires several times a second and the debounce swallows all
-    // of it — the pass runs once the transcript stops growing, which is when the meeting is over
+    // of it: the pass runs once the transcript stops growing, which is when the meeting is over
     // and there is something worth indexing.
     drop(db);
     crate::indexing::touch(Arc::clone(&state));
@@ -1488,7 +1488,7 @@ struct SummarizeParams {
 
 /// Summarize a meeting, persist the results, and wire them into the graph.
 ///
-/// The database lock is deliberately released before the model call — summarization can take
+/// The database lock is deliberately released before the model call: summarization can take
 /// tens of seconds, and holding the lock across it would stall every other request.
 async fn summarize_meeting(
     State(state): State<Shared>,
@@ -1532,7 +1532,7 @@ async fn summarize_meeting(
     let mut input = TranscriptInput::new(title, transcript);
 
     // A template is an instruction about shape and a memory is context about the reader, and the
-    // two are not competing — so they travel in separate fields. Passing memories *as* the
+    // two are not competing, so they travel in separate fields. Passing memories *as* the
     // instructions replaced the backend's summary instruction whenever no template was chosen.
     if let Some(template) = &template {
         input = input.with_instructions(template.prompt.clone());
@@ -1569,7 +1569,7 @@ async fn summarize_meeting(
             meeting_id,
             summary_id: Some(stored.id),
             // The deadline as it was said. `due_at` needs a date nobody stated, so the hint
-            // rides in the text rather than being dropped — see `text_with_due_hint`.
+            // rides in the text rather than being dropped; see `text_with_due_hint`.
             text: item.text_with_due_hint(),
             owner: item.owner.clone(),
             owner_person_id: None,
@@ -1611,8 +1611,8 @@ struct QuestionsBody {
 ///
 /// Stateless per request: the caller owns the cooldown and dedupe state, because a desktop
 /// app and a browser tab watching the same meeting should not silence each other. It owns it
-/// by carrying it — `asked` and `last_suggestion_ms` come back in every response and go out
-/// in the next request — and the policy itself is `ClarifierSession`'s, applied here.
+/// by carrying it: `asked` and `last_suggestion_ms` come back in every response and go out
+/// in the next request, and the policy itself is `ClarifierSession`'s, applied here.
 ///
 /// The state used to be accepted nowhere, so every request built an empty session: no
 /// cooldown, and no memory of what had been asked. The desktop app, which polls every thirty
@@ -1790,7 +1790,7 @@ async fn list_backends(State(state): State<Shared>) -> ApiResult<Json<serde_json
                 "requires_endpoint": kind.requires_endpoint(),
                 "lists_models": kind.lists_models(),
                 // Whether a key is available, from the keychain or the environment. The key
-                // itself is never sent — only the fact that there is one, which is what the
+                // itself is never sent; only the fact that there is one, which is what the
                 // UI needs to tell "add a key" apart from "ready to use".
                 "has_key": !kind.requires_api_key() || crate::state::has_api_key(*kind),
             })
@@ -1849,7 +1849,7 @@ async fn list_models(State(state): State<Shared>) -> ApiResult<Json<serde_json::
 /// Download a model into the local store.
 ///
 /// Runs to completion before responding. That is acceptable for a loopback call a user
-/// explicitly started, but it means no progress reporting — a streaming variant is the
+/// explicitly started, but it means no progress reporting: a streaming variant is the
 /// obvious next step for the larger models, which are gigabytes.
 /// Start downloading a model.
 ///
@@ -1896,7 +1896,7 @@ async fn download_progress(
         Some(receiver) => receiver,
         None if state.model_store().is_available(&model) => {
             // Already installed and never downloaded by this process. Emit one terminal event
-            // rather than 404 — the client's question is "is it here yet", and the answer is yes.
+            // rather than 404: the client's question is "is it here yet", and the answer is yes.
             let (sender, receiver) =
                 tokio::sync::watch::channel(DownloadState::already_installed(&model));
             // Keep the sender alive for the life of the receiver.
@@ -1961,7 +1961,7 @@ struct CompleteSetupQuery {
     /// Finish with required steps still unsatisfied.
     ///
     /// Has to be asked for explicitly. Without it an accidental call is still refused, which is
-    /// the whole point of checking server-side — but a user who cannot satisfy a step is not
+    /// the whole point of checking server-side, but a user who cannot satisfy a step is not
     /// thereby locked out of their own machine.
     #[serde(default)]
     skip: bool,
@@ -1971,8 +1971,8 @@ struct CompleteSetupQuery {
 ///
 /// Re-checks readiness server-side, because a gate enforced only in the UI is not a gate. The
 /// check refuses an *unintended* completion; it is not a capability lock. A denied microphone is
-/// not always something the user can reverse — it may belong to an administrator, or they may
-/// only want to import files today — and refusing to open the app over it would strand them with
+/// not always something the user can reverse: it may belong to an administrator, or they may
+/// only want to import files today, and refusing to open the app over it would strand them with
 /// no way forward. `?skip=true` records that, and the answer names what was left unresolved.
 async fn complete_setup(
     State(state): State<Shared>,
@@ -2023,7 +2023,7 @@ async fn complete_setup(
 /// Open a System Settings pane, named rather than linked.
 ///
 /// The app's interface is a page inside the shell's web view, and a web view does not hand an
-/// `x-apple.systempreferences:` link to the OS — it ignores it. Every "Open settings" button in
+/// `x-apple.systempreferences:` link to the OS; it ignores it. Every "Open settings" button in
 /// the app set `window.location.href` to one and did nothing. The engine runs in the app's own
 /// process, so it opens the pane itself.
 ///
@@ -2031,7 +2031,7 @@ async fn complete_setup(
 async fn open_system_settings(Path(pane): Path<String>) -> ApiResult<axum::http::StatusCode> {
     let url = system_settings_url(&pane).ok_or_else(|| {
         ApiError::BadRequest(format!(
-            "unknown settings pane '{pane}' — expected privacy, microphone, screen_recording, \
+            "unknown settings pane '{pane}': expected privacy, microphone, screen_recording, \
              accessibility or input_monitoring"
         ))
     })?;
@@ -2087,7 +2087,7 @@ async fn request_permission(
 ) -> ApiResult<Json<crate::setup::PermissionReadiness>> {
     let kind = CaptureKindArg::parse(&kind).ok_or_else(|| {
         ApiError::BadRequest(format!(
-            "unknown permission '{kind}' — expected 'microphone' or 'system_audio'"
+            "unknown permission '{kind}': expected 'microphone' or 'system_audio'"
         ))
     })?;
 
@@ -2100,7 +2100,7 @@ async fn request_permission(
 
 /// What a refusal means, when "you declined this" is not the whole story.
 ///
-/// A screen-recording request is answered `false` straight away even when it worked — the alert
+/// A screen-recording request is answered `false` straight away even when it worked: the alert
 /// that sends the user to System Settings arrives on its own, and the grant applies only after a
 /// relaunch. So a "denied" here is as often "not switched on yet" as a refusal, and from inside
 /// the process the two look identical.
@@ -2110,7 +2110,7 @@ async fn request_permission(
 ///
 /// The case that reads as "it will never work" is a switch that is already on. macOS keeps the
 /// grant against the designated requirement of the build that was granted, and a build signed
-/// differently fails to match it — tccd denies without a dialog, and the switch still shows on.
+/// differently fails to match it: tccd denies without a dialog, and the switch still shows on.
 /// Removing the entry and adding the app again is what clears it.
 #[cfg(feature = "record")]
 fn denial_detail(kind: CaptureKindArg) -> Option<String> {
@@ -2120,9 +2120,9 @@ fn denial_detail(kind: CaptureKindArg) -> Option<String> {
 
     Some(
         "Look under Privacy & Security → Screen & System Audio Recording, and switch Notewise \
-         on — or add it with the + button if it is missing. If it is already on, the switch \
+         on, or add it with the + button if it is missing. If it is already on, the switch \
          belongs to a differently signed build: remove Notewise with −, add it again with +, \
-         and switch it on. Then quit and reopen Notewise and press Re-check — macOS only \
+         and switch it on. Then quit and reopen Notewise and press Re-check. MacOS only \
          applies this at launch."
             .into(),
     )
@@ -2188,7 +2188,7 @@ impl CaptureKindArg {
 thread_local! {
     /// How many times this thread was about to ask the OS for a permission.
     ///
-    /// Lets a test prove a request did not prompt on any machine — including one where the
+    /// Lets a test prove a request did not prompt on any machine, including one where the
     /// permission is already granted, so the status alone could not show it.
     static PROMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -2264,8 +2264,8 @@ struct RelatedNodeView {
     /// `{kind, id, distance, via}` says "a note, two hops away, via mentions" and never which note.
     /// It had no callers for exactly that reason.
     ///
-    /// `None` for the kinds with no name of their own — a transcript segment, a summary, a decision
-    /// — which belong to a meeting rather than standing beside it. A client shows what it can name.
+    /// `None` for the kinds with no name of their own: a transcript segment, a summary, a decision,
+    /// which belong to a meeting rather than standing beside it. A client shows what it can name.
     label: Option<String>,
 }
 
@@ -2415,7 +2415,7 @@ async fn create_note(
     let db = state.db().await;
 
     // Checked before anything is written. The edge table has no foreign keys, so an unknown id
-    // was stored as a link to nothing — and that meeting id then listed the note as one of its
+    // was stored as a link to nothing, and that meeting id then listed the note as one of its
     // own, while the caller was told the note had been filed against a meeting.
     if let Some(meeting_id) = body.references_meeting {
         MeetingRepository::new(&db).get(meeting_id)?;
@@ -2494,7 +2494,7 @@ struct SearchHitView {
     /// The meeting a transcript hit was said in, so a result can be opened.
     ///
     /// Null for kinds that do not belong to a meeting. Without it a search for a phrase someone
-    /// remembers hearing returns the id of a transcript row, which no screen can show — the
+    /// remembers hearing returns the id of a transcript row, which no screen can show: the
     /// index knew the answer and the API threw it away.
     meeting_id: Option<Id>,
 }
@@ -2519,7 +2519,7 @@ async fn search(
         .into_iter()
         .collect();
 
-    // A transcript segment has no title of its own, so it borrows the meeting's — a result
+    // A transcript segment has no title of its own, so it borrows the meeting's: a result
     // reading "Postgres migration sync" is something a user can recognise; a blank one is not.
     let titles: std::collections::HashMap<Id, String> = {
         let meetings = MeetingRepository::new(&db);
@@ -3182,7 +3182,7 @@ mod tests {
     }
 
     /// Searching for a phrase someone remembers hearing has to lead back to the meeting. The
-    /// hit is a transcript row, which no screen can open on its own — so it has to carry the
+    /// hit is a transcript row, which no screen can open on its own, so it has to carry the
     /// meeting it belongs to, and borrow that meeting's name.
     #[tokio::test]
     async fn a_transcript_hit_names_the_meeting_it_can_be_opened_in() {
@@ -3398,7 +3398,7 @@ mod tests {
         )
         .await;
 
-        // The mock backend returns prose, which correctly parses to no questions — the
+        // The mock backend returns prose, which correctly parses to no questions: the
         // point is that the request was gated in and completed rather than refused.
         assert_eq!(status, StatusCode::OK, "{json}");
         assert!(json["questions"].is_array());
@@ -3410,8 +3410,8 @@ mod tests {
 
     /// The cooldown only exists if the client's state survives between requests.
     ///
-    /// Every request used to build a fresh session, so the desktop app — polling every thirty
-    /// seconds and trusting the engine to gate — made a model call on every poll. The state now
+    /// Every request used to build a fresh session, so the desktop app (polling every thirty
+    /// seconds and trusting the engine to gate) made a model call on every poll. The state now
     /// comes back in each response and goes out with the next request, and while it is inside
     /// the cooldown no model is asked.
     #[tokio::test]
@@ -3631,7 +3631,7 @@ mod tests {
     }
 
     /// The name reaches a meeting title and a temp file's extension, never a path. Even so, the
-    /// handler strips directories — a caller is not a file picker, and the cost of being wrong
+    /// handler strips directories: a caller is not a file picker, and the cost of being wrong
     /// here is writing outside the import folder.
     #[test]
     fn a_traversing_filename_cannot_escape() {
@@ -3647,7 +3647,7 @@ mod tests {
     /// The key must never come back out through the API.
     ///
     /// It is accepted over loopback so a user can add a provider without editing a shell
-    /// profile — but a readable key is a key in every screenshot, log and support bundle, so
+    /// profile, but a readable key is a key in every screenshot, log and support bundle, so
     /// the listing reports only whether one exists.
     #[tokio::test]
     async fn a_saved_api_key_is_never_readable() {
@@ -3719,7 +3719,7 @@ mod tests {
     /// A backend chosen in the app has to outlive the process.
     ///
     /// Without this the engine came back on its inferred default every launch, so a user whose
-    /// Ollama holds `llama3.1:8b` — not the `llama3.1` the default guesses — fixed the same
+    /// Ollama holds `llama3.1:8b` (not the `llama3.1` the default guesses) fixed the same
     /// "model not found" error every single time they opened the app.
     #[tokio::test]
     async fn switching_backend_is_remembered() {
@@ -3754,7 +3754,7 @@ mod tests {
         );
         drop(db);
 
-        // Choosing the provider alone — the top bar's "Ollama" — names no model. What the router
+        // Choosing the provider alone (the top bar's "Ollama") names no model. What the router
         // reports then is the backend's default *guess*, and stored it would come back on the next
         // launch as a choice that is never substituted, failing every feature on a machine that
         // does not hold that exact tag. So the stored model goes rather than being replaced by it.
@@ -3805,7 +3805,7 @@ mod tests {
     }
 
     /// A stopped Ollama is an ordinary state, not a failure. The picker has to be able to say
-    /// "not running" — if this returned an error the whole settings screen would show a banner
+    /// "not running"; if this returned an error the whole settings screen would show a banner
     /// instead of a list.
     #[tokio::test]
     async fn listing_models_for_an_unreachable_daemon_is_not_an_error() {
@@ -3882,7 +3882,7 @@ mod tests {
     }
 
     /// A note filed against a meeting that does not exist was created anyway, with its link stored
-    /// pointing nowhere — and `GET /v1/meetings/<that id>/notes` then listed it.
+    /// pointing nowhere, and `GET /v1/meetings/<that id>/notes` then listed it.
     #[tokio::test]
     async fn a_note_referencing_an_unknown_meeting_is_a_404_and_not_created() {
         let app = app();
@@ -4016,7 +4016,7 @@ mod tests {
         );
     }
 
-    /// A stop with nothing running is a 409, not a silent success — a client that got 200 here
+    /// A stop with nothing running is a 409, not a silent success: a client that got 200 here
     /// would clear its recording UI while a real recording was still going.
     #[tokio::test]
     async fn stopping_when_nothing_is_recording_is_a_conflict() {
@@ -4218,7 +4218,7 @@ mod tests {
         assert_eq!(approved["status"], "approved");
 
         // A second approval conflicts with the draft's state. It was a 422 `invalid_state`
-        // reading "invalid stored value in column 'email_drafts.status'" — a damaged database, to
+        // reading "invalid stored value in column 'email_drafts.status'": a damaged database, to
         // anyone reading it.
         let (status, again) = json(
             &app,
@@ -4293,7 +4293,7 @@ mod tests {
                         response.status(),
                         StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
                     ),
-                    "{method} {path} answered {} — a send path must not exist",
+                    "{method} {path} answered {}: a send path must not exist",
                     response.status()
                 );
             }
@@ -4516,7 +4516,7 @@ mod tests {
 
     /// `/v1/models` and `/v1/models/:name/download` must agree about where models live. They
     /// did not: the listing re-derived a path from the environment while the downloader
-    /// honoured `with_model_dir`, so a model on disk could be reported missing forever — and
+    /// honoured `with_model_dir`, so a model on disk could be reported missing forever; and
     /// the setup gate that waits on it would never open.
     #[tokio::test]
     async fn list_models_honours_the_configured_model_dir() {
@@ -4571,7 +4571,7 @@ mod tests {
         assert_eq!(body["steps"]["model"]["required"], true);
 
         // A test binary is not an app bundle, and without the capture feature there is no backend
-        // at all — either way system audio cannot be granted here, so it must be excluded from the
+        // at all: either way system audio cannot be granted here, so it must be excluded from the
         // gate rather than left permanently blocking.
         assert_eq!(
             body["steps"]["permissions"]["system_audio"]["status"],
@@ -4686,7 +4686,7 @@ mod tests {
     ///
     /// This used to require the status to be `not_requested` or `unavailable`, which holds only
     /// on a machine where nothing was ever decided. A test process launched from a terminal or an
-    /// editor inherits that app's microphone grant, honestly reports `granted`, and failed — while
+    /// editor inherits that app's microphone grant, honestly reports `granted`, and failed, while
     /// a granted permission is exactly the case in which nothing can prompt. So it checks the
     /// property itself, two ways: the handler never took the prompting path (on every machine),
     /// and what it reported is what the non-prompting probe says (a prompt answered, or denied
@@ -4746,8 +4746,8 @@ mod tests {
     }
 
     /// The gate refuses an unintended completion; it must not be a lock-out. Someone who cannot
-    /// satisfy a step — a grant that belongs to an administrator, a model they do not want to
-    /// download today — has to be able to reach the app, and the answer has to say what they
+    /// satisfy a step (a grant that belongs to an administrator, a model they do not want to
+    /// download today) has to be able to reach the app, and the answer has to say what they
     /// skipped rather than report a clean setup.
     #[tokio::test]
     async fn setup_can_be_skipped_explicitly() {
@@ -4791,7 +4791,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         install_model(dir.path(), "tiny.en");
 
-        // One app, so both calls share a database — a fresh router per call would start from
+        // One app, so both calls share a database: a fresh router per call would start from
         // an empty one and never exercise idempotency.
         let app = app_with_model_dir(dir.path());
 
@@ -4839,7 +4839,7 @@ mod tests {
     }
 
     /// On a build without capture, asking for system audio must answer "unavailable" rather
-    /// than fail — the wizard needs a reason to show, not an error banner.
+    /// than fail: the wizard needs a reason to show, not an error banner.
     #[tokio::test]
     async fn requesting_system_audio_reports_unavailable_rather_than_failing() {
         let (status, body) = json(
@@ -4958,7 +4958,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{json}");
         assert_eq!(json["merged"], false, "nothing to merge with yet");
 
-        // Speaker 3 was Dana all along — the clustering split one person in two.
+        // Speaker 3 was Dana all along: the clustering split one person in two.
         let (status, json) = call(&app, rename("Speaker 3", "Dana")).await;
         assert_eq!(status, StatusCode::OK, "{json}");
         assert_eq!(json["merged"], true);
@@ -5067,7 +5067,7 @@ mod tests {
         assert_eq!(body["retain_minutes"], 90);
     }
 
-    /// Turning it on is allowed even when it cannot run yet — but it must say why it will not.
+    /// Turning it on is allowed even when it cannot run yet, but it must say why it will not.
     #[tokio::test]
     async fn turning_it_on_reports_what_is_still_missing() {
         let app = app();
@@ -5082,7 +5082,7 @@ mod tests {
         assert_eq!(body["effective"], false, "nothing is downloaded: {body}");
 
         // Whichever of the two conditions this build fails, it must name it rather than going
-        // quiet — "on, and nothing happens" is the state this field exists to prevent.
+        // quiet: "on, and nothing happens" is the state this field exists to prevent.
         let reason = body["blocked_by"].as_str().expect("a reason");
         assert!(
             reason.contains("compiled without") || reason.contains("not been downloaded"),
@@ -5209,12 +5209,12 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
-    /// Removing a model that was never downloaded is a no-op, not an error — the caller's intent
+    /// Removing a model that was never downloaded is a no-op, not an error: the caller's intent
     /// is "make it not be there", and it already is not.
     ///
     /// Runs against a temporary model directory, and must stay that way. `app()` resolves the
     /// *real* one, so this test deleted the developer's actual downloaded model every time the
-    /// suite ran — silently, since the assertion passes either way.
+    /// suite ran, silently, since the assertion passes either way.
     #[tokio::test]
     async fn removing_a_model_that_is_not_installed_succeeds() {
         let dir = tempfile::tempdir().expect("temp dir");

@@ -40,7 +40,7 @@ impl<'a> PersonRepository<'a> {
     /// second person created without an address collided with the first.
     ///
     /// An address already on file is refused, compared without case. The unique index compares
-    /// bytes, so `Dana@example.com` slipped past it beside `dana@example.com` — and
+    /// bytes, so `Dana@example.com` slipped past it beside `dana@example.com`, and
     /// [`Self::find_by_email`], which ignores case, then had two people to choose between.
     pub fn create(&self, new: NewPerson) -> Result<Person> {
         let email = new
@@ -99,8 +99,8 @@ impl<'a> PersonRepository<'a> {
     /// pre-register everyone they will ever meet.
     ///
     /// Names are not unique in reality, so this will merge two different people who share
-    /// one. That is the right trade for attribution — a wrongly merged pair is visible and
-    /// fixable, whereas a proliferation of near-duplicate rows is neither — but it means
+    /// one. That is the right trade for attribution; a wrongly merged pair is visible and
+    /// fixable, whereas a proliferation of near-duplicate rows is neither, but it means
     /// callers with a real identifier should use [`Self::find_by_email`] first.
     pub fn find_or_create_by_name(&self, display_name: &str) -> Result<Person> {
         let existing: Option<Person> = self
@@ -160,7 +160,7 @@ impl<'a> PersonRepository<'a> {
     /// Remove a person. Their participation cascades; what they said stays, unattributed.
     ///
     /// `transcript_segments.speaker_id` references `people` with no `ON DELETE` action (v6), so a
-    /// person any segment pointed at could not be deleted at all — the statement failed its foreign
+    /// person any segment pointed at could not be deleted at all; the statement failed its foreign
     /// key. The free-text `speaker` label is untouched, so the transcript still reads the same; only
     /// the link to an identity that no longer exists goes, which is what `ON DELETE SET NULL` would
     /// have done. Both in one transaction, so a failed delete leaves the links where they were.
@@ -232,7 +232,7 @@ impl<'a> PersonRepository<'a> {
     /// Returns vectors rather than doing the matching: nearest-neighbour over embeddings is
     /// not a SQL query, and the metric (cosine over L2-normalised vectors) belongs to
     /// `diarization::cluster`. Implementing it here would either duplicate that metric, where
-    /// it would drift, or make `storage` depend on `diarization` — which inverts the
+    /// it would drift, or make `storage` depend on `diarization`, which inverts the
     /// dependency rule. Callers filter by `model` before comparing.
     pub fn voice_prints(&self) -> Result<Vec<VoicePrint>> {
         let conn = self.db.conn();
@@ -263,7 +263,7 @@ impl<'a> PersonRepository<'a> {
     /// Link a person to a meeting they took part in.
     ///
     /// Idempotent: re-adding the same person is not an error, because the callers that
-    /// discover participants — a transcript pass, a calendar import — legitimately see the
+    /// discover participants (a transcript pass, a calendar import) legitimately see the
     /// same person more than once.
     pub fn add_participant(&self, meeting_id: Id, person_id: Id, role: Option<&str>) -> Result<()> {
         self.db.conn().execute(
@@ -373,7 +373,7 @@ mod tests {
     }
 
     /// The index compares bytes and `find_by_email` does not, so a case variant has to be refused
-    /// here — otherwise one address belongs to two people and lookups pick one at random.
+    /// here: otherwise one address belongs to two people and lookups pick one at random.
     #[test]
     fn an_email_already_on_file_is_refused_whatever_its_case() {
         let db = db();
@@ -545,7 +545,7 @@ mod tests {
         );
     }
 
-    /// `speaker_id` has no `ON DELETE` action, so a person a segment pointed at was undeletable —
+    /// `speaker_id` has no `ON DELETE` action, so a person a segment pointed at was undeletable:
     /// the foreign key failed. What they said must survive them, unattributed.
     #[test]
     fn a_person_a_segment_points_at_can_still_be_deleted() {

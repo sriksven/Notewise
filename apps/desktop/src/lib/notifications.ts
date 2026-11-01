@@ -8,7 +8,7 @@ import { api } from "./api";
  * `NotificationRepository` has had `pending_on` and `mark_delivered` since the comms layer landed
  * and nothing ever drained them, because the engine has no way to raise an OS notification and
  * `src-tauri` is deliberately outside the workspace. So the engine decides *that* something should
- * be shown and this drains the queue — the same split `connector_outbox` uses for delivery.
+ * be shown and this drains the queue, the same split `connector_outbox` uses for delivery.
  *
  * The browser notification API rather than a Tauri plugin: it works in the webview and in a
  * browser, which means this path can actually be tested.
@@ -31,8 +31,8 @@ const POLL_MS = 15_000;
  * The row is marked delivered anyway, so the queue drains rather than filling with things that will
  * never be shown.
  *
- * Ten minutes is the same window the engine keeps a join offer live for, which is not a coincidence
- * — past that there is nothing to act on either way.
+ * Ten minutes is the same window the engine keeps a join offer live for, which is not a coincidence:
+ * past that there is nothing to act on either way.
  */
 export const STALE_MS = 10 * 60 * 1000;
 
@@ -100,8 +100,8 @@ export async function deliverPending(): Promise<number> {
         tag: item.id,
       });
 
-      // Bring the window forward. Whatever the notification is about is acted on in the app — a
-      // meeting to record has a button there — so the useful thing a click can do is get the user
+      // Bring the window forward. Whatever the notification is about is acted on in the app (a
+      // meeting to record has a button there), so the useful thing a click can do is get the user
       // to it.
       notification.onclick = () => {
         window.focus();
@@ -126,7 +126,7 @@ export async function deliverPending(): Promise<number> {
 /**
  * Ask for permission and start polling. Returns a stop function.
  *
- * Permission is requested rather than assumed, and a refusal is final — nothing retries, because a
+ * Permission is requested rather than assumed, and a refusal is final: nothing retries, because a
  * prompt on a timer is how an app gets its notifications permanently blocked.
  */
 export function startNotificationDelivery(): () => void {

@@ -24,7 +24,7 @@ export default {
         // rule at all. `lib/theme.ts` publishes the channels beside the colours.
         accent: {
           DEFAULT: "rgb(var(--accent-rgb) / <alpha-value>)",
-          // Text drawn in the accent — timestamps that seek, the selected chip. Written as
+          // Text drawn in the accent: timestamps that seek, the selected chip. Written as
           // `text-accent-soft` in several screens and never defined, so it rendered in body text.
           soft: "rgb(var(--accent-rgb) / <alpha-value>)",
           hover: "var(--accent-hover)",
@@ -55,7 +55,7 @@ export default {
           line: "var(--danger-line)",
         },
 
-        // Recording is red in every theme. If it is red, audio is being captured — that has to
+        // Recording is red in every theme. If it is red, audio is being captured: that has to
         // be true regardless of which accent someone picked.
         record: { DEFAULT: "rgb(var(--record-rgb) / <alpha-value>)", hover: "var(--record-hover)" },
       },

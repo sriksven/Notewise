@@ -16,7 +16,7 @@
 //! # Why the window is re-read every time
 //!
 //! Apps Script exposes no change feed, so there is no cursor to advance through. This re-reads a
-//! rolling window and lets `ExternalItemRepository::upsert` make that idempotent — the cursor holds
+//! rolling window and lets `ExternalItemRepository::upsert` make that idempotent: the cursor holds
 //! the window's high-water mark rather than a vendor token, which is what
 //! `Cursor(Option<String>)` being opaque is for.
 
@@ -96,7 +96,7 @@ impl GoogleBridge {
         Ok(reply.calendars)
     }
 
-    /// Create a Gmail draft. Never sends — the script has no send call.
+    /// Create a Gmail draft. Never sends: the script has no send call.
     pub async fn create_draft(&self, to: &[String], subject: &str, body: &str) -> Result<DraftRef> {
         let reply: DraftReply = self
             .call(serde_json::json!({
@@ -149,7 +149,7 @@ impl GoogleBridge {
 
         serde_json::from_str(&text).map_err(|e| {
             ConnectorError::Permanent(format!(
-                "the script's reply could not be read ({e}). It may be an older deployment — \
+                "the script's reply could not be read ({e}). It may be an older deployment, so \
                  redeploy it from scripts/gapps/."
             ))
         })
@@ -212,8 +212,8 @@ impl SourceConnector for GoogleBridge {
 
         Ok(PullBatch {
             items,
-            // The high-water mark, not a vendor token. Nothing reads it back — the window is
-            // recomputed from the clock — but recording it makes the last successful pull visible.
+            // The high-water mark, not a vendor token. Nothing reads it back (the window is
+            // recomputed from the clock) but recording it makes the last successful pull visible.
             next_cursor: Cursor(Some(now.to_rfc3339())),
         })
     }
@@ -262,12 +262,12 @@ impl SinkConnector for GoogleBridge {
     /// Create a draft in the user's own Gmail.
     ///
     /// The deployed script's `createDraft` is `GmailApp.createDraft`, and there is deliberately no
-    /// `send` action in the script we ship — so this cannot send mail even if this code asked it to.
+    /// `send` action in the script we ship, so this cannot send mail even if this code asked it to.
     /// That is a stronger guarantee than a comment: the capability is absent from the thing holding
     /// the authorization, which the user can read before deploying it.
     ///
     /// A second push returns the first draft rather than creating another, for the same reason
-    /// Microsoft's does — see [`MicrosoftGraph`](crate::sources::MicrosoftGraph)'s `push`.
+    /// Microsoft's does: see [`MicrosoftGraph`](crate::sources::MicrosoftGraph)'s `push`.
     async fn push(&self, outbound: &Outbound) -> Result<ExternalRef> {
         if let Some(existing) = &outbound.existing {
             tracing::debug!(
@@ -346,7 +346,7 @@ pub fn to_inbound(event: &ScriptEvent) -> Result<Inbound> {
         external_id: event.id.clone(),
         url: None,
         title: event.title.clone(),
-        // No version field from Apps Script, so nothing to compare — upsert overwrites, which is
+        // No version field from Apps Script, so nothing to compare: upsert overwrites, which is
         // correct: the script's answer is always the current truth.
         remote_version: None,
         occurred_at: Some(starts),
@@ -379,7 +379,7 @@ fn parse_time(raw: &str) -> Result<DateTime<Utc>> {
 /// Find a conference link in the event.
 ///
 /// Apps Script exposes no dedicated field for one, so it is pulled out of the location and then the
-/// description. First match wins — a description often mentions several URLs and the joining link is
+/// description. First match wins: a description often mentions several URLs and the joining link is
 /// conventionally the first.
 pub fn join_url_of(event: &ScriptEvent) -> Option<String> {
     const HOSTS: &[&str] = &[
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(item.payload["recurrence_key"], "series-abc");
     }
 
-    /// A stand-in for a deployed script, so the request path — auth, error shape, redirect — is
+    /// A stand-in for a deployed script, so the request path (auth, error shape, redirect) is
     /// exercised rather than only the decoding.
     async fn stub(reply: serde_json::Value, redirect: bool) -> String {
         use axum::{routing::post, Router};
@@ -801,7 +801,7 @@ mod tests {
         assert!(to_inbound(&reply.events[0]).is_ok());
     }
     /// The sink, through the same stub the pull path uses. Proves the payload shape reaches the
-    /// script and the link comes back — which is what the interface turns into "Open in Gmail".
+    /// script and the link comes back, which is what the interface turns into "Open in Gmail".
     #[tokio::test]
     async fn the_sink_creates_a_draft_and_returns_its_link() {
         let url = stub(

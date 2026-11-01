@@ -15,8 +15,8 @@ export interface SummaryState {
  *
  * Lifted out of the summary screen because the summary is no longer only a screen: the
  * intelligence panel shows the same decisions and action items alongside the transcript. Two
- * components fetching the same row independently would drift — one refreshed after summarizing
- * and the other not — and would double the requests to say so.
+ * components fetching the same row independently would drift (one refreshed after summarizing
+ * and the other not), and would double the requests to say so.
  *
  * Read, never generated. A summary is written once and looked at many times; re-running a model
  * on every selection would be slow and would give a different answer each time.

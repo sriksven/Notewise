@@ -10,7 +10,7 @@ BASE_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 # The same order the engine resolves it in (`notewise_storage::data_dir`, then `models/`):
 # NOTEWISE_MODEL_DIR, then NOTEWISE_DATA_DIR, then the platform's data directory. A model
-# prefetched anywhere else is a model the engine downloads again — and CI, which this exists
+# prefetched anywhere else is a model the engine downloads again, and CI, which this exists
 # for, is exactly where NOTEWISE_DATA_DIR tends to be set.
 if [ -n "${NOTEWISE_DATA_DIR:-}" ]; then
   DEFAULT_DIR="$NOTEWISE_DATA_DIR/models"

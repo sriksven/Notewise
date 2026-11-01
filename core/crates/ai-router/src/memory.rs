@@ -7,7 +7,7 @@
 //!
 //! The **reflector** decides which candidates survive: rejecting duplicates, rejecting claims about
 //! other people, and choosing a scope. It is a pure function over candidates and existing memories,
-//! so every rule in it is testable exhaustively with no model — which matters because this is where
+//! so every rule in it is testable exhaustively with no model, which matters because this is where
 //! the decisions that can be wrong live. It is the same split [`crate::clarify`] uses: the model call
 //! in one place, the judgement about whether to act in another.
 //!
@@ -51,7 +51,7 @@ pub enum Verdict {
     Duplicate { existing: String },
     /// A claim about somebody other than the user.
     ThirdParty { reason: String },
-    /// Something that should not be written down at all — a key, a card number, a phone number.
+    /// Something that should not be written down at all: a key, a card number, a phone number.
     Secret { category: Category },
     /// Too vague, too long, or empty.
     Unusable { reason: String },
@@ -71,12 +71,12 @@ pub const MAX_LEN: usize = 200;
 
 /// The shortest useful memory.
 ///
-/// Below this it cannot carry a fact — "yes", "ok", "the team".
+/// Below this it cannot carry a fact: "yes", "ok", "the team".
 pub const MIN_LEN: usize = 8;
 
 /// Pronouns that make a sentence about the user.
 ///
-/// Matched as whole words — see [`words`]. These used to be substrings, and a substring test
+/// Matched as whole words; see [`words`]. These used to be substrings, and a substring test
 /// for "mine" is true of "undermine", "me " of "time ", "our " of "your" and "behaviour", "us "
 /// of "status": so "Dana tends to undermine the team" read as first person and was kept,
 /// which is the one thing this module exists to prevent.
@@ -180,7 +180,7 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
         // differ only in what the UI can say.
         //
         // A pronoun is reliable evidence of a third party. A *name* is not detectable here: I tried
-        // capitalisation and it missed "Dana is difficult" — the name is sentence-initial — while
+        // capitalisation and it missed "Dana is difficult" (the name is sentence-initial) while
         // flagging "Fridays" as a person. A heuristic that cannot tell a weekday from a colleague is
         // worse than none, so a named person without a pronoun is reported as the honest thing: not
         // a fact about the user.
@@ -189,7 +189,7 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
                 reason: "describes somebody other than the user".into(),
             };
         }
-        // Not about the user and not about anyone else either — an observation about the world,
+        // Not about the user and not about anyone else either: an observation about the world,
         // which is what the transcript is for.
         return Verdict::Unusable {
             reason: "not a fact about the user".into(),
@@ -209,7 +209,7 @@ pub fn reflect(candidate: &Candidate, existing: &[String]) -> Verdict {
 
 /// The first thing in this text the redactor recognises, if any.
 ///
-/// Uses [`RedactionPolicy::SecretsAndContacts`] — the strictest — rather than whatever policy the
+/// Uses [`RedactionPolicy::SecretsAndContacts`], the strictest, rather than whatever policy the
 /// router happens to be on. The question here is not "what should be masked on the way out" but
 /// "what should never be written down", and a phone number in a durable fact injected into every
 /// future prompt is in the second category even when it would have been fine in the first.
@@ -222,7 +222,7 @@ pub fn contains_secret(text: &str) -> Option<Category> {
 ///
 /// Word-overlap rather than embeddings: this runs during a background pass that may have no embedder,
 /// and "I prefer short summaries" versus "I prefer summaries that are short" is the shape of
-/// duplicate that actually shows up. It is deliberately generous — keeping two phrasings of one fact
+/// duplicate that actually shows up. It is deliberately generous; keeping two phrasings of one fact
 /// wastes a capped slot, which is worse than dropping a near-duplicate.
 fn says_the_same(a: &str, b: &str) -> bool {
     let words = |s: &str| -> std::collections::BTreeSet<String> {
@@ -286,39 +286,39 @@ pub const MAX_CANDIDATES: usize = 3;
 /// The instruction block for the observer.
 ///
 /// Written as one string so the whole contract is visible at once, and stated in the negative more
-/// than the positive — the failure that matters is not "it missed a fact" but "it wrote down
+/// than the positive: the failure that matters is not "it missed a fact" but "it wrote down
 /// something about a colleague", and a prompt guards against that by forbidding it explicitly rather
 /// than by describing what is wanted and hoping.
 pub fn observer_prompt() -> String {
     format!(
-        "You read what a person said in their meetings — only their own lines, labelled `You` — and \
+        "You read what a person said in their meetings (only their own lines, labelled `You`) and \
 note durable facts **about that person** which would help you help them in future.
 
 Reply with EXACTLY ONE JSON object and nothing else:
 
 {{\"memories\": [{{\"text\": \"<one short fact>\", \"global\": true}}]}}
 
-Return at most {MAX_CANDIDATES}. Return `{{\"memories\": []}}` if there is nothing worth keeping — \
+Return at most {MAX_CANDIDATES}. Return `{{\"memories\": []}}` if there is nothing worth keeping: \
 that is the common and correct answer for most meetings.
 
 What to record:
 - Their role, what they are responsible for, what they work on.
 - Vocabulary their team uses that you would otherwise misread.
-- How they like things done — the format of a summary, the tone of a message.
+- How they like things done: the format of a summary, the tone of a message.
 - Long-running projects and what they are for.
 
 What NOT to record, ever:
 - Anything about another person. Not their role, not their performance, not their plans, not \
 their health, not who they report to. If a fact is about somebody who is not the person you are \
 helping, leave it out. There is no version of it that is acceptable.
-- Anything that happened once. A decision, a date, an action item — those live in the meeting.
+- Anything that happened once. A decision, a date, an action item: those live in the meeting.
 - Secrets. Keys, tokens, card numbers, phone numbers, addresses.
 - Anything you inferred rather than heard.
 
 Set `global` to true when the fact is true everywhere, and false when it only applies to the \
 project this meeting belongs to.
 
-Write each fact in the person's own voice, starting with \"I\" or \"my\" — \"I own the billing \
+Write each fact in the person's own voice, starting with \"I\" or \"my\": \"I own the billing \
 service\", not \"the user owns the billing service\"."
     )
 }
@@ -327,7 +327,7 @@ service\", not \"the user owns the billing service\"."
 ///
 /// Tolerant of code fences and surrounding prose, like every other JSON protocol in this codebase:
 /// a model asked for JSON wraps it. An unreadable reply yields nothing, which the caller treats as
-/// "this meeting had nothing worth keeping" — the same outcome as an honest empty answer, and the
+/// "this meeting had nothing worth keeping": the same outcome as an honest empty answer, and the
 /// safe direction for a feature whose failure mode is remembering too much.
 pub fn parse_candidates(reply: &str) -> Vec<Candidate> {
     #[derive(Deserialize)]
@@ -443,7 +443,7 @@ mod tests {
 
     /// A characterisation that names somebody without a pronoun. What matters is that it is not
     /// stored; the reason given is the weaker "not about the user", because a name cannot be
-    /// detected here reliably — see the comment in `reflect`.
+    /// detected here reliably: see the comment in `reflect`.
     #[test]
     fn a_named_characterisation_is_still_never_stored() {
         let v = reflect(&candidate("Dana is difficult in design reviews"), &[]);
@@ -460,8 +460,8 @@ mod tests {
         assert_eq!(v, Verdict::Keep { global: false });
     }
 
-    /// The pronoun check used substrings, so these all read as first person — "mine" is in
-    /// "undermine", "our" in "behaviour", "me" in "time", "us" in "status", "my" in "economy" —
+    /// The pronoun check used substrings, so these all read as first person ("mine" is in
+    /// "undermine", "our" in "behaviour", "me" in "time", "us" in "status", "my" in "economy"),
     /// and were kept as facts about the user.
     #[test]
     fn a_pronoun_inside_another_word_does_not_make_a_sentence_about_the_user() {

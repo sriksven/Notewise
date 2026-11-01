@@ -1,7 +1,7 @@
 //! Local REST API over the Notewise engine.
 //!
-//! Binds to **loopback only**. Any process on the machine — the browser extension, a script,
-//! the desktop app's frontend — can reach the running engine; nothing off the machine can.
+//! Binds to **loopback only**. Any process on the machine (the browser extension, a script,
+//! the desktop app's frontend) can reach the running engine; nothing off the machine can.
 //! See [`Server::bind`], which refuses a non-loopback address rather than quietly exposing a
 //! user's meetings to their network.
 //!
@@ -103,7 +103,7 @@ pub struct Server {
 /// Start every background loop.
 ///
 /// One function rather than the same four lines at each entry point. There are three ways to start
-/// this server — `serve`, `serve_with_frontend`, `bind_with_frontend` — and while the list was
+/// this server (`serve`, `serve_with_frontend`, `bind_with_frontend`) and while the list was
 /// duplicated across all three, adding a loop meant remembering all three. A loop wired into two of
 /// them is the worst outcome available: it works when you test it and does nothing in the build
 /// users run.
@@ -121,14 +121,14 @@ fn start_background(state: &Arc<AppState>) {
 }
 
 impl Server {
-    /// Default port. Registered nowhere — chosen to sit clear of common dev servers.
+    /// Default port. Registered nowhere: chosen to sit clear of common dev servers.
     pub const DEFAULT_PORT: u16 = 47_821;
 
     /// Validate a bind address.
     ///
     /// Returns [`ServeError::NotLoopback`] for anything that would accept connections from
-    /// off the machine. The API is unauthenticated by design — it assumes a trust boundary at
-    /// the machine edge — so binding it to `0.0.0.0` would publish the user's meetings to
+    /// off the machine. The API is unauthenticated by design: it assumes a trust boundary at
+    /// the machine edge, so binding it to `0.0.0.0` would publish the user's meetings to
     /// their whole network.
     pub fn bind(addr: impl AsRef<str>) -> Result<Self, ServeError> {
         let addr = addr.as_ref();
@@ -146,7 +146,7 @@ impl Server {
     /// How many ports above the default are considered discoverable.
     ///
     /// The browser extension has to find the engine without being told where it is, and a
-    /// Manifest V3 `host_permissions` list is static — it cannot name a port chosen at runtime.
+    /// Manifest V3 `host_permissions` list is static: it cannot name a port chosen at runtime.
     /// A small, fixed window is the only shape that satisfies both: the engine lands somewhere
     /// inside it, and the extension can enumerate it.
     ///
@@ -164,7 +164,7 @@ impl Server {
 
     /// Bind the first free port in the discoverable window, falling back to any free port.
     ///
-    /// The desktop shell used to ask for port 0 — a free port chosen by the OS — which avoided
+    /// The desktop shell used to ask for port 0 (a free port chosen by the OS) which avoided
     /// collisions and made the engine unfindable: the extension had one hardcoded port and the
     /// app was never on it.
     ///
@@ -175,7 +175,7 @@ impl Server {
             let port = Self::DEFAULT_PORT + offset;
             // Bound and dropped immediately: this is a probe, and the real listener is created
             // later by `bind_with_frontend`. A port that frees in between is a race we lose by
-            // failing to start, which the caller reports — not by binding something unexpected.
+            // failing to start, which the caller reports, not by binding something unexpected.
             if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
                 return Self {
                     addr: SocketAddr::from(([127, 0, 0, 1], port)),
@@ -237,7 +237,7 @@ impl Server {
 
         // Every MCP server this session started is a child process. `kill_on_drop` is the backstop,
         // but a process left for the allocator to notice is a process the user cannot see and has
-        // no window to close — so they are stopped here, on the way out, on purpose.
+        // no window to close, so they are stopped here, on the way out, on purpose.
         state.mcp().stop_all().await;
 
         Ok(())
@@ -246,7 +246,7 @@ impl Server {
     /// Bind now and return the router-serving future plus the real address.
     ///
     /// Binding before returning is what lets an embedder (the desktop shell) know the port is
-    /// actually listening before it points a window at it — otherwise the window can load
+    /// actually listening before it points a window at it; otherwise the window can load
     /// before the server is up and show a connection error on launch.
     pub async fn bind_with_frontend(
         self,
@@ -298,7 +298,7 @@ fn from_this_machine(router: AxumRouter) -> AxumRouter {
 /// Build the route table and serve a frontend from `dir` alongside it.
 ///
 /// Serving the UI from the engine is a security decision, not a convenience. The alternative
-/// — the frontend on its own origin calling this API — is cross-origin, which would require
+/// (the frontend on its own origin calling this API) is cross-origin, which would require
 /// permissive CORS on an unauthenticated loopback server. That would let **any** page the user
 /// visits read their meetings, since same-origin policy is currently the only thing standing
 /// in the way. Same origin means no CORS is needed at all.
@@ -337,7 +337,7 @@ async fn serve_index(index: std::path::PathBuf) -> axum::response::Response {
             tracing::error!(path = %index.display(), error = %e, "frontend index is missing");
             (
                 axum::http::StatusCode::NOT_FOUND,
-                "the Notewise frontend is not built — run `npm run build` in apps/desktop",
+                "the Notewise frontend is not built: run `npm run build` in apps/desktop",
             )
                 .into_response()
         }
@@ -355,7 +355,7 @@ mod tests {
     ///
     /// The tests below match on `\n`-delimited patterns. Windows CI checks out with
     /// `core.autocrlf=true`, so on that runner every line ends `\r\n` and a search for `"\n}\n"`
-    /// finds nothing — which is exactly how `every_spawn_is_started` failed there while passing on
+    /// finds nothing, which is exactly how `every_spawn_is_started` failed there while passing on
     /// every other platform. Normalising once is cheaper than making each pattern tolerate both.
     fn read_source(path: &std::path::Path) -> String {
         std::fs::read_to_string(path)
@@ -382,7 +382,7 @@ mod tests {
             if path.extension().and_then(|e| e.to_str()) != Some("rs") {
                 continue;
             }
-            // Skipped: this file holds `start_background`, not a loop — and it holds this test,
+            // Skipped: this file holds `start_background`, not a loop, and it holds this test,
             // whose own source would otherwise match the needle below. A drift test that matches
             // itself reports drift that does not exist.
             if path.file_name().and_then(|n| n.to_str()) == Some("lib.rs") {
@@ -432,8 +432,8 @@ mod tests {
     /// Every way of starting the server starts the background loops.
     ///
     /// The counterpart to the test above: that one catches a loop nobody starts, this one catches an
-    /// entry point that starts nothing. Both failures look identical from the outside — a feature
-    /// that quietly never happens — and this is the half that a fourth `serve`-shaped method would
+    /// entry point that starts nothing. Both failures look identical from the outside: a feature
+    /// that quietly never happens, and this is the half that a fourth `serve`-shaped method would
     /// reintroduce.
     #[test]
     fn every_entry_point_starts_them() {
@@ -626,7 +626,7 @@ mod tests {
             assert!(!body.contains("<!doctype"), "html shadowed the api: {body}");
         }
 
-        /// The guard has to be on the routers the entry points actually serve — a layer defined and
+        /// The guard has to be on the routers the entry points actually serve: a layer defined and
         /// never applied is the failure this pins. The frontend fallback included: a rebinding page
         /// should not even load.
         #[tokio::test]

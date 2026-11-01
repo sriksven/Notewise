@@ -8,8 +8,8 @@
 //! # Why this is in the engine and not the shell
 //!
 //! The design's architecture says nothing in the engine depends on `os-input`. This does, and the
-//! reason is worth stating rather than hiding: with the `os-input` feature off — which is the
-//! default, and what CI builds — that crate is pure logic with no platform SDK, no `unsafe`, and no
+//! reason is worth stating rather than hiding: with the `os-input` feature off (which is the
+//! default, and what CI builds) that crate is pure logic with no platform SDK, no `unsafe`, and no
 //! grant of any kind. What the design was protecting against is the assistant's *platform*
 //! requirements leaking into an engine build, and a feature that is off does not leak.
 //!
@@ -20,7 +20,7 @@
 //!
 //! Raw transcription needs no model beyond Whisper, so it is the one thing here that works with no
 //! LLM configured at all. Cleaned sends the transcript to whichever backend is set to fix
-//! punctuation and casing — which is a round trip and, on a hosted backend, an upload. So it is a
+//! punctuation and casing, which is a round trip and, on a hosted backend, an upload. So it is a
 //! choice per session and not a default.
 //!
 //! # What a stop does, in order
@@ -66,7 +66,7 @@ const MODE_SETTING: &str = "assistant.dictation.mode";
 /// The default binding.
 ///
 /// Chosen from what nothing else claims. `super+shift+d` is not in the OS's set, not a common editor
-/// shortcut, and not one of the combinations [`notewise_os_input::AVOID_BY_DEFAULT`] lists — which a
+/// shortcut, and not one of the combinations [`notewise_os_input::AVOID_BY_DEFAULT`] lists, which a
 /// test checks, because a default hotkey that collides with somebody's IDE is an uninstall.
 pub const DEFAULT_HOTKEY: &str = "super+shift+d";
 
@@ -81,7 +81,7 @@ pub const DEFAULT_OVERLAY_HOTKEY: &str = "super+shift+a";
 /// Every feature that holds a global hotkey, and where its binding is stored.
 ///
 /// Held as data so the conflict check, the settings read, and the shell's registration cannot drift
-/// apart. Adding a third feature means adding a row, and the conflict detection covers it for free —
+/// apart. Adding a third feature means adding a row, and the conflict detection covers it for free,
 /// which is the whole reason [`HotkeyRegistry`] exists rather than two settings compared by hand.
 pub const HOTKEYS: &[(&str, &str, &str)] = &[
     (FEATURE, HOTKEY_SETTING, DEFAULT_HOTKEY),
@@ -166,11 +166,11 @@ pub fn join_segments(segments: &[Segment]) -> String {
 /// The instruction for the cleaned mode.
 ///
 /// Deliberately narrow. A model asked to "improve" dictation rewrites it, and a dictation surface
-/// that changes the user's words is worse than one that leaves a missing comma — they said what
+/// that changes the user's words is worse than one that leaves a missing comma: they said what
 /// they said, and this is not a drafting tool.
 pub fn cleanup_prompt() -> &'static str {
     "You fix the punctuation and capitalisation of dictated speech. Return the corrected text and \
-nothing else — no preamble, no quotes, no commentary.
+nothing else: no preamble, no quotes, no commentary.
 
 Rules:
 - Do not change the words. Do not add, remove, reorder, or rephrase anything.
@@ -270,7 +270,7 @@ fn unsupported_reason() -> String {
         .to_string()
 }
 
-/// `device` and `language` are read only by the capture path, which is behind the feature flags —
+/// `device` and `language` are read only by the capture path, which is behind the feature flags,
 /// so a build that cannot record accepts them and has nothing to do with them. Kept rather than
 /// gated so the request shape does not change between builds, which would make one client work
 /// against one engine and not another.
@@ -341,7 +341,7 @@ struct DictatedBody {
     mode: &'static str,
     /// How the text got where it went, or why it did not.
     insertion: Option<Insertion>,
-    /// One sentence for the user, when there is something worth saying — a borrowed clipboard, or
+    /// One sentence for the user, when there is something worth saying: a borrowed clipboard, or
     /// a refusal and what to do about it.
     note: Option<String>,
     duration_ms: i64,
@@ -381,7 +381,7 @@ async fn stop_and_insert(State(state): State<Shared>) -> ApiResult<Json<Dictated
             (Some(outcome), note)
         }
         // A missing grant or an uncompiled platform layer. The text is still returned, and the
-        // message says which pane to open — the whole point of that error carrying it.
+        // message says which pane to open, the whole point of that error carrying it.
         Err(error) => (None, Some(insertion_note(&error))),
     };
 
@@ -397,7 +397,7 @@ async fn stop_and_insert(State(state): State<Shared>) -> ApiResult<Json<Dictated
 
 /// What to tell the user when insertion could not even be attempted.
 fn insertion_note(error: &OsInputError) -> String {
-    format!("{error} Your text is above — copy it from here.")
+    format!("{error} Your text is above. Copy it from here.")
 }
 
 /// Stop listening and throw the words away.
@@ -514,7 +514,7 @@ async fn capabilities(State(state): State<Shared>) -> ApiResult<Json<Capabilitie
     let mode = stored_mode(&state).await;
 
     // Only the two the assistant actually needs. Screen recording and input monitoring belong to
-    // 9b and 9d, which are not built — listing them here would ask for grants nothing uses.
+    // 9b and 9d, which are not built; listing them here would ask for grants nothing uses.
     let permissions = [Capability::Microphone, Capability::Accessibility]
         .into_iter()
         .map(|capability| {
@@ -580,8 +580,8 @@ struct HotkeySaved {
 /// Set a global hotkey.
 ///
 /// Validated through the registry every feature's binding goes into, so a combination that would
-/// collide with another Notewise feature is refused here — at configuration time, with both names in
-/// the message — rather than at press time, when the symptom is a key that does nothing.
+/// collide with another Notewise feature is refused here (at configuration time, with both names in
+/// the message) rather than at press time, when the symptom is a key that does nothing.
 async fn set_hotkey(
     State(state): State<Shared>,
     Json(body): Json<HotkeyBody>,
@@ -651,7 +651,7 @@ async fn set_hotkey(
 ///
 /// Built from settings each time rather than kept in memory: the bindings change rarely and reading
 /// two rows is cheaper than a cache that can be stale. A stored binding that no longer parses is
-/// skipped rather than fatal — it would otherwise make the settings screen unopenable.
+/// skipped rather than fatal: it would otherwise make the settings screen unopenable.
 async fn load_registry(state: &Shared) -> HotkeyRegistry {
     let mut registry = HotkeyRegistry::new();
     let stored = stored_hotkeys(state).await;
@@ -697,7 +697,7 @@ struct ContextBody {
 /// What is on screen, as text.
 ///
 /// Exists so the foundation's screen-context reader is reachable and inspectable before 9b is built
-/// on top of it — and so a user can see exactly what an overlay assistant *would* be shown, which
+/// on top of it, and so a user can see exactly what an overlay assistant *would* be shown, which
 /// is the kind of thing that should be visible before it is used rather than after.
 async fn read_context() -> ApiResult<Json<ContextBody>> {
     let context = notewise_os_input::screen_context().map_err(|error| match error {
@@ -724,7 +724,7 @@ fn spawn_capture(
     use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
     use notewise_transcription::{ModelRegistry, ModelStore, TranscriptionEngine, WhisperEngine};
 
-    // The smallest installed model, or the catalogue's default when none is installed — the
+    // The smallest installed model, or the catalogue's default when none is installed: the
     // availability check below is what turns that into a message the user can act on.
     let model = ModelRegistry::all()
         .into_iter()
@@ -737,7 +737,7 @@ fn spawn_capture(
 
     if !store.is_available(&model) {
         return Err(format!(
-            "the '{}' model is not installed — download it first",
+            "the '{}' model is not installed. Download it first",
             model.name
         ));
     }
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     /// Without the platform layer, reading the screen refuses with a reason rather than returning
-    /// an empty context — which would read as "there was nothing on screen".
+    /// an empty context, which would read as "there was nothing on screen".
     #[test]
     fn reading_the_screen_says_why_it_cannot_rather_than_answering_nothing() {
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -1163,7 +1163,7 @@ mod tests {
                 assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
                 // The reason differs by platform: a macOS build without the feature names it, and a
                 // Linux build says the platform cannot do this at all. Asserting the feature name
-                // passed on macOS and failed on Linux for a build behaving correctly — so what is
+                // passed on macOS and failed on Linux for a build behaving correctly, so what is
                 // asserted is the property that holds everywhere: the refusal explains itself, and
                 // does not point at a setting that cannot fix it.
                 let reason = body["error"].as_str().expect("a reason");

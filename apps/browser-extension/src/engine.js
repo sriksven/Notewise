@@ -1,17 +1,17 @@
 /**
  * The local engine, as seen from the extension.
  *
- * The extension is just another loopback API client and gets no special access — the same surface
+ * The extension is just another loopback API client and gets no special access: the same surface
  * the CLI and the desktop frontend use. Nothing here reaches the network: `127.0.0.1` is refused by
  * `Server::bind` if it is ever pointed anywhere else.
  *
  * Runs in the service worker (`background.js`), never on the meeting page. A request made from a
- * content script is the page's request, which Chrome refuses to send to loopback — see `relay.js`.
+ * content script is the page's request, which Chrome refuses to send to loopback. See `relay.js`.
  *
  * # Finding it
  *
  * The engine does not sit on one known port. The desktop shell picks the first free port in a
- * small window, because a `notewise serve` may already hold the first one — and a Manifest V3
+ * small window, because a `notewise serve` may already hold the first one, and a Manifest V3
  * `host_permissions` list is static, so it cannot name a port chosen at runtime.
  *
  * So the extension enumerates the window. That means it will knock on ports belonging to other
@@ -82,7 +82,7 @@ async function identify(port, fetchImpl) {
 /**
  * Find the engine that is actually recording.
  *
- * Probed in parallel — ten sequential timeouts would be seven seconds before a meeting page
+ * Probed in parallel: ten sequential timeouts would be seven seconds before a meeting page
  * learned there was nothing to talk to.
  *
  * An engine that is recording wins over one that is merely running: with both a CLI and the
@@ -128,8 +128,8 @@ async function recordingStartedAt(engineOrigin, meetingId, fetchImpl) {
  * back with it so a caller does not have to search again for every batch.
  *
  * `startedAt` is the recording's start, which the page needs because the engine measures turns
- * from it and the page cannot know it: tracking starts when a poll first sees the recording — up to
- * a poll interval late — or whenever the meeting tab is opened or reloaded, which can be an hour
+ * from it and the page cannot know it: tracking starts when a poll first sees the recording (up to
+ * a poll interval late) or whenever the meeting tab is opened or reloaded, which can be an hour
  * in. Without it every turn lands that much early, on whoever was speaking then.
  */
 export async function activeRecording(fetchImpl = fetch) {
@@ -148,8 +148,8 @@ export async function activeRecording(fetchImpl = fetch) {
  * Post a batch of speaker events.
  *
  * Returns true when the engine accepted them. A rejection is logged once by the caller rather than
- * retried: the engine rejects a batch for structural reasons — an unknown participant, a negative
- * timestamp — and re-sending the identical body would fail identically.
+ * retried: the engine rejects a batch for structural reasons (an unknown participant, a negative
+ * timestamp), and re-sending the identical body would fail identically.
  */
 export async function postSpeakerEvents(meetingId, batch, engineOrigin, fetchImpl = fetch) {
   const response = await fetchImpl(
@@ -169,13 +169,13 @@ export async function postSpeakerEvents(meetingId, batch, engineOrigin, fetchImp
  *
  * # What crosses the wire, and what does not
  *
- * The platform — `meet`, `zoom`, or `teams` — and an opaque key. Not the URL, not the meeting code,
+ * The platform (`meet`, `zoom`, or `teams`) and an opaque key. Not the URL, not the meeting code,
  * not the page title, not the roster. The engine's only use for an identity here is to avoid
  * notifying twice about one meeting, and a digest does that exactly as well as the thing it was
  * derived from. Sending the link as well would be sending something nothing reads.
  *
- * The digest is for deduplication rather than secrecy — a meeting code is short enough that a
- * determined listener could search for it — but the listener has already been checked to be
+ * The digest is for deduplication rather than secrecy (a meeting code is short enough that a
+ * determined listener could search for it), but the listener has already been checked to be
  * Notewise before anything is sent, and not sending data nobody needs is worth doing regardless.
  *
  * Returns true when an engine accepted the signal, which is what stops the caller repeating it.
@@ -201,7 +201,7 @@ export async function postJoinSignal(platform, meetingId, fetchImpl = fetch) {
     return response.ok;
   } catch {
     // The engine went away between the probe and the post. Not an error worth surfacing on a
-    // meeting page — the user gets no notification, which is the same as not having the app open.
+    // meeting page: the user gets no notification, which is the same as not having the app open.
     return false;
   }
 }

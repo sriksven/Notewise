@@ -7,7 +7,7 @@
 //! to a prompt. All of that runs in CI on any platform.
 //!
 //! The platform layer is [`native`], behind the off-by-default `os-input` feature, and it is the
-//! only place in this crate with `unsafe` in it — a build without the feature keeps
+//! only place in this crate with `unsafe` in it: a build without the feature keeps
 //! `forbid(unsafe_code)`, which the attribute below states conditionally rather than as a comment.
 //! Engine CI must not need an Accessibility grant or a windowing toolchain, exactly as it must not
 //! need a microphone.
@@ -145,7 +145,7 @@ pub fn selection_is_replaceable() -> Result<bool> {
 /// Read text off the screen as pixels.
 ///
 /// Needs the Screen & System Audio Recording grant, which macOS gives to an app bundle and not to
-/// a loose binary — so under `cargo run` this refuses with that reason rather than a permission
+/// a loose binary, so under `cargo run` this refuses with that reason rather than a permission
 /// prompt that would do nothing.
 pub fn recognise_text_on_screen() -> Result<String> {
     #[cfg(all(target_os = "macos", feature = "os-input"))]
@@ -166,7 +166,7 @@ pub fn recognise_text_on_screen() -> Result<String> {
 
 /// Start noticing when the user pauses while typing.
 ///
-/// Records timing and a count. Not keys — see `native::keystrokes` for why that distinction is the
+/// Records timing and a count. Not keys: see `native::keystrokes` for why that distinction is the
 /// whole argument for asking for Input Monitoring at all.
 pub fn start_typing_monitor() -> Result<()> {
     #[cfg(all(target_os = "macos", feature = "os-input"))]
@@ -192,7 +192,7 @@ pub fn stop_typing_monitor() {
 
 /// What has been typed lately, as timing.
 ///
-/// A default — nothing running, nothing seen — on a build that cannot watch. Not an error: a caller
+/// A default (nothing running, nothing seen) on a build that cannot watch. Not an error: a caller
 /// asking "should I suggest something" gets "no" rather than a failure to handle.
 pub fn typing_activity() -> TypingActivity {
     #[cfg(all(target_os = "macos", feature = "os-input"))]

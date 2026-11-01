@@ -5,7 +5,7 @@
 //! `client.rs`'s tests hand `McpClient` a `Transport` implemented in the test, which proves the
 //! lifecycle and the gate and proves nothing at all about framing. Newline delimiting, a banner
 //! printed before the protocol starts, a notification arriving between a request and its reply, an
-//! SSE-framed body, a session header that has to be echoed — none of those exist above the
+//! SSE-framed body, a session header that has to be echoed; none of those exist above the
 //! transport, and all of them are how this breaks in the field.
 //!
 //! So: a real child process reached over real pipes, and a real HTTP server reached over a real
@@ -35,7 +35,7 @@ fn allowing(server: &str, tool: &str) -> Allowlist {
 /// A POSIX-shell MCP server.
 ///
 /// Gated with the tests that use it. Without that, a Windows build has three unused items and CI
-/// builds with `-D warnings` — so the whole test target fails to compile on a platform where the
+/// builds with `-D warnings`, so the whole test target fails to compile on a platform where the
 /// only thing wrong is that a shell script is not runnable.
 ///
 /// Chosen over a compiled helper binary on purpose: a helper would need its own crate target, and
@@ -128,7 +128,7 @@ async fn a_real_child_process_can_be_handshaken_listed_and_called() {
     assert_eq!(text_of(&result).as_deref(), Some("heard you"));
 
     // The banner on stdout before the handshake, and the stderr write during the call, both had to
-    // be tolerated for any of the above to pass — a client that treated either as fatal, or that
+    // be tolerated for any of the above to pass; a client that treated either as fatal, or that
     // let stderr fill its pipe, would have failed or hung by now.
 
     client.stop_all().await;
@@ -223,7 +223,7 @@ async fn stopping_a_server_ends_its_process() {
     panic!("the child process outlived its session");
 }
 
-/// `kill -0` — asks whether a pid exists without signalling it.
+/// `kill -0`: asks whether a pid exists without signalling it.
 #[cfg(unix)]
 fn alive(pid: i32) -> bool {
     std::process::Command::new("/bin/kill")
@@ -238,7 +238,7 @@ fn alive(pid: i32) -> bool {
 
 /// An in-process MCP server over streamable HTTP.
 ///
-/// It replies to `initialize` in plain JSON with a session id, and to `tools/call` in SSE framing —
+/// It replies to `initialize` in plain JSON with a session id, and to `tools/call` in SSE framing,
 /// which is the combination a real streamable-HTTP server produces, and the combination a client
 /// that only handled one of them would break on.
 async fn http_server() -> (
@@ -294,7 +294,7 @@ async fn http_server() -> (
             }),
             other if other.ends_with("call") => {
                 // SSE framing, with a keep-alive comment and a notification event ahead of the
-                // answer — all three of which a real server sends.
+                // answer: all three of which a real server sends.
                 let payload = json!({
                     "jsonrpc": "2.0",
                     "id": id,
@@ -407,7 +407,7 @@ async fn an_http_server_rejecting_a_method_reports_its_own_message() {
     let mut list = Allowlist::new();
     list.allow("remote", "post_message");
 
-    // The stub only publishes `post_message`, so this is refused before dispatch — which is the
+    // The stub only publishes `post_message`, so this is refused before dispatch, which is the
     // point: the schema cache is what makes that possible without a round trip.
     let err = client
         .call(&config, &list, "no_such_tool", json!({}))
