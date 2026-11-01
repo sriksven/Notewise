@@ -279,6 +279,30 @@ impl UtteranceBuffer {
         Some(self.take())
     }
 
+    /// What is buffered so far, without taking it.
+    ///
+    /// For showing words while somebody is still talking. A buffer is handed out at a pause or a
+    /// length cap, which is the right place to cut and a second or more behind the speaker, so live
+    /// dictation decodes this in between to keep up. Nothing is consumed: the clock, the gate and
+    /// where the next cut falls are exactly what they would have been without the look.
+    ///
+    /// `None` until the buffer holds enough speech to be worth decoding, for the same reason
+    /// [`Self::flush`] refuses one. A look at room tone is where invented words come from.
+    pub fn pending(&self) -> Option<Utterance> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+
+        if self.gate_on_speech && self.speech_ms < self.config.min_speech_ms {
+            return None;
+        }
+
+        Some(Utterance {
+            samples: self.buffer.clone(),
+            offset_ms: self.offset_ms(),
+        })
+    }
+
     /// Take the buffer and advance the clock past it.
     fn take(&mut self) -> Utterance {
         self.take_until(self.buffer.len())
@@ -746,5 +770,66 @@ mod tests {
         let mut buffer = UtteranceBuffer::new(RATE);
         assert!(buffer.flush().is_none());
         assert!(buffer.push(&[]).is_none());
+    }
+
+    /// Live dictation looks before anyone has spoken. A quiet room must give it nothing to decode,
+    /// or the first thing shown would be a sentence Whisper made up.
+    #[test]
+    fn a_look_at_a_quiet_room_sees_nothing() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+        assert!(buffer.pending().is_none());
+
+        feed(&mut buffer, &silence(800));
+        assert!(buffer.pending().is_none());
+    }
+
+    /// The point of a look: the words being spoken are there before the speaker pauses.
+    #[test]
+    fn a_look_mid_phrase_sees_the_speech_so_far() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let out = feed(&mut buffer, &speech(700));
+        assert!(
+            out.is_empty(),
+            "nothing is cut while the speaker is still talking"
+        );
+
+        let look = buffer.pending().expect("the phrase so far");
+        assert_eq!(look.offset_ms, 0);
+        assert_eq!(look.samples.len(), samples(700));
+    }
+
+    /// A look must not move the cut. The phrase handed over at the pause is the whole phrase, from
+    /// where it started, as if nothing had looked at it on the way.
+    #[test]
+    fn a_look_takes_nothing() {
+        let mut looked = UtteranceBuffer::new(RATE);
+        let mut untouched = UtteranceBuffer::new(RATE);
+
+        let mut audio = speech(1_200);
+        audio.extend(silence(1_500));
+
+        let mut cut = Vec::new();
+        for frame in audio.chunks(samples(FRAME_MS)) {
+            let _ = looked.pending();
+            cut.extend(looked.push(frame));
+        }
+
+        assert_eq!(cut, feed(&mut untouched, &audio));
+        assert_eq!(cut.len(), 1);
+        assert_eq!(cut[0].offset_ms, 0);
+    }
+
+    /// Once a phrase is cut it belongs to the kept text. A look straight after must not show it a
+    /// second time.
+    #[test]
+    fn a_look_after_a_cut_does_not_repeat_the_phrase() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let mut audio = speech(1_000);
+        audio.extend(silence(1_500));
+        assert_eq!(feed(&mut buffer, &audio).len(), 1);
+
+        assert!(buffer.pending().is_none());
     }
 }

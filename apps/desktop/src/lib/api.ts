@@ -702,6 +702,10 @@ export interface DictationStatus {
   listening: boolean;
   started_at: string | null;
   mode: "raw" | "cleaned" | null;
+  /** Words already decoded properly, while a session started with `partials` is listening. */
+  committed: string | null;
+  /** A guess at the phrase still being spoken. The next read may revise it. */
+  interim: string | null;
 }
 
 /**
@@ -1872,14 +1876,24 @@ export const api = {
 
   dictationStatus: () => request<DictationStatus>("/v1/dictation"),
 
-  /** Start listening. Nothing is transcribed until it stops. */
-  startDictation: (input: { mode?: "raw" | "cleaned" } = {}) =>
+  /**
+   * Start listening.
+   *
+   * `insert: false` hands the words back at the stop instead of typing them at the cursor, for a
+   * box inside this app. `partials: true` makes the status carry the words while they are said.
+   */
+  startDictation: (
+    input: { mode?: "raw" | "cleaned"; insert?: boolean; partials?: boolean } = {},
+  ) =>
     request<DictationStatus>("/v1/dictation", {
       method: "POST",
       body: JSON.stringify(input),
     }),
 
-  /** Stop listening, transcribe, and put the words at the cursor. */
+  /**
+   * Stop listening, transcribe, and put the words at the cursor, unless it was started with
+   * `insert: false`.
+   */
   stopDictation: () => request<Dictated>("/v1/dictation", { method: "DELETE" }),
 
   cancelDictation: () =>

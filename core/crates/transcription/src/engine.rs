@@ -210,6 +210,32 @@ impl WhisperEngine {
         ))
     }
 
+    /// Decode what has been said since the last cut, without consuming it.
+    ///
+    /// Live dictation shows words while somebody is still talking. [`TranscriptionEngine::feed`]
+    /// only decodes at a pause or a length cap, which is right for text that is kept and a second
+    /// or more behind the speaker, so this decodes the unfinished phrase on demand. What it returns
+    /// is a guess the next look may revise, and nothing keeps it: the buffer is left where it was,
+    /// and the text that stays still comes from `feed` and `finish`.
+    ///
+    /// Greedy rather than beam search. A look is repeated every few hundred milliseconds and
+    /// replaced by the next one, so keeping up with the speaker is worth more than the accuracy
+    /// beam search buys. The kept text is still decoded with beam search.
+    ///
+    /// Empty until the phrase holds enough speech to decode, for the reason the gate exists.
+    #[cfg(feature = "whisper")]
+    pub fn preview(&self) -> Result<Vec<Segment>> {
+        match self.stream.pending() {
+            Some(utterance) => self.decode(utterance, Search::Greedy),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    #[cfg(not(feature = "whisper"))]
+    pub fn preview(&self) -> Result<Vec<Segment>> {
+        Err(Self::unavailable())
+    }
+
     #[cfg(not(feature = "whisper"))]
     fn unavailable() -> TranscriptionError {
         TranscriptionError::EngineUnavailable {
@@ -226,7 +252,7 @@ impl WhisperEngine {
     /// here produced "I know. You're happy to see a new work to grow.", indistinguishable in
     /// the transcript from something a person said.
     #[cfg(feature = "whisper")]
-    fn decode(&mut self, utterance: Utterance) -> Result<Vec<Segment>> {
+    fn decode(&self, utterance: Utterance, search: Search) -> Result<Vec<Segment>> {
         if utterance.samples.is_empty() {
             return Ok(Vec::new());
         }
@@ -248,10 +274,16 @@ impl WhisperEngine {
         //
         // Beam 5 is whisper.cpp's default. The cost is decode time, measured rather than
         // assumed: see `benches/` notes in the commit that introduced this.
-        let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
-            beam_size: 5,
-            patience: -1.0,
-        });
+        //
+        // A preview is the one exception, and greedy is right for it: see `preview`.
+        let strategy = match search {
+            Search::Beam => whisper_rs::SamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: -1.0,
+            },
+            Search::Greedy => whisper_rs::SamplingStrategy::Greedy { best_of: 1 },
+        };
+        let mut params = whisper_rs::FullParams::new(strategy);
         // whisper.cpp writes to stdout by default, which would corrupt the MCP server's
         // JSON-RPC stream sharing this process.
         params.set_print_progress(false);
@@ -326,7 +358,7 @@ impl TranscriptionEngine for WhisperEngine {
         }
 
         match self.stream.push(&frame.samples) {
-            Some(utterance) => self.decode(utterance),
+            Some(utterance) => self.decode(utterance, Search::Beam),
             None => Ok(Vec::new()),
         }
     }
@@ -341,7 +373,7 @@ impl TranscriptionEngine for WhisperEngine {
     #[cfg(feature = "whisper")]
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         match self.stream.flush() {
-            Some(utterance) => self.decode(utterance),
+            Some(utterance) => self.decode(utterance, Search::Beam),
             None => Ok(Vec::new()),
         }
     }
@@ -350,6 +382,16 @@ impl TranscriptionEngine for WhisperEngine {
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         Err(Self::unavailable())
     }
+}
+
+/// How hard a decode searches for the best transcription.
+#[cfg(feature = "whisper")]
+#[derive(Debug, Clone, Copy)]
+enum Search {
+    /// Beam search, for text that is kept.
+    Beam,
+    /// One pass, for a preview that is replaced a moment later.
+    Greedy,
 }
 
 /// Silence appended to every buffer before whisper.cpp sees it.
@@ -969,6 +1011,76 @@ mod tests {
             "span was {}",
             transcript.span_ms()
         );
+    }
+
+    /// Live dictation's look, on real speech: words show before the phrase is cut, and looking
+    /// leaves the kept text exactly what it would have been.
+    ///
+    /// Fed in 100 ms frames and looked at every 300 ms of audio, as dictation does. Prints how long
+    /// each look took, which is the number that decides whether text keeps up with a speaker.
+    /// `NOTEWISE_MODEL` defaults to `tiny.en`, the smallest model and so the one dictation picks
+    /// when it is installed.
+    #[tokio::test]
+    #[cfg(feature = "whisper")]
+    #[ignore = "requires a downloaded model and a speech sample"]
+    async fn previews_real_speech_before_the_phrase_is_cut() {
+        use notewise_audio_capture::AudioSource;
+
+        let dir = std::env::var("NOTEWISE_MODEL_DIR").expect("NOTEWISE_MODEL_DIR");
+        let sample = std::env::var("NOTEWISE_SAMPLE_WAV").expect("NOTEWISE_SAMPLE_WAV");
+        let name = std::env::var("NOTEWISE_MODEL").unwrap_or_else(|_| "tiny.en".into());
+
+        let model = crate::ModelRegistry::get(&name).expect("a known model");
+        let mut looked = WhisperEngine::new(model, ModelStore::new(&dir)).expect("engine");
+        let mut untouched = looked.sibling();
+
+        let mut source = notewise_audio_capture::FileSource::open_wav(&sample).expect("wav");
+        let mut kept = Vec::new();
+        let mut kept_untouched = Vec::new();
+        let mut early_look = None;
+        let mut look_ms = Vec::new();
+        let mut frames = 0;
+
+        while let Some(frame) = source.next_frame().expect("frame") {
+            let frame = frame.to_transcription_format();
+            kept.extend(looked.feed(&frame).await.expect("feed"));
+            kept_untouched.extend(untouched.feed(&frame).await.expect("feed"));
+
+            frames += 1;
+            if frames % 3 == 0 {
+                let started = std::time::Instant::now();
+                let look = looked.preview().expect("preview");
+                look_ms.push(started.elapsed().as_millis());
+
+                if kept.is_empty() && early_look.is_none() && !look.is_empty() {
+                    early_look = Some(look.iter().map(|s| s.text.clone()).collect::<Vec<_>>());
+                }
+            }
+        }
+        kept.extend(looked.finish().await.expect("finish"));
+        kept_untouched.extend(untouched.finish().await.expect("finish"));
+
+        println!(
+            "model: {name}, gpu enabled: {}",
+            WhisperEngine::gpu_enabled()
+        );
+        println!("first look, before any phrase was cut: {early_look:?}");
+        println!(
+            "looks: {}, slowest {} ms, mean {} ms",
+            look_ms.len(),
+            look_ms.iter().max().copied().unwrap_or(0),
+            look_ms.iter().sum::<u128>() / look_ms.len().max(1) as u128,
+        );
+        println!(
+            "kept: {:?}",
+            kept.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        assert!(
+            early_look.is_some(),
+            "no words were shown before the first phrase was cut"
+        );
+        assert_eq!(kept, kept_untouched, "looking changed the kept text");
     }
 
     #[tokio::test]
