@@ -34,7 +34,7 @@ pub struct RelatedNode {
 
 /// Walk outward from `start`, nearest first, up to `depth` hops.
 ///
-/// Each node is reported once, by its shortest path — breadth-first order guarantees the
+/// Each node is reported once, by its shortest path; breadth-first order guarantees the
 /// first time a node is dequeued is via a shortest route, so cycles terminate and a node
 /// reachable by several paths does not appear repeatedly.
 pub(crate) fn breadth_first(

@@ -1,4 +1,4 @@
-//! The AI router — the seam the local-or-cloud promise rests on.
+//! The AI router: the seam the local-or-cloud promise rests on.
 //!
 //! Every feature that needs a model calls [`AiBackend`]. Nothing above this crate imports a
 //! provider SDK or hits a provider URL. That is what makes "local or cloud, your choice" a
@@ -8,7 +8,7 @@
 //!
 //! | Backend | Runs | Needs |
 //! |---|---|---|
-//! | [`MockBackend`] | In-process | Nothing — exists so the seam stays testable |
+//! | [`MockBackend`] | In-process | Nothing - exists so the seam stays testable |
 //! | [`OllamaBackend`] | Local machine | A running Ollama daemon |
 //! | [`AnthropicBackend`] | Anthropic API | The user's own API key (BYOK) |
 //! | [`GeminiBackend`] | Google Gemini | The user's own API key |
@@ -84,7 +84,7 @@ use async_trait::async_trait;
 /// The one interface every model provider hides behind.
 ///
 /// Implementors must be `Send + Sync` so a single backend can be shared across the async
-/// runtime — the API server holds one and serves concurrent requests from it.
+/// runtime: the API server holds one and serves concurrent requests from it.
 #[async_trait]
 pub trait AiBackend: Send + Sync + std::fmt::Debug {
     /// Human-readable identifier for the model actually in use, recorded alongside
@@ -121,7 +121,7 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
     ///
     /// Defaults to [`Self::model_id`], which is right for every hosted provider: the
     /// configured name is the name, and there is nothing to resolve. A local daemon holds
-    /// specific tags, so a backend talking to one overrides this — reporting a name that is
+    /// specific tags, so a backend talking to one overrides this, reporting a name that is
     /// not the one about to run is how a user ends up looking for a model they never had.
     async fn resolved_model_id(&self) -> String {
         self.model_id().to_string()
@@ -130,7 +130,7 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
     /// The model names this backend can actually run, if it can be asked.
     ///
     /// Empty by default. A local daemon holds whatever the user has pulled, and the names are
-    /// exact tags — `llama3.1:8b` is not `llama3.1`, and a UI that offers the second when only
+    /// exact tags: `llama3.1:8b` is not `llama3.1`, and a UI that offers the second when only
     /// the first is installed sends the user into a 404 with no way to correct it. Hosted
     /// providers return empty: their catalogues change without us, and listing them costs a
     /// round trip against a metered key.
@@ -143,7 +143,7 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
 mod tests {
     use super::*;
 
-    /// The trait must stay object-safe — the router stores `Box<dyn AiBackend>`, and losing
+    /// The trait must stay object-safe; the router stores `Box<dyn AiBackend>`, and losing
     /// object safety would break the whole design.
     #[test]
     fn backend_trait_is_object_safe() {

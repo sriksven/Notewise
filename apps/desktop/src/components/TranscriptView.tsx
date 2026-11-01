@@ -38,7 +38,7 @@ function timestamp(ms: number): string {
  * The live transcript.
  *
  * Consecutive segments from one speaker are grouped so the transcript reads as
- * paragraphs rather than a timestamped log — a wall of per-segment speaker
+ * paragraphs rather than a timestamped log: a wall of per-segment speaker
  * labels is technically accurate and much harder to read back later.
  */
 export function TranscriptView({
@@ -209,7 +209,7 @@ export function TranscriptView({
  * line: a transcript is mostly read, and hundreds of edit affordances would drown the thing being
  * read. The `title` says how, for anyone who does not guess.
  *
- * Empty is refused locally as well as by the engine — blanking a line leaves a gap with no record
+ * Empty is refused locally as well as by the engine: blanking a line leaves a gap with no record
  * anything was there, which is a different operation from correcting one.
  */
 function CorrectableLine({

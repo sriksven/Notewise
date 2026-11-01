@@ -29,13 +29,13 @@ import {
  *
  * Accessibility is one of the two most alarming grants on macOS, and asking for it is a trust event
  * for a product sold on privacy. So this screen says what each grant is for before it asks, names
- * the pane, and says that macOS only applies it at the next launch — a feature that silently stays
+ * the pane, and says that macOS only applies it at the next launch: a feature that silently stays
  * broken until the app restarts reads as a feature that does not work.
  *
  * # Why there is a try-it control
  *
  * Every native path here needs a grant no test can hold. This is where somebody finds out whether
- * it actually works on their machine, and it reports which tier ran — including when the clipboard
+ * it actually works on their machine, and it reports which tier ran, including when the clipboard
  * was borrowed, which the user is entitled to know at the time rather than at their next paste.
  */
 export function AssistantSettings() {
@@ -166,7 +166,7 @@ export function AssistantSettings() {
    * Show what would be suggested for a sentence typed here.
    *
    * The same reason the dictation button exists: the real feature needs Input Monitoring, a pause in
-   * typing, and a model — three things that can each be wrong on their own — and nothing else in the
+   * typing, and a model: three things that can each be wrong on their own, and nothing else in the
    * app can tell you which. `force` skips the pause and the rate limit and nothing else, so an empty
    * field still has nothing to suggest.
    *
@@ -194,7 +194,7 @@ export function AssistantSettings() {
    *
    * The only other way out of a live session is "Stop and insert", which types wherever the cursor
    * happens to be. Someone who started this by accident, or said the wrong thing, needs an exit
-   * that does not put text into another application — the engine has had one all along and nothing
+   * that does not put text into another application: the engine has had one all along and nothing
    * offered it.
    */
   const discard = async () => {
@@ -223,7 +223,7 @@ export function AssistantSettings() {
         Dictation
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-        Press a key, talk, and the words appear wherever your cursor is — in any app. Transcribed on
+        Press a key, talk, and the words appear wherever your cursor is, in any app. Transcribed on
         this machine by the same model that transcribes your meetings. Nothing is sent anywhere
         unless you choose the cleaned mode.
       </p>
@@ -268,7 +268,7 @@ export function AssistantSettings() {
                        text-[12px] text-ink placeholder:text-ink-faint"
           />
           <span className="ml-2 text-[11.5px] text-ink-faint">
-            {saving ? "saving…" : "cmd, ctrl, alt, shift — press it once to start, again to stop"}
+            {saving ? "saving…" : "cmd, ctrl, alt, shift: press it once to start, again to stop"}
           </span>
         </label>
 
@@ -292,7 +292,7 @@ export function AssistantSettings() {
               checked={capabilities.mode === "cleaned"}
               onSelect={() => void setMode("cleaned")}
               title="Punctuation fixed"
-              description="Sends the transcript to your configured model to add punctuation and capitals. Your words are never rewritten — if the model tries, the raw text is used instead."
+              description="Sends the transcript to your configured model to add punctuation and capitals. Your words are never rewritten: if the model tries, the raw text is used instead."
             />
           </div>
         </fieldset>
@@ -321,7 +321,7 @@ export function AssistantSettings() {
                 {listening ? "Stop and insert" : "Try it"}
               </button>
 
-              {/* Only while listening, and never the primary action — insert is what the feature is
+              {/* Only while listening, and never the primary action: insert is what the feature is
                   for. But it has to be here, or the only way out types into another app. */}
               {listening && (
                 <button
@@ -339,7 +339,7 @@ export function AssistantSettings() {
             </div>
             <p className="mt-1.5 text-[11.5px] text-ink-faint">
               {listening
-                ? "Listening. Click somewhere you want the text first — it goes wherever the cursor is when you stop, or discard it and nothing is inserted."
+                ? "Listening. Click somewhere you want the text first. It goes wherever the cursor is when you stop, or discard it and nothing is inserted."
                 : "Checks whether dictation works on this machine, which is the one thing no test can."}
             </p>
 
@@ -348,7 +348,7 @@ export function AssistantSettings() {
         )}
       </div>
 
-      {/* 9b and 9c: one hotkey, because from the user's side it is one gesture — the panel offers
+      {/* 9b and 9c: one hotkey, because from the user's side it is one gesture: the panel offers
           actions when something is highlighted and answers questions when nothing is. */}
       <h3 className="mb-1 mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
         <Sparkles size={12} className="text-ink-faint" aria-hidden />
@@ -377,7 +377,7 @@ export function AssistantSettings() {
         </label>
         <p className="text-[11.5px] leading-relaxed text-ink-faint">
           Reading the window in front needs the Accessibility permission above. Reading text that
-          is only on screen as pixels — a PDF, a screenshot — additionally needs Screen &amp;
+          is only on screen as pixels (a PDF, a screenshot) additionally needs Screen &amp;
           System Audio Recording, which a copy run with cargo run cannot hold.
         </p>
 
@@ -409,7 +409,7 @@ export function AssistantSettings() {
       </h3>
       <p className="mb-2 text-[12px] leading-relaxed text-ink-muted">
         Notices when you stop typing and offers to finish the sentence. The suggestion appears in
-        Notewise, not as greyed-out text inside the other app — macOS gives no way to draw into
+        Notewise, not as greyed-out text inside the other app: macOS gives no way to draw into
         another application&rsquo;s window, and pretending otherwise would show you nothing.
       </p>
       <div className="space-y-2 rounded-lg border border-hairline p-3">
@@ -424,7 +424,7 @@ export function AssistantSettings() {
             <span className="block text-[12px] text-ink">Watch for typing pauses</span>
             <span className="block text-[11.5px] leading-relaxed text-ink-faint">
               Needs Input Monitoring, the most invasive permission macOS has. Notewise records only
-              that a key was pressed and when — no key codes, no characters, nothing kept. Off
+              that a key was pressed and when: no key codes, no characters, nothing kept. Off
               until you turn it on, and never turned on by another feature.
             </span>
           </span>
@@ -442,7 +442,7 @@ export function AssistantSettings() {
             backwards. */}
         <div className="border-t border-hairline pt-2">
           <label className="mb-1 block text-[11.5px] text-ink-faint" htmlFor="completion-try">
-            Try it — type half a sentence
+            Try it: type half a sentence
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -490,7 +490,7 @@ export function AssistantSettings() {
                 // The decision, not a shrug. `too_short` and `too_long` are the policy working;
                 // anything else with no suggestion means the model had nothing to add.
                 <span className="text-ink-faint">
-                  Nothing suggested — {completion.decision.replace(/_/g, " ")}.
+                  Nothing suggested: {completion.decision.replace(/_/g, " ")}.
                 </span>
               )}
             </p>

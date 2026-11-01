@@ -3,7 +3,7 @@
 //! # Why retrieval at all
 //!
 //! Grounding a question on "the whole workspace" is not an option: a year of meetings is
-//! millions of tokens, and even where a context window would hold it, the answer degrades —
+//! millions of tokens, and even where a context window would hold it, the answer degrades:
 //! the relevant three sentences are drowned by a hundred irrelevant pages. So the question is
 //! used to select material first, and only the selection reaches the model.
 //!
@@ -15,11 +15,11 @@
 //! meeting that only ever said "cost structure".
 //!
 //! **Semantic**, over locally-computed embeddings ([`crate::indexing`]). This is what closes
-//! that gap. It needs Ollama and an indexing pass, so it is not always available — and when it
+//! that gap. It needs Ollama and an indexing pass, so it is not always available, and when it
 //! is not, everything still works, less well.
 //!
 //! Neither subsumes the other, which is why both run. Lexical wins on names, identifiers,
-//! quoted phrases and rare words — the things an embedding smooths away. Semantic wins on
+//! quoted phrases and rare words, the things an embedding smooths away. Semantic wins on
 //! paraphrase. A question usually contains both.
 //!
 //! # How the two are combined
@@ -27,8 +27,8 @@
 //! Reciprocal Rank Fusion: each retriever produces a ranking, and an entity's score is the sum
 //! of `1 / (k + rank)` over the rankings it appears in.
 //!
-//! The alternative — normalising BM25 scores and cosine similarities onto a common scale and
-//! adding them — requires the two to be comparable, and they are not. BM25 is unbounded and
+//! The alternative (normalising BM25 scores and cosine similarities onto a common scale and
+//! adding them) requires the two to be comparable, and they are not. BM25 is unbounded and
 //! corpus-dependent; cosine is bounded and says nothing about how good the *best* match is.
 //! Tuning a weight between them means tuning it per workspace. RRF discards the magnitudes and
 //! keeps only the order, which is the part both retrievers agree means something, and it needs
@@ -82,8 +82,8 @@ const STOPWORDS: &[&str] = &[
 /// One piece of source material, with enough identity to cite it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Passage {
-    /// `meeting`, `note`, or `ticket` — matching `NodeKind` naming — or `app` for what
-    /// Notewise says about itself.
+    /// `meeting`, `note`, or `ticket`, matching `NodeKind` naming, or `app` for what Notewise
+    /// says about itself.
     pub kind: &'static str,
     pub target: Target,
     pub title: String,
@@ -112,7 +112,7 @@ impl std::fmt::Display for Target {
 impl Passage {
     /// How this passage is labelled in the prompt and referred to in a citation.
     fn label(&self, index: usize) -> String {
-        format!("[{}] {} — {}", index + 1, self.kind, self.title)
+        format!("[{}] {} - {}", index + 1, self.kind, self.title)
     }
 }
 
@@ -155,7 +155,7 @@ pub fn terms(query: &str) -> Vec<String> {
 ///
 /// 60 is the value from the original paper and the de-facto default. Its effect is to flatten
 /// the difference between the top few ranks, so a result that both retrievers place in their
-/// top handful outranks one that a single retriever placed first — which is the behaviour the
+/// top handful outranks one that a single retriever placed first, which is the behaviour the
 /// fusion exists to produce.
 const RRF_K: f32 = 60.0;
 
@@ -171,15 +171,15 @@ const VECTOR_LIMIT: usize = 40;
 /// unrelated meeting about a broken coffee machine, and 0.292 against a note containing the
 /// words "typing here". A fixed floor low enough to admit the first admits all three.
 ///
-/// The baseline differs per model — some compress everything into a narrow high band, others
-/// spread out — so any absolute number is calibrated for one embedder and wrong for the next.
+/// The baseline differs per model: some compress everything into a narrow high band, others
+/// spread out, so any absolute number is calibrated for one embedder and wrong for the next.
 /// A ratio to the best match is not: 0.607 × 0.85 keeps only the meeting that answered it.
 const RELATIVE_KEEP: f32 = 0.85;
 
 /// How far the best match must stand above a typical one for anything to count as a match.
 ///
 /// The relative rule alone cannot tell "one good match and some noise" from "nothing here is
-/// relevant" — in both cases something scores highest. What separates them is whether the best
+/// relevant", in both cases something scores highest. What separates them is whether the best
 /// score *stands out*. When every chunk scores about the same, the top one is not an answer,
 /// it is an accident of ordering, and the refusal path should run.
 ///
@@ -192,21 +192,21 @@ const MIN_SEPARATION: f32 = 1.15;
 const MIN_CHUNKS_FOR_SEPARATION: usize = 4;
 
 /// A sanity bound. Cosine similarity below this is not a weak match, it is an unrelated
-/// document — no embedding model puts genuinely related text here.
+/// document: no embedding model puts genuinely related text here.
 const ABSOLUTE_FLOOR: f32 = 0.2;
 
 /// A match this strong needs no corroboration from the rest of the distribution.
 ///
 /// The counterpart to [`ABSOLUTE_FLOOR`], and safe for the opposite reason: no embedding model
 /// scores unrelated text this high, so admitting on it alone risks little. It exists because a
-/// relative test cannot handle a corpus with no spread — if every chunk scores identically,
+/// relative test cannot handle a corpus with no spread: if every chunk scores identically,
 /// nothing "stands out" and every relative rule rejects everything, including a perfect match.
 const STRONG_MATCH: f32 = 0.75;
 
 /// Material matching `query` by word alone.
 ///
 /// What [`gather_hybrid`] falls back to whenever the semantic half cannot contribute. Returns
-/// an empty list when nothing matches, which callers must handle explicitly — a model given no
+/// an empty list when nothing matches, which callers must handle explicitly: a model given no
 /// material and asked a question will answer from its own weights, and that answer looks
 /// exactly like a grounded one.
 fn lexical_only(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
@@ -216,13 +216,13 @@ fn lexical_only(db: &Database, query: &str) -> ApiResult<Vec<Passage>> {
 
 /// Lexical and semantic together, fused by rank.
 ///
-/// Falls back to lexical-only whenever the semantic half cannot contribute — no embedder, no
+/// Falls back to lexical-only whenever the semantic half cannot contribute: no embedder, no
 /// vectors for this model, a stopped daemon. That is not an error path; it is the ordinary
 /// state of a workspace that has never been indexed, and it must return results rather than
 /// complain.
 ///
 /// Takes the state rather than a `&Database` on purpose. Embedding the question is an
-/// `.await`, and `Database` is `Send` but not `Sync` — a lock guard held across that await
+/// `.await`, and `Database` is `Send` but not `Sync`: a lock guard held across that await
 /// makes the whole future non-`Send`, which axum rejects at the route. So the lock is taken
 /// three times, briefly, and never spans the model call.
 pub async fn gather_hybrid(
@@ -330,7 +330,7 @@ fn cutoff<T>(scored: &[(f32, T)]) -> Option<f32> {
     }
 
     // A very strong match needs no corroboration. This is the one absolute number here, and
-    // it is a ceiling rather than a floor — no embedding model scores unrelated text this
+    // it is a ceiling rather than a floor: no embedding model scores unrelated text this
     // high, so being wrong about it costs far less than the floor it replaces. It also covers
     // the degenerate case the separation test cannot: a corpus where everything matches
     // perfectly has no spread to measure, and rejecting all of it would be absurd.
@@ -343,14 +343,14 @@ fn cutoff<T>(scored: &[(f32, T)]) -> Option<f32> {
     if scored.len() >= MIN_CHUNKS_FOR_SEPARATION {
         // The background is the median of the *lower half*, not of everything. A plain median
         // lands inside the relevant cluster whenever several documents genuinely match, and
-        // then rejects the very case retrieval exists for — measured: scores of
+        // then rejects the very case retrieval exists for; measured: scores of
         // [0.61, 0.59, 0.55, 0.30, 0.29] have a median of 0.55, which suppresses all three
         // real matches. The lower half estimates what an *irrelevant* document scores.
         let tail = &scored[scored.len() / 2..];
         let background = tail[tail.len() / 2].0;
 
         // A background at or below zero means most of the corpus is orthogonal to the
-        // question — the easy case, where anything positive stands out. Multiplying by it
+        // question: the easy case, where anything positive stands out. Multiplying by it
         // would also invert the comparison.
         if background > 0.0 && best < background * MIN_SEPARATION {
             return None;
@@ -404,7 +404,7 @@ fn lexical_ranking(db: &Database, query: &str) -> ApiResult<Vec<(&'static str, I
 /// Reciprocal Rank Fusion over any number of rankings.
 ///
 /// Ties are broken by the earliest ranking an entity appeared in, so the result is
-/// deterministic — an unstable order here would make the same question return different
+/// deterministic: an unstable order here would make the same question return different
 /// citations on consecutive asks.
 pub fn fuse(rankings: &[Vec<(&'static str, Id)>]) -> Vec<(&'static str, Id)> {
     let mut scores: BTreeMap<(&'static str, Id), (f32, usize)> = BTreeMap::new();
@@ -438,7 +438,7 @@ pub fn fuse(rankings: &[Vec<(&'static str, Id)>]) -> Vec<(&'static str, Id)> {
 ///
 /// A stored chunk is a copy of the entity as it was when it was embedded, and the index is
 /// refreshed in a background pass that does not see every kind of edit. Correct a line of a
-/// transcript — "Team is 49 dollars" to "59 dollars" — and the meeting's chunks still say 49;
+/// transcript ("Team is 49 dollars" to "59 dollars") and the meeting's chunks still say 49;
 /// measured on a real workspace, Ask went on answering "49 dollars a month" after the
 /// correction and after a rebuild, because the stored copy was handed to the model as the
 /// passage. So a chunk is used only if it still occurs in the entity's current text; one that
@@ -495,7 +495,7 @@ fn assemble(
 /// How much of a passage the relevance check sees.
 ///
 /// Enough to judge whether it bears on the question, short enough that eight of them stay a
-/// cheap call. The full passage still goes to the answer — this is a filter, not a summary.
+/// cheap call. The full passage still goes to the answer: this is a filter, not a summary.
 const JUDGE_EXCERPT_CHARS: usize = 500;
 
 /// Drop the passages that do not actually bear on the question.
@@ -505,8 +505,8 @@ const JUDGE_EXCERPT_CHARS: usize = 500;
 /// Cosine similarity is not calibrated for relevance. It says which document is *nearer*, not
 /// whether any of them is *about* the question, and no threshold over it can answer the second
 /// question from the first. Measured on a real workspace: asking about Kubernetes scored 0.509
-/// against a meeting on pricing bands — higher than that same meeting scored against several
-/// questions it genuinely answered — because embeddings put anything shaped like a workplace
+/// against a meeting on pricing bands, higher than that same meeting scored against several
+/// questions it genuinely answered, because embeddings put anything shaped like a workplace
 /// discussion in the same neighbourhood.
 ///
 /// Relative thresholds help when the corpus is large enough to have a background to measure
@@ -519,15 +519,15 @@ const JUDGE_EXCERPT_CHARS: usize = 500;
 ///
 /// # Fail open, always
 ///
-/// A filter that cannot run returns everything. Every failure here — an unreachable model,
-/// an unparseable reply, a refusal — costs precision and never an answer, which is the right
+/// A filter that cannot run returns everything. Every failure here (an unreachable model,
+/// an unparseable reply, a refusal) costs precision and never an answer, which is the right
 /// way round: over-citing is a nuisance, and losing the passage that held the answer is not.
 pub async fn keep_relevant(
     state: &std::sync::Arc<crate::state::AppState>,
     question: &str,
     passages: Vec<Passage>,
 ) -> Vec<Passage> {
-    // One candidate is still worth checking — the small-corpus failure returns exactly one.
+    // One candidate is still worth checking: the small-corpus failure returns exactly one.
     // Zero is not.
     if passages.is_empty() {
         return passages;
@@ -538,7 +538,7 @@ pub async fn keep_relevant(
         .enumerate()
         .map(|(index, passage)| {
             format!(
-                "[{}] {} — {}\n{}",
+                "[{}] {} - {}\n{}",
                 index + 1,
                 passage.kind,
                 passage.title,
@@ -555,7 +555,7 @@ pub async fn keep_relevant(
          matter.\n\n\
          {listing}\n\n\
          Which passages contain information that helps answer the question? Reply with only \
-         the numbers, separated by commas — for example: 1, 3\n\
+         the numbers, separated by commas, for example: 1, 3\n\
          If none of them do, reply with exactly: none"
     );
 
@@ -608,7 +608,7 @@ pub fn parse_relevance(reply: &str, count: usize) -> Option<Vec<usize>> {
         return Some(Vec::new());
     }
 
-    // Neither numbers nor a refusal — the model said something else entirely.
+    // Neither numbers nor a refusal: the model said something else entirely.
     None
 }
 
@@ -716,11 +716,11 @@ pub fn as_context(passages: &[Passage]) -> String {
 ///
 /// The three rules that matter, in the order they get broken: answer only from the material,
 /// cite which passage, and say so when the material does not contain the answer. The last is
-/// the one worth the words — a model that invents a plausible decision nobody made is worse
+/// the one worth the words: a model that invents a plausible decision nobody made is worse
 /// than useless here, because the whole point is a record of what was actually said.
 pub const GROUNDING_RULES: &str = "\
 Answer only from the material above. Cite the passages you used by their number, like [2].
-If the material does not contain the answer, say so plainly and stop — do not fill the gap \
+If the material does not contain the answer, say so plainly and stop. Do not fill the gap \
 from general knowledge, and do not guess. Quote exact wording when the question is about what \
 someone actually said or decided.";
 
@@ -940,7 +940,7 @@ mod tests {
     }
 
     /// A stored chunk is a copy of the meeting as it was. Correct a line and the copy still says
-    /// what was wrong — and was handed to the model as the passage, so Ask kept answering with
+    /// what was wrong, and was handed to the model as the passage, so Ask kept answering with
     /// the figure the user had just fixed.
     #[test]
     fn a_chunk_the_entity_no_longer_contains_is_never_served() {
@@ -1013,7 +1013,7 @@ mod tests {
 
         let context = as_context(&passages);
         assert!(
-            context.starts_with("[1] meeting — Pricing review"),
+            context.starts_with("[1] meeting - Pricing review"),
             "{context}"
         );
 
@@ -1034,7 +1034,7 @@ mod tests {
 
     // ------------------------------------------------------------ fusion
 
-    /// Distinct ids, generated once per test. `Id::new` is random, which is fine here — the
+    /// Distinct ids, generated once per test. `Id::new` is random, which is fine here: the
     /// assertions compare against the values captured, never against a literal.
     fn entity(kind: &'static str) -> (&'static str, Id) {
         (kind, Id::new())
@@ -1096,7 +1096,7 @@ mod tests {
         let a = entity("note");
         let b = entity("note");
 
-        // Both appear once, at the same rank, in different rankings — a perfect tie.
+        // Both appear once, at the same rank, in different rankings: a perfect tie.
         let first = fuse(&[vec![a], vec![b]]);
         for _ in 0..20 {
             assert_eq!(fuse(&[vec![a], vec![b]]), first);
@@ -1144,7 +1144,7 @@ mod tests {
         assert_eq!(chunks[&("note", near)], vec!["on point".to_string()]);
     }
 
-    /// Without a floor, every question retrieves *something* — and the refusal path that
+    /// Without a floor, every question retrieves *something*, and the refusal path that
     /// stops a confident answer with no basis never runs.
     #[test]
     fn distant_neighbours_are_not_treated_as_matches() {
@@ -1205,7 +1205,7 @@ mod tests {
     /// These are the numbers that showed the original absolute threshold was wrong: it was set
     /// at 0.25, and the *irrelevant* entries here score 0.292 and 0.435.
     const MEASURED: &[f32] = &[
-        0.607, // the meeting that answered it — and never used the word "pricing"
+        0.607, // the meeting that answered it, and never used the word "pricing"
         0.435, // an unrelated meeting about a broken coffee machine
         0.292, // a note whose entire content is "typing here"
         0.292, // ditto
@@ -1226,7 +1226,7 @@ mod tests {
         assert_eq!(kept, 1, "cutoff {cut} kept {kept} of {MEASURED:?}");
     }
 
-    /// Two genuinely relevant documents must both survive — the rule trims noise, not results.
+    /// Two genuinely relevant documents must both survive: the rule trims noise, not results.
     #[test]
     fn several_close_matches_are_all_kept() {
         let close = scores(&[0.61, 0.59, 0.55, 0.30, 0.29]);
@@ -1236,7 +1236,7 @@ mod tests {
         assert_eq!(kept, 3, "cutoff {cut}");
     }
 
-    /// When nothing stands out, nothing is a match — this is what makes the refusal path run
+    /// When nothing stands out, nothing is a match: this is what makes the refusal path run
     /// rather than dressing up the least-distant document as an answer.
     #[test]
     fn a_flat_distribution_matches_nothing() {
@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     /// The distinction the whole filter rests on. An explicit "none" is the model having
-    /// looked and found nothing — the answer this exists to get. Unparseable is the model
+    /// looked and found nothing: the answer this exists to get. Unparseable is the model
     /// having failed, and must keep everything instead.
     #[test]
     fn none_and_gibberish_mean_different_things() {

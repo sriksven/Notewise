@@ -12,14 +12,14 @@ const POLL_MS = 1000;
  * # Why this is a setting and not a default
  *
  * Clustering voice embeddings is the only way to answer "who spoke" for a mono recording with no
- * meeting app to ask — an imported file, or one microphone in a room. It is also a guess, and how
+ * meeting app to ask: an imported file, or one microphone in a room. It is also a guess, and how
  * accurate it is on real meetings is not something this project has measured. A wrong name on a
  * quote is worse than an honest `Speaker 1`, so it is opt-in and says what it is.
  *
  * # Three things must be true
  *
  * The build needs the feature, the model needs downloading, and the setting needs turning on. The
- * engine reports each separately and this screen shows whichever is missing — "it's on and nothing
+ * engine reports each separately and this screen shows whichever is missing: "it's on and nothing
  * happens" is the state worth designing against.
  */
 export function SpeakerSeparationSettings() {
@@ -79,7 +79,7 @@ export function SpeakerSeparationSettings() {
         Separate speakers by voice
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-        For recordings where nothing can be asked who was talking — an imported file, or one
+        For recordings where nothing can be asked who was talking: an imported file, or one
         microphone in a room. It groups the audio into distinct voices and labels them{" "}
         <span className="font-medium text-ink">Speaker 1</span>,{" "}
         <span className="font-medium text-ink">Speaker 2</span>, and so on. Naming them is still
@@ -105,7 +105,7 @@ export function SpeakerSeparationSettings() {
             </span>
             <span className="mt-0.5 block text-[12px] leading-relaxed text-ink-muted">
               Applies to imported recordings. Live calls already know who spoke from which stream
-              the audio arrived on, which is exact — this would only make that worse. Off by
+              the audio arrived on, which is exact; this would only make that worse. Off by
               default.
             </span>
           </span>
@@ -207,7 +207,7 @@ export function SpeakerSeparationSettings() {
 
           <p className="mt-2 text-[11px] leading-snug text-ink-faint">
             Separation is a guess, and how well it works on your recordings has not been measured
-            here — expect to merge or rename speakers afterwards. Everything runs on this machine;
+            here: expect to merge or rename speakers afterwards. Everything runs on this machine;
             no audio is uploaded.
           </p>
         </div>

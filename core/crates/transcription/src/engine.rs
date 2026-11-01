@@ -14,8 +14,8 @@ use crate::{Result, TranscriptionError};
 
 /// A speech recognition engine.
 ///
-/// Engines are fed audio frames and produce segments. The interface is streaming-shaped —
-/// `feed` then `finish` — because a meeting needs a transcript appearing as it runs, not
+/// Engines are fed audio frames and produce segments. The interface is streaming-shaped:
+/// `feed` then `finish`, because a meeting needs a transcript appearing as it runs, not
 /// only after it ends.
 #[async_trait]
 pub trait TranscriptionEngine: std::fmt::Debug + Send {
@@ -28,7 +28,7 @@ pub trait TranscriptionEngine: std::fmt::Debug + Send {
 
     /// Feed one frame, returning any segments completed by it.
     ///
-    /// Usually empty — engines buffer until they have enough audio to decode a phrase.
+    /// Usually empty: engines buffer until they have enough audio to decode a phrase.
     async fn feed(&mut self, frame: &AudioFrame) -> Result<Vec<Segment>>;
 
     /// Flush buffered audio and return the remaining segments.
@@ -71,7 +71,7 @@ pub trait TranscriptionEngine: std::fmt::Debug + Send {
 /// # Segmentation
 ///
 /// whisper.cpp transcribes a buffer, not a stream. Feeding it one 100 ms frame at a time
-/// would produce nonsense — the model needs enough context to resolve a phrase — so audio has
+/// would produce nonsense (the model needs enough context to resolve a phrase) so audio has
 /// to be grouped before it is decoded.
 ///
 /// Grouping is delegated to [`UtteranceBuffer`], which cuts on the *speaker pausing* rather
@@ -90,7 +90,7 @@ pub struct WhisperEngine {
 
     /// Spoken language, or `None` to let Whisper detect it.
     ///
-    /// Detection costs a pass over the first buffer and is occasionally wrong — a meeting that
+    /// Detection costs a pass over the first buffer and is occasionally wrong: a meeting that
     /// opens in English and is detected as Welsh transcribes as nonsense for its whole length.
     /// Naming the language removes that failure entirely, so a picker is worth having.
     #[allow(dead_code)]
@@ -106,7 +106,7 @@ pub struct WhisperEngine {
 }
 
 // `whisper_rs::WhisperContext` is not `Debug`, so this is written by hand. It reports the
-// model and buffer state — the loaded weights have nothing useful to print, and audio must
+// model and buffer state: the loaded weights have nothing useful to print, and audio must
 // not end up in a log line.
 impl std::fmt::Debug for WhisperEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -151,7 +151,7 @@ impl WhisperEngine {
     ///
     /// Recording a call means transcribing the microphone and the system tap as two separate
     /// streams. Building a second engine with [`WhisperEngine::new`] would load the weights
-    /// twice — 148 MB for `base.en`, over a gigabyte for `large` — to no purpose: decoding
+    /// twice (148 MB for `base.en`, over a gigabyte for `large`) to no purpose: decoding
     /// allocates a fresh state per utterance, so one set of weights serves both channels.
     ///
     /// The audio buffering is *not* shared. That is the point: each channel needs its own
@@ -210,6 +210,32 @@ impl WhisperEngine {
         ))
     }
 
+    /// Decode what has been said since the last cut, without consuming it.
+    ///
+    /// Live dictation shows words while somebody is still talking. [`TranscriptionEngine::feed`]
+    /// only decodes at a pause or a length cap, which is right for text that is kept and a second
+    /// or more behind the speaker, so this decodes the unfinished phrase on demand. What it returns
+    /// is a guess the next look may revise, and nothing keeps it: the buffer is left where it was,
+    /// and the text that stays still comes from `feed` and `finish`.
+    ///
+    /// Greedy rather than beam search. A look is repeated every few hundred milliseconds and
+    /// replaced by the next one, so keeping up with the speaker is worth more than the accuracy
+    /// beam search buys. The kept text is still decoded with beam search.
+    ///
+    /// Empty until the phrase holds enough speech to decode, for the reason the gate exists.
+    #[cfg(feature = "whisper")]
+    pub fn preview(&self) -> Result<Vec<Segment>> {
+        match self.stream.pending() {
+            Some(utterance) => self.decode(utterance, Search::Greedy),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    #[cfg(not(feature = "whisper"))]
+    pub fn preview(&self) -> Result<Vec<Segment>> {
+        Err(Self::unavailable())
+    }
+
     #[cfg(not(feature = "whisper"))]
     fn unavailable() -> TranscriptionError {
         TranscriptionError::EngineUnavailable {
@@ -221,12 +247,12 @@ impl WhisperEngine {
     /// Decode one utterance.
     ///
     /// The buffer arrives already gated: [`UtteranceBuffer`] guarantees it holds real speech,
-    /// so there is no silence check here. That gate is not optional politeness — fed room
+    /// so there is no silence check here. That gate is not optional politeness: fed room
     /// tone, Whisper does not return nothing, it invents. Ten seconds of it in a live test
     /// here produced "I know. You're happy to see a new work to grow.", indistinguishable in
     /// the transcript from something a person said.
     #[cfg(feature = "whisper")]
-    fn decode(&mut self, utterance: Utterance) -> Result<Vec<Segment>> {
+    fn decode(&self, utterance: Utterance, search: Search) -> Result<Vec<Segment>> {
         if utterance.samples.is_empty() {
             return Ok(Vec::new());
         }
@@ -243,15 +269,21 @@ impl WhisperEngine {
         //
         // `Greedy { best_of: 1 }` takes the single highest-probability token at every step with
         // no ability to revise, so one bad token drags the rest of the phrase after it. That is
-        // the failure mode behind a transcript full of fluent, confident, wrong words — and it
+        // the failure mode behind a transcript full of fluent, confident, wrong words, and it
         // costs nothing on clean speech, which is exactly why testing on clean speech hides it.
         //
         // Beam 5 is whisper.cpp's default. The cost is decode time, measured rather than
         // assumed: see `benches/` notes in the commit that introduced this.
-        let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
-            beam_size: 5,
-            patience: -1.0,
-        });
+        //
+        // A preview is the one exception, and greedy is right for it: see `preview`.
+        let strategy = match search {
+            Search::Beam => whisper_rs::SamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: -1.0,
+            },
+            Search::Greedy => whisper_rs::SamplingStrategy::Greedy { best_of: 1 },
+        };
+        let mut params = whisper_rs::FullParams::new(strategy);
         // whisper.cpp writes to stdout by default, which would corrupt the MCP server's
         // JSON-RPC stream sharing this process.
         params.set_print_progress(false);
@@ -269,7 +301,7 @@ impl WhisperEngine {
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
         // Suppress blank output at the start of a window, and non-speech tokens like
-        // "(wind blowing)" — subtitle-corpus artefacts that are not meeting content.
+        // "(wind blowing)": subtitle-corpus artefacts that are not meeting content.
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
 
@@ -326,7 +358,7 @@ impl TranscriptionEngine for WhisperEngine {
         }
 
         match self.stream.push(&frame.samples) {
-            Some(utterance) => self.decode(utterance),
+            Some(utterance) => self.decode(utterance, Search::Beam),
             None => Ok(Vec::new()),
         }
     }
@@ -341,7 +373,7 @@ impl TranscriptionEngine for WhisperEngine {
     #[cfg(feature = "whisper")]
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         match self.stream.flush() {
-            Some(utterance) => self.decode(utterance),
+            Some(utterance) => self.decode(utterance, Search::Beam),
             None => Ok(Vec::new()),
         }
     }
@@ -350,6 +382,16 @@ impl TranscriptionEngine for WhisperEngine {
     async fn finish(&mut self) -> Result<Vec<Segment>> {
         Err(Self::unavailable())
     }
+}
+
+/// How hard a decode searches for the best transcription.
+#[cfg(feature = "whisper")]
+#[derive(Debug, Clone, Copy)]
+enum Search {
+    /// Beam search, for text that is kept.
+    Beam,
+    /// One pass, for a preview that is replaced a moment later.
+    Greedy,
 }
 
 /// Silence appended to every buffer before whisper.cpp sees it.
@@ -381,7 +423,7 @@ fn padded_for_decoding(mut samples: Vec<f32>) -> Vec<f32> {
 ///
 /// whisper.cpp decodes a buffer padded out to thirty seconds, and nothing bounds its timestamps
 /// by the audio it was really given. On a buffer cut while someone was still talking, it put the
-/// last segment's end 600 ms past the buffer's end — over the first segment of the next buffer,
+/// last segment's end 600 ms past the buffer's end, over the first segment of the next buffer,
 /// so the stored transcript overlapped itself. Both ends are clamped to the decoded audio.
 // Called only from the feature-gated inference path; its tests are not gated.
 #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
@@ -397,7 +439,7 @@ fn segment_bounds(t0_cs: i64, t1_cs: i64, offset_ms: i64, duration_ms: i64) -> (
 /// whisper.cpp signals "there was nothing here" in-band, as text: `[BLANK_AUDIO]`, and its
 /// training corpus of subtitles teaches it to emit annotations like `(silence)` or
 /// `[MUSIC PLAYING]`. Stored unfiltered these become transcript lines that read as things
-/// someone said — observed here as a `[BLANK_AUDIO]` segment spanning ten seconds of a real
+/// someone said: observed here as a `[BLANK_AUDIO]` segment spanning ten seconds of a real
 /// recording's opening room tone.
 ///
 /// Matching is deliberately narrow: the whole segment must be one bracketed or parenthesised
@@ -448,7 +490,7 @@ fn is_non_speech_marker(text: &str) -> bool {
 /// this; this is the second line, for a buffer that holds real speech and loops anyway.
 ///
 /// A run of three or more *adjacent, identical* segments collapses to one spanning the run.
-/// Three is the threshold because two is ordinary speech — "No. No." is a thing people say —
+/// Three is the threshold because two is ordinary speech ("No. No." is a thing people say)
 /// while a phrase repeated verbatim three times in consecutive segments, with no other words
 /// between them, is the decoder rather than the speaker.
 // Called only from the feature-gated inference path; its tests are not gated.
@@ -748,7 +790,7 @@ mod tests {
     }
 
     /// whisper.cpp leaves the last second of its input undecoded and refuses inputs under a second,
-    /// so what it is handed must end in more than a second of silence — and nothing else may change.
+    /// so what it is handed must end in more than a second of silence, and nothing else may change.
     #[test]
     fn buffers_reach_whisper_with_more_than_a_second_of_silence_after_them() {
         let speech = vec![0.25f32; 8_000]; // half a second
@@ -857,7 +899,7 @@ mod tests {
 
     /// The regression test for the hallucination this gate exists to stop.
     ///
-    /// Ungated, real Whisper on room tone returns invented sentences — a live recording in
+    /// Ungated, real Whisper on room tone returns invented sentences: a live recording in
     /// this repository produced *"I know. You're happy to see a new work to grow."* over the
     /// silence before anyone spoke. Gated, it must return nothing at all.
     ///
@@ -929,8 +971,8 @@ mod tests {
             gated_out.iter().map(|s| &s.text).collect::<Vec<_>>()
         );
 
-        // Not asserted as a hard requirement — whisper.cpp's own thresholds may also catch
-        // this noise — but printed, because if the ungated run is empty too then this test
+        // Not asserted as a hard requirement: whisper.cpp's own thresholds may also catch
+        // this noise, but printed, because if the ungated run is empty too then this test
         // proves nothing and the sample needs to change.
         if invented.is_empty() {
             println!("NOTE: ungated run was also empty; this sample does not exercise the gate");
@@ -969,6 +1011,76 @@ mod tests {
             "span was {}",
             transcript.span_ms()
         );
+    }
+
+    /// Live dictation's look, on real speech: words show before the phrase is cut, and looking
+    /// leaves the kept text exactly what it would have been.
+    ///
+    /// Fed in 100 ms frames and looked at every 300 ms of audio, as dictation does. Prints how long
+    /// each look took, which is the number that decides whether text keeps up with a speaker.
+    /// `NOTEWISE_MODEL` defaults to `tiny.en`, the smallest model and so the one dictation picks
+    /// when it is installed.
+    #[tokio::test]
+    #[cfg(feature = "whisper")]
+    #[ignore = "requires a downloaded model and a speech sample"]
+    async fn previews_real_speech_before_the_phrase_is_cut() {
+        use notewise_audio_capture::AudioSource;
+
+        let dir = std::env::var("NOTEWISE_MODEL_DIR").expect("NOTEWISE_MODEL_DIR");
+        let sample = std::env::var("NOTEWISE_SAMPLE_WAV").expect("NOTEWISE_SAMPLE_WAV");
+        let name = std::env::var("NOTEWISE_MODEL").unwrap_or_else(|_| "tiny.en".into());
+
+        let model = crate::ModelRegistry::get(&name).expect("a known model");
+        let mut looked = WhisperEngine::new(model, ModelStore::new(&dir)).expect("engine");
+        let mut untouched = looked.sibling();
+
+        let mut source = notewise_audio_capture::FileSource::open_wav(&sample).expect("wav");
+        let mut kept = Vec::new();
+        let mut kept_untouched = Vec::new();
+        let mut early_look = None;
+        let mut look_ms = Vec::new();
+        let mut frames = 0;
+
+        while let Some(frame) = source.next_frame().expect("frame") {
+            let frame = frame.to_transcription_format();
+            kept.extend(looked.feed(&frame).await.expect("feed"));
+            kept_untouched.extend(untouched.feed(&frame).await.expect("feed"));
+
+            frames += 1;
+            if frames % 3 == 0 {
+                let started = std::time::Instant::now();
+                let look = looked.preview().expect("preview");
+                look_ms.push(started.elapsed().as_millis());
+
+                if kept.is_empty() && early_look.is_none() && !look.is_empty() {
+                    early_look = Some(look.iter().map(|s| s.text.clone()).collect::<Vec<_>>());
+                }
+            }
+        }
+        kept.extend(looked.finish().await.expect("finish"));
+        kept_untouched.extend(untouched.finish().await.expect("finish"));
+
+        println!(
+            "model: {name}, gpu enabled: {}",
+            WhisperEngine::gpu_enabled()
+        );
+        println!("first look, before any phrase was cut: {early_look:?}");
+        println!(
+            "looks: {}, slowest {} ms, mean {} ms",
+            look_ms.len(),
+            look_ms.iter().max().copied().unwrap_or(0),
+            look_ms.iter().sum::<u128>() / look_ms.len().max(1) as u128,
+        );
+        println!(
+            "kept: {:?}",
+            kept.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        assert!(
+            early_look.is_some(),
+            "no words were shown before the first phrase was cut"
+        );
+        assert_eq!(kept, kept_untouched, "looking changed the kept text");
     }
 
     #[tokio::test]

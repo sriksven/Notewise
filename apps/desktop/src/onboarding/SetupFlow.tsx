@@ -108,7 +108,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
               {isLast ? (
                 // Never disabled. A permission the user declined, or cannot grant, would
                 // otherwise leave the only way into the app greyed out on a screen with no
-                // other exit — a first launch that ends in a dead end.
+                // other exit: a first launch that ends in a dead end.
                 <button
                   type="button"
                   onClick={() => void finish()}
@@ -134,7 +134,7 @@ export function SetupFlow({ readiness, refresh, onFinished }: SetupFlowProps) {
 
             {isLast && skipping.length > 0 && (
               <p className="mt-3 text-center text-[12px] leading-relaxed text-ink-muted">
-                You can go in without finishing — but {skipping.join(", and ")}. Everything else
+                You can go in without finishing, but {skipping.join(", and ")}. Everything else
                 works, and Settings can pick this up later.
               </p>
             )}

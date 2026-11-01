@@ -7,7 +7,7 @@
 //!
 //! There is no Rust implementation of a competitive speaker-embedding network, and writing one
 //! would mean reimplementing and re-validating a research model. ONNX Runtime runs the
-//! published weights as published — the same numbers the authors evaluated — and it is the
+//! published weights as published (the same numbers the authors evaluated) and it is the
 //! same runtime the reference implementations use, so a disagreement is a bug here rather than
 //! an unknown.
 //!
@@ -265,7 +265,7 @@ mod tests {
     /// itself than to a different speaker.
     ///
     /// Deliberately weaker than "a single threshold separates them", because on the TTS voices
-    /// available here it does not — see the note on [`crate::EmbeddingDiarizer`]. This asserts
+    /// available here it does not: see the note on [`crate::EmbeddingDiarizer`]. This asserts
     /// the model is doing something real without overclaiming what it can do.
     #[cfg(feature = "onnx")]
     #[tokio::test]
@@ -310,7 +310,7 @@ mod tests {
             "the embedding is not separating speakers at all: {same:.3} vs {different:.3}"
         );
 
-        // The classes must not merely differ on average — they must not overlap, or no single
+        // The classes must not merely differ on average; they must not overlap, or no single
         // threshold can separate them and clustering is guessing.
         let worst_same =
             crate::cosine_distance(&e[0], &e[1]).max(crate::cosine_distance(&e[2], &e[3]));
@@ -347,7 +347,7 @@ mod tests {
 
     /// Diagnostic: the full distance matrix, with and without cepstral mean normalisation.
     ///
-    /// `NOTEWISE_MATRIX=A_s1.wav,A_s2.wav,B_s1.wav,B_s2.wav` — two speakers, two utterances
+    /// `NOTEWISE_MATRIX=A_s1.wav,A_s2.wav,B_s1.wav,B_s2.wav`: two speakers, two utterances
     /// each, in that order.
     #[cfg(feature = "onnx")]
     #[tokio::test]

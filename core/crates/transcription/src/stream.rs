@@ -3,7 +3,7 @@
 //! # Why this is not a fixed window
 //!
 //! A decoder transcribes a buffer, not a stream, so live audio has to be cut into buffers
-//! somewhere. Cutting on a fixed clock — the obvious approach, and what this crate did first —
+//! somewhere. Cutting on a fixed clock (the obvious approach, and what this crate did first)
 //! goes wrong in three ways at once, all of which were observed in one 15-second recording:
 //!
 //! 1. **Nothing appears until the first window closes.** With a ten-second window the
@@ -16,7 +16,7 @@
 //!
 //! 3. **Segment timings drift into fiction.** Advancing the clock by the whole window, when
 //!    speech occupied only its first two seconds, leaves an eight-second hole between one
-//!    segment and the next. Downstream, anything reading gaps — diarization especially —
+//!    segment and the next. Downstream, anything reading gaps (diarization especially)
 //!    reads that hole as a real pause.
 //!
 //! Cutting where the *speaker* stops fixes all three. The gate is [`Vad`], which already
@@ -56,7 +56,7 @@ impl Utterance {
 pub struct UtteranceConfig {
     /// Trailing silence that marks the end of an utterance.
     ///
-    /// Counted from when the gate *closes*, not from when energy drops — so [`Vad`]'s hangover
+    /// Counted from when the gate *closes*, not from when energy drops, so [`Vad`]'s hangover
     /// (280 ms by default, protecting word-final consonants) is added to this before a phrase
     /// is handed over. The delay a user actually sees is therefore hangover + this + decode,
     /// which at the default lands a little under a second after the speaker stops.
@@ -66,7 +66,7 @@ pub struct UtteranceConfig {
     ///
     /// Someone reading a list aloud can go a long time without a gap the gate notices. Without
     /// a cap the transcript would show nothing for as long as they kept going. The cost is a
-    /// cut mid-phrase — which is why the cut is not made at the cap itself but at the quietest
+    /// cut mid-phrase, which is why the cut is not made at the cap itself but at the quietest
     /// moment in the [`Self::cut_search_ms`] before it. See [`UtteranceBuffer::push`].
     pub max_utterance_ms: i64,
 
@@ -83,7 +83,7 @@ pub struct UtteranceConfig {
     /// Speech a buffer must contain before it is worth decoding.
     ///
     /// The guard against the invented-text failure. A buffer that is mostly silence with one
-    /// blip in it — a chair creak, a keyboard, a breath the gate let through — is exactly what
+    /// blip in it (a chair creak, a keyboard, a breath the gate let through) is exactly what
     /// makes the model hallucinate, and is never worth an inference.
     pub min_speech_ms: i64,
 
@@ -142,7 +142,7 @@ pub struct UtteranceBuffer {
     /// Unbroken silence at the tail of `buffer`, in milliseconds.
     silence_ms: i64,
 
-    /// Whether to gate on speech at all. Off is a diagnostic — see
+    /// Whether to gate on speech at all. Off is a diagnostic: see
     /// [`UtteranceBuffer::without_speech_gate`].
     gate_on_speech: bool,
 }
@@ -241,7 +241,7 @@ impl UtteranceBuffer {
 
         if self.buffered_ms() >= self.config.max_utterance_ms {
             if has_enough_speech {
-                // Still talking. Cut anyway so the transcript keeps moving — but where the speaker
+                // Still talking. Cut anyway so the transcript keeps moving, but where the speaker
                 // is quietest, not wherever the cap happened to land, and keep what follows.
                 let cut = self.quietest_cut();
                 return Some(self.take_until(cut));
@@ -277,6 +277,30 @@ impl UtteranceBuffer {
         }
 
         Some(self.take())
+    }
+
+    /// What is buffered so far, without taking it.
+    ///
+    /// For showing words while somebody is still talking. A buffer is handed out at a pause or a
+    /// length cap, which is the right place to cut and a second or more behind the speaker, so live
+    /// dictation decodes this in between to keep up. Nothing is consumed: the clock, the gate and
+    /// where the next cut falls are exactly what they would have been without the look.
+    ///
+    /// `None` until the buffer holds enough speech to be worth decoding, for the same reason
+    /// [`Self::flush`] refuses one. A look at room tone is where invented words come from.
+    pub fn pending(&self) -> Option<Utterance> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+
+        if self.gate_on_speech && self.speech_ms < self.config.min_speech_ms {
+            return None;
+        }
+
+        Some(Utterance {
+            samples: self.buffer.clone(),
+            offset_ms: self.offset_ms(),
+        })
     }
 
     /// Take the buffer and advance the clock past it.
@@ -321,7 +345,7 @@ impl UtteranceBuffer {
     /// Where to cut a buffer that reached the length cap: the quietest moment near its end.
     ///
     /// Energy over 20 ms windows, stepped by 10 ms, across the last
-    /// [`UtteranceConfig::cut_search_ms`] — never earlier than half way, so a cut cannot leave the
+    /// [`UtteranceConfig::cut_search_ms`], never earlier than half way, so a cut cannot leave the
     /// decoder a sliver. The cut is the middle of the quietest window: a pause between clauses if
     /// there is one, a stop consonant or the gap between two words if not.
     fn quietest_cut(&self) -> usize {
@@ -418,7 +442,7 @@ mod tests {
             .collect()
     }
 
-    /// Feed audio the way a microphone does — in 100 ms frames — collecting what comes out.
+    /// Feed audio the way a microphone does (in 100 ms frames) collecting what comes out.
     fn feed(buffer: &mut UtteranceBuffer, audio: &[f32]) -> Vec<Utterance> {
         let mut out = Vec::new();
         for frame in audio.chunks(samples(FRAME_MS)) {
@@ -431,7 +455,7 @@ mod tests {
 
     /// The headline defect: with a ten-second fixed window, nothing reached the decoder for
     /// ten seconds. A phrase followed by a pause must be handed over shortly after the pause
-    /// starts — about a second, not ten.
+    /// starts: about a second, not ten.
     #[test]
     fn a_phrase_is_handed_over_as_soon_as_the_speaker_pauses() {
         const PHRASE_MS: i64 = 1_500;
@@ -455,7 +479,7 @@ mod tests {
         );
         assert!(
             latency_ms >= 300,
-            "handed over {latency_ms} ms after the phrase — too eager to call it an endpoint"
+            "handed over {latency_ms} ms after the phrase: too eager to call it an endpoint"
         );
     }
 
@@ -479,7 +503,7 @@ mod tests {
         assert_eq!(out.len(), 1, "silence produced an extra buffer to decode");
     }
 
-    /// A blip in a long silence — a chair, a keyboard, a breath — is not an utterance.
+    /// A blip in a long silence (a chair, a keyboard, a breath) is not an utterance.
     #[test]
     fn a_short_blip_in_a_quiet_room_is_not_worth_decoding() {
         let mut buffer = UtteranceBuffer::new(RATE);
@@ -511,7 +535,7 @@ mod tests {
         let out = feed(&mut buffer, &audio);
         assert_eq!(out.len(), 2, "two phrases, two utterances");
 
-        // The second utterance starts where the first ended — no invented hole. This is the
+        // The second utterance starts where the first ended: no invented hole. This is the
         // property the phantom speaker came from: with a fixed window the hole was 8000 ms.
         let first_end = out[0].offset_ms + out[0].duration_ms(RATE);
         let gap = out[1].offset_ms - first_end;
@@ -551,7 +575,7 @@ mod tests {
             out.len()
         );
 
-        // Consecutive, contiguous, and in order — a cut, not a gap.
+        // Consecutive, contiguous, and in order: a cut, not a gap.
         for pair in out.windows(2) {
             assert_eq!(
                 pair[1].offset_ms,
@@ -597,7 +621,7 @@ mod tests {
         );
     }
 
-    /// A final phrase with no trailing pause — someone stops talking and clicks stop — is the
+    /// A final phrase with no trailing pause (someone stops talking and clicks stop) is the
     /// last thing anyone said, and must not be lost.
     #[test]
     fn a_final_phrase_is_flushed_even_without_a_trailing_pause() {
@@ -632,7 +656,7 @@ mod tests {
 
     /// A one-word answer is a real utterance and must reach the decoder.
     ///
-    /// "Yes." is around 200 ms of voicing — below `min_speech_ms` on its own. It survives
+    /// "Yes." is around 200 ms of voicing, below `min_speech_ms` on its own. It survives
     /// because the gate's hangover is *counted as speech*, which pads a short word past the
     /// threshold. That is load-bearing rather than lucky, so it is asserted here.
     #[test]
@@ -746,5 +770,66 @@ mod tests {
         let mut buffer = UtteranceBuffer::new(RATE);
         assert!(buffer.flush().is_none());
         assert!(buffer.push(&[]).is_none());
+    }
+
+    /// Live dictation looks before anyone has spoken. A quiet room must give it nothing to decode,
+    /// or the first thing shown would be a sentence Whisper made up.
+    #[test]
+    fn a_look_at_a_quiet_room_sees_nothing() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+        assert!(buffer.pending().is_none());
+
+        feed(&mut buffer, &silence(800));
+        assert!(buffer.pending().is_none());
+    }
+
+    /// The point of a look: the words being spoken are there before the speaker pauses.
+    #[test]
+    fn a_look_mid_phrase_sees_the_speech_so_far() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let out = feed(&mut buffer, &speech(700));
+        assert!(
+            out.is_empty(),
+            "nothing is cut while the speaker is still talking"
+        );
+
+        let look = buffer.pending().expect("the phrase so far");
+        assert_eq!(look.offset_ms, 0);
+        assert_eq!(look.samples.len(), samples(700));
+    }
+
+    /// A look must not move the cut. The phrase handed over at the pause is the whole phrase, from
+    /// where it started, as if nothing had looked at it on the way.
+    #[test]
+    fn a_look_takes_nothing() {
+        let mut looked = UtteranceBuffer::new(RATE);
+        let mut untouched = UtteranceBuffer::new(RATE);
+
+        let mut audio = speech(1_200);
+        audio.extend(silence(1_500));
+
+        let mut cut = Vec::new();
+        for frame in audio.chunks(samples(FRAME_MS)) {
+            let _ = looked.pending();
+            cut.extend(looked.push(frame));
+        }
+
+        assert_eq!(cut, feed(&mut untouched, &audio));
+        assert_eq!(cut.len(), 1);
+        assert_eq!(cut[0].offset_ms, 0);
+    }
+
+    /// Once a phrase is cut it belongs to the kept text. A look straight after must not show it a
+    /// second time.
+    #[test]
+    fn a_look_after_a_cut_does_not_repeat_the_phrase() {
+        let mut buffer = UtteranceBuffer::new(RATE);
+
+        let mut audio = speech(1_000);
+        audio.extend(silence(1_500));
+        assert_eq!(feed(&mut buffer, &audio).len(), 1);
+
+        assert!(buffer.pending().is_none());
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! The dispatcher is the only thing that calls a sink. It classifies each failure into
 //! retry-with-backoff or dead-letter, and on success records the resulting artifact as an
-//! `external_item` joined to its source node by a `synced_to` edge — so a pushed action item
+//! `external_item` joined to its source node by a `synced_to` edge, so a pushed action item
 //! is reachable from `find_related` rather than through a connector-specific lookup.
 
 use std::sync::Arc;
@@ -75,8 +75,8 @@ impl Dispatcher {
     /// Build a dispatcher.
     ///
     /// Takes anything that becomes an `Arc<ConnectorRegistry>`, so a caller holding the registry by
-    /// value passes it and a caller holding a shared one — `api-server` keeps its behind an `Arc` so
-    /// connecting a folder in one window does not block a request in another — passes that. Without
+    /// value passes it and a caller holding a shared one (`api-server` keeps its behind an `Arc` so
+    /// connecting a folder in one window does not block a request in another) passes that. Without
     /// this the shared caller would have to rebuild the registry per request.
     pub fn new(registry: impl Into<Arc<ConnectorRegistry>>, policy: RetryPolicy) -> Self {
         Self {
@@ -91,7 +91,7 @@ impl Dispatcher {
 
     /// Claim and deliver one batch.
     ///
-    /// Returns `Ok` even when individual deliveries fail — a failed push is recorded on its
+    /// Returns `Ok` even when individual deliveries fail: a failed push is recorded on its
     /// row, not propagated, because one broken connector must not stop the others.
     pub async fn drain(&self, db: &Database) -> Result<DispatchReport> {
         let claimed =
@@ -141,7 +141,7 @@ impl Dispatcher {
             Ok(reference) => reference,
             // Recorded here rather than in the sink. A sink writes to somewhere; deciding what a
             // refusal *means* for the workspace is the dispatcher's job, and it is the layer that
-            // has the database — the vault connector holds a folder path and nothing else.
+            // has the database; the vault connector holds a folder path and nothing else.
             Err(ConnectorError::Diverged { path }) => {
                 if let Some(item_id) = existing_item_id {
                     // Best effort: failing to record it must not turn a paused mirror into a lost
@@ -150,7 +150,7 @@ impl Dispatcher {
                         tracing::warn!(error = %e, "could not record a vault divergence");
                     }
                 } else {
-                    // A first push cannot diverge — there was nothing to compare against — so this
+                    // A first push cannot diverge (there was nothing to compare against) so this
                     // is a sink returning `Diverged` without an existing reference, which is a bug
                     // in the sink rather than a state the user can resolve.
                     tracing::warn!(
@@ -172,7 +172,7 @@ impl Dispatcher {
     /// The artifact this node already has in this connector, if any.
     ///
     /// Without this, `Outbound::existing` would always be `None` and a second push would file
-    /// a second ticket — the exact failure the outbox exists to prevent, reintroduced one
+    /// a second ticket: the exact failure the outbox exists to prevent, reintroduced one
     /// layer up. The outbox stops a *retry* from duplicating; this stops a genuinely new
     /// enqueue for an already-synced node from duplicating.
     /// The row id as well as the reference.
@@ -289,7 +289,7 @@ mod tests {
             .id
     }
 
-    /// The vault needs a real payload — it writes `markdown` under `title` — and its own id.
+    /// The vault needs a real payload (it writes `markdown` under `title`) and its own id.
     fn queued_vault(db: &Database, node_id: Id, key: &str) -> Id {
         OutboxRepository::new(db)
             .enqueue(NewOutboxEntry {
@@ -393,7 +393,7 @@ mod tests {
 
         dispatcher.drain(&db).await.unwrap();
 
-        // A genuinely new enqueue for the same node — not a retry.
+        // A genuinely new enqueue for the same node, not a retry.
         queued(&db, node_id, "k2");
         dispatcher.drain(&db).await.unwrap();
 
@@ -572,7 +572,7 @@ mod tests {
         );
     }
 
-    /// Retrying cannot resolve a conflict, only a person can — so it dead-letters at once rather
+    /// Retrying cannot resolve a conflict, only a person can, so it dead-letters at once rather
     /// than spending three attempts to reach the same refusal.
     #[tokio::test]
     async fn a_divergence_does_not_retry() {

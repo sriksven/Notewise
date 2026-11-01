@@ -35,10 +35,10 @@ impl McpError {
             // will not help. The capability is absent, so the agent should stop asking.
             McpError::WriteDenied(_) => METHOD_NOT_FOUND,
             McpError::InvalidParams(_) => INVALID_PARAMS,
-            // A missing record is the agent's mistake, not a server fault — reporting it as
+            // A missing record is the agent's mistake, not a server fault; reporting it as
             // invalid params lets the agent correct itself instead of retrying blindly.
             McpError::Storage(notewise_storage::StorageError::NotFound { .. }) => INVALID_PARAMS,
-            // The same for a schema rule the arguments broke — an id naming nothing, a duplicate.
+            // The same for a schema rule the arguments broke: an id naming nothing, a duplicate.
             // Retrying unchanged fails identically; correcting the arguments does not.
             McpError::Storage(notewise_storage::StorageError::Constraint { .. }) => INVALID_PARAMS,
             McpError::Storage(_) | McpError::Graph(_) => INTERNAL_ERROR,

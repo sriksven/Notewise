@@ -1,4 +1,4 @@
-# Scheduled jobs — design
+# Scheduled jobs - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -9,7 +9,7 @@
 ## Why this exists
 
 Everything the engine does today is triggered by a person in the app. There is no scheduler
-anywhere in the workspace — a grep for one finds only the word in comments.
+anywhere in the workspace; a grep for one finds only the word in comments.
 
 The work that most wants scheduling is exactly the work nobody does manually: a Friday digest of
 the week's decisions, a Monday list of action items that went overdue, a morning brief of today's
@@ -39,7 +39,7 @@ answer. None of them gets asked, because asking requires remembering.
 
 ## Decisions
 
-### S1 — A scheduled job may propose external tool calls; it may never execute them
+### S1 - A scheduled job may propose external tool calls; it may never execute them
 
 Spec 6's M2 requires a human to confirm every external MCP tool call, every time. A scheduled job
 is by definition unattended. These cannot both hold if jobs can execute tools, and M2 is the one
@@ -52,7 +52,7 @@ them the same way they confirm any other proposal.
 This is the entire reason Spec 6 made the tool allowlist a first-class object rather than a global
 switch: a job gets a subset, and that subset governs what it may *propose*.
 
-**Rejected — allowing pre-approved tools on a schedule.** It is what AnythingLLM does and it is
+**Rejected: allowing pre-approved tools on a schedule.** It is what AnythingLLM does and it is
 the shortest path to this product acquiring an unattended send path, which nothing in it has by
 design. A scheduled job that can act in other people's systems while nobody is watching is a
 different product with a different risk profile.
@@ -60,7 +60,7 @@ different product with a different risk profile.
 What a job *can* do without confirmation is exactly what `agent.rs` can already do: search, read,
 and write one note. Those are reversible and local.
 
-### S2 — Runs are persisted, with their traces
+### S2 - Runs are persisted, with their traces
 
 `agent.rs` keeps runs in memory and argues that a trace is only interesting while it is happening
 or just after, and that the note it wrote survives anyway.
@@ -73,10 +73,10 @@ So `job_runs` holds status, timings, the step trace, and what was produced. This
 divergence Spec 6 makes for `tool_executions`, on the same principle: unwitnessed or irreversible
 work gets a durable record.
 
-Retention is bounded — the last N runs per job, pruned on write. An unbounded trace table on a
+Retention is bounded: the last N runs per job, pruned on write. An unbounded trace table on a
 job firing every fifteen minutes is a disk-space bug with a slow fuse.
 
-### S3 — The scheduler is a task inside `api-server`, not a new crate
+### S3 - The scheduler is a task inside `api-server`, not a new crate
 
 `api-server` is already the long-running process that owns the tokio runtime, holds
 `Arc<dyn AiBackend>`, and serves the agent. A scheduler is a loop that decides when to invoke work
@@ -85,10 +85,10 @@ that already lives there.
 A separate crate would need the agent, the router, the repositories, and the notification path
 handed to it, which is to say it would need `api-server`'s entire state for no isolation benefit.
 
-The scheduling *decision* logic — given cron expressions and a clock, which jobs are due — is a
+The scheduling *decision* logic (given cron expressions and a clock, which jobs are due) is a
 pure module with an injected clock, testable without waiting for wall time.
 
-### S4 — One run per job at a time; a job still running is skipped, not queued
+### S4 - One run per job at a time; a job still running is skipped, not queued
 
 If a job's previous run has not finished when its next fire time arrives, the new occurrence is
 skipped and the skip is recorded.
@@ -100,7 +100,7 @@ where a user can see that their schedule is too tight.
 Concurrency across *different* jobs is bounded by a small limit so several heavy jobs firing at
 midnight do not saturate a local model.
 
-### S5 — Missed occurrences are not backfilled
+### S5 - Missed occurrences are not backfilled
 
 The app is not a daemon. If it was closed from Friday to Monday, Monday's launch does not fire three
 days of jobs.
@@ -112,7 +112,7 @@ once, and that flag defaults off.
 
 The run history records the gap so it is visible rather than silently absent.
 
-### S6 — Job output lands as a note, which is a thing that already exists
+### S6 - Job output lands as a note, which is a thing that already exists
 
 A completed run writes a note, using the path `agent.rs` already uses. No new "job results
 workspace", no new entity type.
@@ -124,7 +124,7 @@ vault sink. Inventing a parallel container would put job output outside every on
 The note is linked to the run, so the run history points at what it produced and the note points
 back at how it was made.
 
-### S7 — Cron expressions, parsed by a dependency, validated at save time
+### S7 - Cron expressions, parsed by a dependency, validated at save time
 
 Standard five-field cron, plus a validated preview of the next several fire times shown before the
 job is saved. An invalid expression is rejected at save, not discovered at 3am.
@@ -220,14 +220,14 @@ tick (30s)
         ├─> job_runs 'running'
         ├─> agent loop with the job prompt, capped by timeout_secs
         │     ├─> search / read / write one note      (executed)
-        │     └─> propose tool calls in the allowlist (NOT executed — S1)
+        │     └─> propose tool calls in the allowlist (NOT executed, S1)
         ├─> prune runs beyond the retention limit
         ├─> job_runs 'completed' with trace, note_id, proposal count
-        └─> Notification(Desktop): "<job> finished — 1 note, 3 actions to review"
+        └─> Notification(Desktop): "<job> finished: 1 note, 3 actions to review"
 ```
 
 Proposals created by a job are ordinary Spec 6 `tool_executions` rows with status `proposed`. They
-are indistinguishable from ones a human requested, which is deliberate — there is one review queue,
+are indistinguishable from ones a human requested, which is deliberate; there is one review queue,
 not two.
 
 ## Error handling
@@ -252,7 +252,7 @@ waits:
 
 - `due_jobs` with an injected clock: not yet due, exactly due, overdue, disabled, already running,
   missed-with-catch-up, missed-without-catch-up.
-- DST transitions in a local timezone — the spring-forward hour that does not exist and the
+- DST transitions in a local timezone: the spring-forward hour that does not exist and the
   fall-back hour that happens twice.
 - Cron validation accepts standard expressions and rejects malformed ones at save.
 - Concurrency: same job never runs twice; different jobs bounded by the limit.

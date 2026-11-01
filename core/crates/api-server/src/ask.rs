@@ -6,7 +6,7 @@
 //!
 //! The returned `citations` array is not decoration. A grounded answer that cannot be traced
 //! back to its source is indistinguishable from a confident invention, and the difference
-//! matters more here than almost anywhere — the product's claim is that it records what was
+//! matters more here than almost anywhere: the product's claim is that it records what was
 //! actually said.
 
 use std::sync::Arc;
@@ -59,14 +59,14 @@ fn latest_question(messages: &[Turn]) -> Option<&str> {
         .map(|m| m.content.as_str())
 }
 
-/// What retrieval searches for: the latest question, or — when it only makes sense through the
-/// one before it — both.
+/// What retrieval searches for: the latest question, or (when it only makes sense through the
+/// one before it) both.
 ///
 /// Searching on the latest question alone is right when it changes the subject ("and what about
 /// headcount?"), and is why earlier turns are not pooled. It fails a follow-up that points back:
 /// "Who owns that?" has one search term, "owns", which matches nothing, so after "What did we
 /// decide about the search cluster?" the answer was "Nothing in this workspace matches that
-/// question" — measured on `llama3.1:8b`, against a meeting that said who owns it. A short
+/// question", measured on `llama3.1:8b`, against a meeting that said who owns it. A short
 /// question that refers back with a pronoun is searched together with the question it refers to.
 fn retrieval_query(messages: &[Turn]) -> Option<String> {
     let mut asked = messages.iter().rev().filter(|m| m.role != "assistant");
@@ -107,7 +107,7 @@ fn to_router_messages(messages: Vec<Turn>) -> Vec<ChatMessage> {
 
 /// Ask about one note.
 ///
-/// The note itself is always the first passage and is never dropped for budget — it is the
+/// The note itself is always the first passage and is never dropped for budget: it is the
 /// thing being asked about, and an answer assembled without it would be about something else.
 /// With `scope: "workspace"` the rest of the workspace is searched too, so a note can be
 /// asked what the meetings said about it.
@@ -279,7 +279,7 @@ async fn answer(
 
     let (text, cited) = check_references(&response.text, passages.len());
     // The passages the answer points at, under the numbers it uses. All of them when it points
-    // at none — an answer that cites nothing was still written from this material, and hiding
+    // at none: an answer that cites nothing was still written from this material, and hiding
     // the material would present it as having no source.
     let citations: Vec<serde_json::Value> = retrieval::citations(&passages)
         .into_iter()
@@ -302,8 +302,8 @@ async fn answer(
         // Whether there was any material behind this answer at all.
         //
         // Derived from the passages rather than from whether a *search* ran. Those are not the
-        // same question, and conflating them made a note-scoped answer — which is grounded on
-        // the note itself and needs no search — report `false` and get labelled "nothing
+        // same question, and conflating them made a note-scoped answer (which is grounded on
+        // the note itself and needs no search) report `false` and get labelled "nothing
         // matched" in the UI, directly under the citation it had just produced.
         "grounded": !passages.is_empty(),
     })))
@@ -318,7 +318,7 @@ async fn answer(
 /// The citation list under an answer is its legend: `[2]` in the text is the chip numbered 2.
 /// Two things broke that, both measured on `llama3.1:8b`:
 ///
-/// - **References to passages that do not exist.** Given one passage — a four-line transcript —
+/// - **References to passages that do not exist.** Given one passage (a four-line transcript)
 ///   the model answered "According to [3], Raj will own the OpenSearch migration. According to
 ///   [4], the cutover is October 3rd", numbering the transcript's lines. The text pointed at
 ///   sources the user could not open. With one passage there is only one thing such a reference
@@ -328,7 +328,7 @@ async fn answer(
 ///   citation, so a question about Enterprise pricing showed a chip for a 1:1 about someone's
 ///   medical leave beside an answer that had not used it. Only cited passages are listed now.
 ///
-/// Brackets holding anything but numbers — a quoted `[inaudible]`, `[Dana: …]` — are not
+/// Brackets holding anything but numbers (a quoted `[inaudible]`, `[Dana: …]`) are not
 /// references and are left alone.
 fn check_references(text: &str, passages: usize) -> (String, Vec<usize>) {
     let mut out = String::with_capacity(text.len());
@@ -552,7 +552,7 @@ mod tests {
         );
     }
 
-    /// The note is passage 1 already. Retrieval finding it again must not list it twice — two
+    /// The note is passage 1 already. Retrieval finding it again must not list it twice: two
     /// numbers pointing at identical text makes every citation ambiguous.
     #[tokio::test]
     async fn the_note_is_never_cited_twice() {
@@ -696,7 +696,7 @@ mod tests {
     }
 
     /// The citation list is the legend for the `[n]` in the text. A chip for a passage the answer
-    /// never used — measured: a 1:1 about someone's medical leave, under an answer about pricing —
+    /// never used (measured: a 1:1 about someone's medical leave, under an answer about pricing)
     /// is a source that is not one.
     #[tokio::test]
     async fn only_the_passages_an_answer_cites_are_listed() {

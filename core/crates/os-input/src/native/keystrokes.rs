@@ -17,7 +17,7 @@
 //!
 //! # Threading
 //!
-//! An event tap needs a run loop, and it does not need to be the main one — unlike a Carbon hotkey.
+//! An event tap needs a run loop, and it does not need to be the main one, unlike a Carbon hotkey.
 //! So the monitor owns a thread, builds its tap there, and runs that thread's loop. Nothing about
 //! this has to coordinate with the window.
 
@@ -32,11 +32,11 @@ type CFRunLoopRef = *mut c_void;
 type CGEventRef = *const c_void;
 type CGEventTapProxy = *const c_void;
 
-/// `kCGSessionEventTap` — this login session's events.
+/// `kCGSessionEventTap`: this login session's events.
 const SESSION_TAP: u32 = 1;
 /// `kCGHeadInsertEventTap`.
 const HEAD_INSERT: u32 = 0;
-/// `kCGEventTapOptionListenOnly` — cannot modify or drop an event. See the module docs.
+/// `kCGEventTapOptionListenOnly`: cannot modify or drop an event. See the module docs.
 const LISTEN_ONLY: u32 = 1;
 /// `CGEventMaskBit(kCGEventKeyDown)`.
 const KEY_DOWN_MASK: u64 = 1 << 10;
@@ -80,7 +80,7 @@ extern "C" {
 
 /// When the last keystroke happened, in milliseconds since the Unix epoch. Zero for none yet.
 static LAST_KEYSTROKE_MS: AtomicI64 = AtomicI64::new(0);
-/// How many keystrokes have been seen. For diagnostics — "is the tap actually working".
+/// How many keystrokes have been seen. For diagnostics: "is the tap actually working".
 static KEYSTROKES: AtomicU64 = AtomicU64::new(0);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// The monitor thread's run loop, so it can be stopped from elsewhere.
@@ -90,7 +90,7 @@ static TAP: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 /// The callback. Runs on the monitor thread, inside event dispatch.
 ///
-/// Two lines of work on purpose. A slow tap callback is not just slow — the system disables a tap
+/// Two lines of work on purpose. A slow tap callback is not just slow: the system disables a tap
 /// that overruns its deadline, and a disabled tap is a feature that stops working silently.
 extern "C" fn on_event(
     _proxy: CGEventTapProxy,
@@ -133,7 +133,7 @@ fn now_ms() -> i64 {
 /// Why the monitor could not start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TapRefusal {
-    /// `CGEventTapCreate` returned null, which is what a missing grant looks like — there is no
+    /// `CGEventTapCreate` returned null, which is what a missing grant looks like: there is no
     /// error code, only a null port.
     PermissionMissing,
     /// The run loop source could not be made.
@@ -208,7 +208,7 @@ pub fn start() -> Result<(), TapRefusal> {
     }
 
     // Bounded: a tap that cannot be created answers immediately, and one that can is running by the
-    // time this returns — so a caller that gets `Ok` knows the monitor is live.
+    // time this returns, so a caller that gets `Ok` knows the monitor is live.
     match rx.recv_timeout(std::time::Duration::from_secs(3)) {
         Ok(answer) => answer,
         Err(_) => {
@@ -262,7 +262,7 @@ pub fn activity() -> TypingActivity {
 mod tests {
     use super::*;
 
-    /// The event mask, spelled out. A wrong bit watches the wrong events — mouse movement instead
+    /// The event mask, spelled out. A wrong bit watches the wrong events: mouse movement instead
     /// of typing, which would be both useless and considerably more alarming.
     #[test]
     fn the_mask_watches_key_presses_and_nothing_else() {

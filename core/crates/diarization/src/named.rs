@@ -5,7 +5,7 @@
 //! The two sources of speaker evidence in this crate fail in opposite directions.
 //!
 //! [`crate::EmbeddingDiarizer`] hears the audio, so its turn boundaries are as precise as the
-//! segments themselves — but it can only ever say *these three stretches are the same voice*.
+//! segments themselves, but it can only ever say *these three stretches are the same voice*.
 //! The labels are `Speaker 1..N`, and no amount of better clustering turns one into a name.
 //!
 //! [`crate::TimelineDiarizer`] has the names, because the platform routing the call knows who is
@@ -24,13 +24,13 @@
 //!
 //! # Two structural wins, and one guarded loss
 //!
-//! **Over-splitting repairs itself.** A voice that clustering split in two — a speaker who moved
-//! closer to their mic halfway through — produces two clusters that both vote for Marcus. Both
+//! **Over-splitting repairs itself.** A voice that clustering split in two (a speaker who moved
+//! closer to their mic halfway through) produces two clusters that both vote for Marcus. Both
 //! get named "Marcus", which merges them. The timeline fixes a clustering error for free.
 //!
 //! **Enrollment falls out of it.** A cluster that has been given a name is a labelled voiceprint.
 //! Persisting that would let the same person be recognised in a later meeting where no platform
-//! exists to ask — an in-person one. Deliberately not done here: see the design spec, a stored
+//! exists to ask: an in-person one. Deliberately not done here: see the design spec, a stored
 //! voiceprint is biometric data about someone who is not the user and never consented.
 //!
 //! **Under-splitting is the dangerous case, and is refused rather than guessed.** If clustering
@@ -60,7 +60,7 @@ pub struct NamingConfig {
     /// them talked more. At 0.6 a cluster split 70/30 between two participants stays anonymous;
     /// one that is 95% Marcus becomes Marcus.
     ///
-    /// Raising it trades names for caution — more clusters stay `Speaker N`. Lowering it trades
+    /// Raising it trades names for caution: more clusters stay `Speaker N`. Lowering it trades
     /// caution for names, and the errors it admits are the expensive kind: a real person quoted
     /// saying something they did not say. 0.6 is deliberately nearer the cautious end.
     pub min_share: f32,
@@ -127,7 +127,7 @@ impl<D> NamedClusterDiarizer<D> {
 
             // Every turn touching this segment votes, weighted by how much of the segment it
             // covers. Using every overlapping turn rather than only the winner means a cluster
-            // that spans two people shows up as split rather than unanimous — which is exactly
+            // that spans two people shows up as split rather than unanimous, which is exactly
             // what `min_share` needs to see in order to refuse it.
             for turn in self.timeline.turns() {
                 if turn.start_ms >= segment.end_ms {
@@ -214,7 +214,7 @@ mod tests {
 
     /// Stands in for the acoustic half, so these tests exercise the naming logic without a model.
     ///
-    /// Labels segments by a caller-supplied cluster assignment — the same shape
+    /// Labels segments by a caller-supplied cluster assignment: the same shape
     /// [`crate::EmbeddingDiarizer`] produces, and the only part of it this code depends on.
     #[derive(Debug)]
     struct FakeClusterer {
@@ -337,7 +337,7 @@ mod tests {
         );
     }
 
-    /// A clear majority does earn the name — the guard must not refuse everything.
+    /// A clear majority does earn the name: the guard must not refuse everything.
     #[test]
     fn a_dominant_participant_earns_the_name_despite_an_interjection() {
         let acoustic = FakeClusterer {
@@ -391,7 +391,7 @@ mod tests {
         );
     }
 
-    /// Segments the platform never reported on keep the acoustic label — a hole gets an
+    /// Segments the platform never reported on keep the acoustic label: a hole gets an
     /// anonymous name, never a borrowed one.
     #[test]
     fn segments_outside_the_timeline_keep_their_cluster_label() {

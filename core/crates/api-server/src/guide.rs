@@ -606,6 +606,7 @@ Deleted meetings and notes wait here until you empty it.
             ),
             ("how do I turn on search by meaning?", "Settings: Search"),
             ("where do I put my api key?", "Settings: API keys"),
+            ("how do I ask by voice?", "Ask"),
         ];
         for (question, expected) in cases {
             assert_eq!(first(question).as_deref(), Some(expected), "{question}");

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// The kind of entity a graph node points at.
 ///
 /// Stored as a string in the edge table, so adding a variant needs no schema migration.
-/// The string forms are part of the on-disk format — changing one is a breaking change.
+/// The string forms are part of the on-disk format; changing one is a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
@@ -20,11 +20,11 @@ pub enum NodeKind {
     Ticket,
     EmailDraft,
     Notification,
-    /// An artifact that lives in another system — a Linear issue, a calendar event, a file
+    /// An artifact that lives in another system: a Linear issue, a calendar event, a file
     /// in a user's vault. Notewise records it but does not own it.
     ExternalItem,
     /// A human: an attendee, a speaker, or whoever owns an action item. Distinct from a
-    /// workspace member — most people in a user's meetings will never have an account.
+    /// workspace member: most people in a user's meetings will never have an account.
     Person,
     /// A recurring meeting, threading its instances so unfinished business carries forward
     /// from one to the next.
@@ -81,7 +81,7 @@ impl fmt::Display for NodeKind {
 
 /// How two nodes relate.
 ///
-/// Edges are stored directionally but traversed in both directions by default — see
+/// Edges are stored directionally but traversed in both directions by default; see
 /// [`Graph::related`](crate::Graph::related). Direction carries meaning for display
 /// ("this note *references* that meeting") rather than for reachability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

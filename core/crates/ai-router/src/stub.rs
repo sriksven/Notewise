@@ -6,7 +6,7 @@
 //!
 //! The point is the wire, not the reply. A backend that builds the right struct and then sends
 //! the key in the URL, or retries a refusal, looks correct to every test that stops at the
-//! struct — so these tests stop at the socket instead.
+//! struct, so these tests stop at the socket instead.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};

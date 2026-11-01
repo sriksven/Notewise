@@ -4,9 +4,9 @@ What changed, in terms of what it does for the person using Notewise rather than
 changed it. Newest first.
 
 The in-app version of this lives under Help → What's new and is deliberately shorter. If you edit
-one, edit the other — `apps/desktop/src/views/HelpView.tsx`.
+one, edit the other: `apps/desktop/src/views/HelpView.tsx`.
 
-## 0.1.0 — 2026-08-21
+## 0.1.0 - 2026-08-21
 
 The first tagged build.
 
@@ -17,11 +17,11 @@ The first tagged build.
   resumable progress. NVIDIA Parakeet is available from the command line, not yet from the app.
 - Speakers can be separated by voice for recordings where nothing knows who was talking, and named;
   the name holds for that meeting, and recognising a voice in a later meeting is not built yet. In a
-  call, the browser extension reads who is speaking from the meeting platform, which is exact — and
+  call, the browser extension reads who is speaking from the meeting platform, which is exact, and
   sends no audio to do it.
 - Transcripts are editable. A word the transcriber got wrong can be corrected in place, and a
   meeting can be renamed.
-- Audio can be kept after transcription — off by default — which is what makes click-to-play on a
+- Audio can be kept after transcription (off by default), which is what makes click-to-play on a
   transcript line possible. A recording that also captures system audio does not keep it yet.
 
 ### What a meeting means
@@ -33,8 +33,13 @@ The first tagged build.
 - Clarifying questions during a live meeting, when there is still time to ask them.
 - What a recurring meeting is still carrying from last time.
 - Search across everything said, and a question you can ask the whole workspace that answers only
-  from your own material and cites it — from its own page, or from the Ask button at the bottom
-  right of any screen but Notes. A note's own Ask works the same way, in a second colour.
+  from your own material and cites it, from its own page, or from the Ask button at the bottom
+  right of most screens, beside the record button on a meeting. On Notes that button asks the open
+  note instead, beside it and in a second colour.
+- Ask out loud. The mic beside every Ask box shows your words as you say them, in grey while
+  they are still a guess, and leaves the finished question in the box for you to check and send.
+  Whisper does the listening on this machine, so a spoken question goes nowhere a typed one
+  would not.
 - Ask also knows the app. It answers how many recordings, notes and tasks you have, what is in the
   trash, what each setting does and what it is set to now, and what Help and About say, with a
   link that opens the page it is about. It explains where to change a setting and never changes
@@ -46,7 +51,7 @@ The first tagged build.
 
 - Notes, with a block editor, attached to meetings.
 - Follow-up emails drafted with tone variants, approved by you, and delivered as a *draft* in Gmail
-  or Outlook — never sent on your behalf.
+  or Outlook, never sent on your behalf.
 - Meetings mirrored to a Markdown vault folder, and a folder watched for documents. A file you
   edited outside Notewise is never silently overwritten.
 - A signed outbound webhook, for anything else.
@@ -54,15 +59,20 @@ The first tagged build.
 
 ### Around the edges
 
-- Calendar connected to Google or Microsoft, which is what makes auto-join detection possible — and
+- Calendar connected to Google or Microsoft, which is what makes auto-join detection possible, and
   it always asks before recording.
 - External tools over MCP, default-deny: nothing runs without you confirming that specific call.
-- A desktop assistant on macOS — dictation into whatever has focus, a panel that can act on
+- A desktop assistant on macOS: dictation into whatever has focus, a panel that can act on
   highlighted text, and inline suggestions. Every one of those needs a permission you grant.
 - Memory: capped, listed in full, editable, and never a fact about somebody else.
 - Model routing rules, so the cheap local model answers the cheap questions.
 - Secrets in the OS keychain, and redaction before anything leaves the machine.
 - A theme with eleven accents, keyboard shortcuts, and an address bar that survives a reload.
+- Plain punctuation everywhere you read: the app, the website and the docs are written without
+  em or en dashes.
+- The download is always the newest build. Every change to the app is built for macOS and Windows
+  and published as the latest build on GitHub Releases, and the website's download buttons offer
+  it as soon as it is up, with its date beside them.
 
 ### Known limits of this build
 
@@ -70,7 +80,7 @@ The first tagged build.
   kept, but this build does not show them.
 - **Signed on macOS, but not by Apple.** The app carries the project's own certificate rather than
   an Apple Developer ID, so the first launch of each download needs **Open Anyway** in System
-  Settings → Privacy & Security — the release notes walk through it. Permissions you grant carry
+  Settings → Privacy & Security: the release notes walk through it. Permissions you grant carry
   over to later releases, because every release is signed with the same certificate. Windows is
   unsigned and will show a SmartScreen warning. Linux `.deb` and `.AppImage` need no signing.
 - **macOS system audio has not yet been run end to end in a release build.** It needs the Screen &
@@ -80,7 +90,7 @@ The first tagged build.
   a call it records you and not the others. Transcription runs on the processor, so it is slower
   than on a Mac, and the desktop assistant is macOS only.
 - **Transcription needs a model download** on first use. The default build stays small on purpose.
-- **The desktop assistant needs permissions macOS cannot grant on your behalf** — Accessibility,
+- **The desktop assistant needs permissions macOS cannot grant on your behalf**: Accessibility,
   and Input Monitoring for typing pauses. Without them the app says which pane to open rather than
   failing quietly.
 - **Hosted anything is opt-in.** With no API key configured, nothing leaves the machine.

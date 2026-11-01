@@ -36,7 +36,7 @@ pub(crate) fn router() -> AxumRouter<Shared> {
             get(get_note).put(update_note).delete(delete_note),
         )
         .route("/v1/notes/:id/restore", post(restore_note))
-        // Registered before the `:id` routes above would ever match — axum's router is not
+        // Registered before the `:id` routes above would ever match: axum's router is not
         // order-sensitive for distinct literals, but `/v1/trash` and `/v1/notes/:id` do not
         // overlap anyway. Kept adjacent to the notes block because that is what it holds.
         .route("/v1/trash", get(list_trash).delete(empty_trash))
@@ -191,7 +191,7 @@ async fn restore_note(
 /// delete has to propagate rather than sit in a local limbo nothing else can see.
 ///
 /// Returned as one object with two lists rather than a merged array, because the two need
-/// different actions behind them — restoring a meeting brings a transcript back, and the
+/// different actions behind them: restoring a meeting brings a transcript back, and the
 /// warning before destroying one is not the warning before destroying a note.
 async fn list_trash(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
     let db = state.db().await;
@@ -203,8 +203,8 @@ async fn list_trash(State(state): State<Shared>) -> ApiResult<Json<serde_json::V
 
 /// Destroy everything in the trash.
 ///
-/// Edges and embeddings are detached first for both kinds. Neither table has a foreign key —
-/// the edge table references heterogeneous kinds and the embedding table is derived data — so
+/// Edges and embeddings are detached first for both kinds. Neither table has a foreign key:
+/// the edge table references heterogeneous kinds and the embedding table is derived data; so
 /// nothing cascades for either, and a row left behind points at something that is gone.
 async fn empty_trash(State(state): State<Shared>) -> ApiResult<Json<Emptied>> {
     let db = state.db().await;
@@ -235,8 +235,8 @@ async fn empty_trash(State(state): State<Shared>) -> ApiResult<Json<Emptied>> {
 /// Move a meeting to the trash, or destroy it.
 ///
 /// Trashing is the default and `?purge=true` is the escape hatch, exactly as for notes. The
-/// stakes are higher here — a meeting owns its transcript, its summaries, its decisions and
-/// its action items, and all of them cascade — which is the argument for the reversible step
+/// stakes are higher here: a meeting owns its transcript, its summaries, its decisions and
+/// its action items, and all of them cascade, which is the argument for the reversible step
 /// existing, not against the endpoint.
 async fn delete_meeting(
     State(state): State<Shared>,
@@ -282,7 +282,7 @@ async fn restore_meeting(
 ) -> ApiResult<Json<notewise_storage::Meeting>> {
     let id = parse_id(&id)?;
     let db = state.db().await;
-    // The transcript returns to the search index by trigger. Its embeddings do not — the next
+    // The transcript returns to the search index by trigger. Its embeddings do not: the next
     // indexing pass rebuilds them, which is why `collect_pending` compares timestamps rather
     // than assuming what is missing was never there.
     Ok(Json(MeetingRepository::new(&db).restore(id)?))
@@ -290,7 +290,7 @@ async fn restore_meeting(
 
 /// Remove the graph edges of a meeting about to be destroyed, and of everything it owns.
 ///
-/// Its summaries, decisions and action items go with it by cascade, but their edges do not — the
+/// Its summaries, decisions and action items go with it by cascade, but their edges do not: the
 /// edge table has no foreign keys. Detaching only the meeting left, among others, the
 /// `became_ticket` edge of every promoted action item pointing out of a row that no longer exists.
 fn detach_meeting(db: &notewise_storage::Database, meeting_id: Id) -> ApiResult<()> {
@@ -916,7 +916,7 @@ async fn assign_series(
 
 #[derive(Debug, Serialize)]
 struct Brief {
-    /// `None` when this meeting is not part of a series, which is not an error — it just
+    /// `None` when this meeting is not part of a series, which is not an error: it just
     /// means there is no history to carry forward.
     series: Option<MeetingSeries>,
     previous_meeting_id: Option<Id>,
@@ -1510,7 +1510,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
 
-        // Two people with prints, written directly — enrolment runs in the capture pipeline.
+        // Two people with prints, written directly: enrolment runs in the capture pipeline.
         {
             let db = state.db().await;
             let people = PersonRepository::new(&db);
@@ -1541,7 +1541,7 @@ mod tests {
             "off must erase, not merely stop collecting"
         );
 
-        // And the people themselves survive — this forgets a voice, not a colleague.
+        // And the people themselves survive: this forgets a voice, not a colleague.
         let db = state.db().await;
         assert_eq!(PersonRepository::new(&db).list().expect("list").len(), 2);
     }
@@ -1678,7 +1678,7 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
-    /// Editing a trashed note must fail rather than quietly restore it — the notes editor
+    /// Editing a trashed note must fail rather than quietly restore it: the notes editor
     /// autosaves on a timer, so a save can land after the delete.
     #[tokio::test]
     async fn a_trashed_note_rejects_edits() {
@@ -1907,7 +1907,7 @@ mod tests {
         let id = seed_meeting(&state, "Live", 1_700_000_000).await;
 
         // No capture in a test build, so this asserts the guard exists rather than exercising
-        // it against a real recording — `recording().status()` is `None` here.
+        // it against a real recording: `recording().status()` is `None` here.
         let (status, _) = call(&app, delete(&format!("/v1/meetings/{id}"))).await;
         assert_eq!(
             status,
@@ -1950,7 +1950,7 @@ mod tests {
     }
 
     /// Every delete has to take its edges with it. Each of these left them behind, and the meeting
-    /// kept listing a ticket or a person with no name — the row was gone, the link was not.
+    /// kept listing a ticket or a person with no name: the row was gone, the link was not.
     #[tokio::test]
     async fn deleting_a_ticket_an_item_or_a_person_removes_their_edges() {
         let (app, state) = app();
@@ -2080,7 +2080,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
 
         let db = state.db().await;
-        // The ticket outlives the meeting — that is the point of promoting — but nothing it is
+        // The ticket outlives the meeting (that is the point of promoting) but nothing it is
         // linked to does.
         assert!(TicketRepository::new(&db).get(ticket).is_ok());
         assert_eq!(Graph::new(&db).edge_count().expect("count"), 0);

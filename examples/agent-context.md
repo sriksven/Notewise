@@ -14,19 +14,19 @@ Searching for a meeting's context finds things that merely *mention* the same wo
 
 Each result carries `distance` (hops) and `via` (the edge kind), so you can distinguish:
 
-- `via: "derived_from"` — the summary this meeting produced. Authoritative.
-- `via: "references"` — a note someone wrote pointing at it. Related, but someone's opinion.
-- `via: "became_ticket"` — work that came out of it.
+- `via: "derived_from"`: the summary this meeting produced. Authoritative.
+- `via: "references"`: a note someone wrote pointing at it. Related, but someone's opinion.
+- `via: "became_ticket"`: work that came out of it.
 
 That distinction is not recoverable from a text search.
 
 ## Depth 2 is usually right
 
-Depth 1 gives immediate neighbours — the summary, notes referencing the meeting. Depth 2
+Depth 1 gives immediate neighbours: the summary, notes referencing the meeting. Depth 2
 reaches one step further: the decisions and action items inside that summary, the tickets
 those became. Beyond that, results get loosely relevant fast.
 
-`depth` is clamped rather than rejected, so asking for more is not an error — it is just noise.
+`depth` is clamped rather than rejected, so asking for more is not an error; it is just noise.
 
 ## Read the summary before the transcript
 
@@ -45,4 +45,4 @@ is the state of the world, not an error to retry.
 ## The surface is read-only
 
 There is no tool to create, edit, or delete anything. If a task needs a change made, report
-what should change and let the user act — do not look for a write tool, there isn't one.
+what should change and let the user act: do not look for a write tool, there isn't one.

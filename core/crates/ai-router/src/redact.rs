@@ -7,7 +7,7 @@
 //!
 //! # What this does and does not claim
 //!
-//! This finds **secrets with recognisable shapes** — provider-prefixed API keys, AWS access
+//! This finds **secrets with recognisable shapes**: provider-prefixed API keys, AWS access
 //! key ids, PEM private key blocks, JWTs, credentials embedded in URLs, and card numbers
 //! that pass a Luhn check. It is deliberately not a general PII scrubber and **must not be
 //! described to users as one**. A password spoken as ordinary words, an address, or an
@@ -104,7 +104,7 @@ impl Category {
     }
 }
 
-/// A count of what was masked. Deliberately carries no sample of the matched text — a
+/// A count of what was masked. Deliberately carries no sample of the matched text; a
 /// redaction report that quotes the secret defeats the purpose, including in logs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RedactionReport {
@@ -206,7 +206,7 @@ fn find_spans(
                 .unwrap_or(text.len()),
             None => text.len(),
         };
-        // Only key material, not every PEM object — a certificate is not a secret.
+        // Only key material, not every PEM object; a certificate is not a secret.
         if text[start..header_end].contains("PRIVATE KEY") {
             spans.push((start, end, Category::PrivateKey));
         }
@@ -214,7 +214,7 @@ fn find_spans(
     }
 
     // Numbers before tokens. A card or phone number in a transcript is written the way it
-    // is spoken — "4111 1111 1111 1111" — so the whitespace-delimited token scanner would
+    // is spoken ("4111 1111 1111 1111") so the whitespace-delimited token scanner would
     // see four harmless four-digit groups and let the whole thing through.
     for (start, end, run) in numeric_runs(text) {
         if spans.iter().any(|(s, e, _)| start < *e && end > *s) {
@@ -247,7 +247,7 @@ fn find_spans(
 /// Split into candidate tokens with their byte offsets.
 ///
 /// Splitting on whitespace alone would keep trailing punctuation ("sk-abc123." ), and
-/// splitting on all punctuation would destroy the tokens we care about — JWTs contain dots,
+/// splitting on all punctuation would destroy the tokens we care about; JWTs contain dots,
 /// URLs contain colons and slashes. So the delimiter set is whitespace plus the punctuation
 /// that cannot appear inside any secret shape we recognise.
 fn tokens(text: &str) -> Vec<(usize, &str)> {
@@ -299,7 +299,7 @@ fn classify(token: &str, policy: RedactionPolicy) -> Option<Category> {
 /// Maximal runs of digits and the separators people write inside numbers, trimmed back to
 /// digits at both ends.
 ///
-/// Bounded to five groups so that a spoken list — "1 2 3 4 5 6 7 8 9 10 11" — is not
+/// Bounded to five groups so that a spoken list ("1 2 3 4 5 6 7 8 9 10 11") is not
 /// mistaken for one long phone number. Real card and phone formats use at most four or five.
 fn numeric_runs(text: &str) -> Vec<(usize, usize, &str)> {
     fn is_number_char(c: char) -> bool {
@@ -450,8 +450,8 @@ fn is_card_number(token: &str) -> bool {
     luhn(&digits)
 }
 
-/// The check digit algorithm every card number satisfies. Without it, any long number —
-/// a meeting id, a phone number, a row count — would be masked as a card.
+/// The check digit algorithm every card number satisfies. Without it, any long number;
+/// a meeting id, a phone number, a row count; would be masked as a card.
 fn luhn(digits: &[u32]) -> bool {
     let sum: u32 = digits
         .iter()
@@ -664,7 +664,8 @@ mod tests {
 
     #[test]
     fn multibyte_text_around_a_secret_is_not_corrupted() {
-        let (out, _) = secrets("Café — clé sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF — fin");
+        let (out, _) =
+            secrets("Café \u{2014} clé sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF \u{2014} fin");
         assert!(out.contains("Café"), "{out}");
         assert!(out.contains("fin"), "{out}");
         assert!(out.contains("[redacted:api_key]"), "{out}");

@@ -1,7 +1,7 @@
 name: frontend
 
 # Separate from `core` for the reason stated there: a broken frontend toolchain must not block
-# an engine fix. These jobs are cheap and fully offline — no browser, no engine, no network —
+# an engine fix. These jobs are cheap and fully offline (no browser, no engine, no network)
 # so they run on every push rather than on a schedule.
 #
 # This workflow exists because it did not: the desktop app had over a hundred tests and a
@@ -55,7 +55,7 @@ jobs:
   # The Tauri shell, which nothing checked at all.
   #
   # Not in the `core` workflow: that one says outright that a broken desktop toolchain must not block
-  # an engine fix, and `tauri-build` needs the frontend's `dist/` — which is gitignored, so it only
+  # an engine fix, and `tauri-build` needs the frontend's `dist/`, which is gitignored, so it only
   # exists after a build. So it goes here, where the build already happens, and after it.
   #
   # Its own job rather than a step on `apps`, because that one is a matrix over two frontends and the
@@ -67,7 +67,7 @@ jobs:
   #
   # The shell is the only crate in the repository that compiles `unsafe`, and every line of it is
   # macOS: ScreenCaptureKit, the accessibility API, Carbon hotkeys, Vision. A Linux run compiles the
-  # `cfg`-else branches — the stubs that refuse with a reason — so it checks the part that has no
+  # `cfg`-else branches (the stubs that refuse with a reason), so it checks the part that has no
   # `unsafe` in it and skips the part that does. That is the wrong half.
   #
   # It is also the platform I can reproduce. A Linux Tauri build needs a webview and a window
@@ -98,12 +98,12 @@ jobs:
 
       # Before clippy, not beside it: `tauri.conf.json` points `frontendDist` at `dist/`, which is
       # gitignored, and `tauri-build` fails on a fresh checkout if it is not there. Nothing about
-      # the Rust here needs the built frontend — the build script does.
+      # the Rust here needs the built frontend; the build script does.
       - name: Frontend
         run: npm ci && npx vite build
         working-directory: apps/desktop
 
-      # `cargo fmt --all` at the repository root does not reach this crate — it is excluded from
+      # `cargo fmt --all` at the repository root does not reach this crate: it is excluded from
       # the workspace, so rustfmt never sees it and drift here was caught by nothing. Found the
       # hard way: unformatted code sat in `main.rs` while every `fmt` gate reported clean.
       - name: Formatting
@@ -121,7 +121,7 @@ jobs:
         working-directory: apps/desktop/src-tauri
 
       # Clippy compiles the shell's tests and runs none of them. They cover what the shell decides
-      # at launch — which backend to restore — and that is invisible to every lint.
+      # at launch (which backend to restore), and that is invisible to every lint.
       - name: Tests
         run: cargo test
         working-directory: apps/desktop/src-tauri
@@ -145,7 +145,7 @@ jobs:
 
       # Its own job rather than a row in the matrix above: the site is a static document with
       # no unit tests, and `npm test` would have to be a lie to fit. Typecheck and build are
-      # the real checks — a build failure here is a page whose buttons do nothing.
+      # the real checks: a build failure here is a page whose buttons do nothing.
       #
       # `pages.yml` also builds it, but only on pushes to main. This runs on pull requests,
       # which is where a break should be caught.
@@ -168,7 +168,7 @@ jobs:
         with:
           node-version: 20
 
-      # No dependencies and no lockfile — the extension is plain JavaScript tested with
+      # No dependencies and no lockfile: the extension is plain JavaScript tested with
       # node's own runner, which is deliberate: an extension that ships a bundler's output is
       # harder to audit, and this one asks for zero permissions.
       - name: Tests

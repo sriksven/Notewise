@@ -1,6 +1,6 @@
 //! Cross-platform audio capture.
 //!
-//! Defines one interface — give me a stream of audio frames — with per-OS implementations
+//! Defines one interface (give me a stream of audio frames) with per-OS implementations
 //! underneath. Nothing above this crate knows which OS it is running on, or whether the audio
 //! came from a microphone, a system loopback tap, or a file.
 //!
@@ -10,11 +10,11 @@
 //! [`resample_linear`]) are complete and tested. The **OS capture backends are behind the
 //! `os-capture` feature and are not implemented**: each needs a platform audio SDK, and on
 //! macOS system-audio capture additionally requires ScreenCaptureKit permission granted to an
-//! app bundle — a TCC switch that cannot be flipped by a build process. Calling one
+//! app bundle, a TCC switch that cannot be flipped by a build process. Calling one
 //! returns [`CaptureError::Unsupported`] with a specific reason rather than silently
 //! producing nothing.
 //!
-//! **Microphone capture is implemented** ([`MicrophoneSource`], `os-capture` feature) — it
+//! **Microphone capture is implemented** ([`MicrophoneSource`], `os-capture` feature); it
 //! needs only the OS microphone permission, no app bundle.
 //!
 //! **System audio is implemented on macOS** ([`SystemAudioSource`], `os-capture` feature),
@@ -81,7 +81,7 @@ pub enum CaptureError {
     /// A platform capture SDK refused a request, carrying its own reason.
     ///
     /// Separate from [`CaptureError::Unsupported`], whose reasons are compile-time facts about
-    /// the build. This one is a runtime refusal — most often a missing permission — and the
+    /// the build. This one is a runtime refusal (most often a missing permission) and the
     /// message is written for the person who has to go and grant it.
     #[error("{0}")]
     Platform(String),
@@ -186,7 +186,7 @@ impl OsBackend {
     /// Why this backend is not usable in the current build.
     ///
     /// Returns `None` only when it would actually work. Whether it *succeeds* is a separate
-    /// question from whether this build can attempt it — a macOS backend can be perfectly
+    /// question from whether this build can attempt it; a macOS backend can be perfectly
     /// available here and still fail at runtime for want of a TCC grant. See
     /// [`permission_status`].
     pub fn unavailable_reason(&self) -> Option<&'static str> {
@@ -287,7 +287,7 @@ mod tests {
         }
     }
 
-    /// An unavailable backend must fail loudly rather than yield silence — a capture path
+    /// An unavailable backend must fail loudly rather than yield silence: a capture path
     /// that quietly produces nothing looks like a broken product.
     ///
     /// This deliberately only opens backends that [`OsBackend::unavailable_reason`] has
@@ -320,7 +320,7 @@ mod tests {
     }
 
     /// `open` used to return `Err` unconditionally, including for backends
-    /// `unavailable_reason` vouched for — so the two disagreed and the only working paths
+    /// `unavailable_reason` vouched for, so the two disagreed and the only working paths
     /// were the ones that bypassed `open` entirely. Nothing but this test stops that
     /// returning.
     #[test]

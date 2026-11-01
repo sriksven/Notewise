@@ -25,7 +25,7 @@ const ICONS: Record<string, typeof FileText> = {
  *
  * The whole premise of the object graph is that a meeting produces notes, tickets and commitments
  * and that those stay attached to it. Until now nothing rendered a single edge: the graph was real,
- * queried by retrieval and by the agent, and invisible. This is the smallest honest view of it —
+ * queried by retrieval and by the agent, and invisible. This is the smallest honest view of it:
  * what is attached, how far away, and by which edge.
  *
  * # Only what can be named

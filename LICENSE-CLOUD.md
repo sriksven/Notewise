@@ -1,7 +1,7 @@
-# Business Source License 1.1 — `cloud/` directory only
+# Business Source License 1.1 - `cloud/` directory only
 
 **This license applies ONLY to the `cloud/` directory.** The `core/` and `apps/`
-directories are MIT licensed — see [LICENSE](LICENSE).
+directories are MIT licensed. See [LICENSE](LICENSE).
 
 ## Parameters
 

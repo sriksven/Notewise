@@ -3,7 +3,7 @@
 //! # Why Carbon
 //!
 //! `RegisterEventHotKey` is the only API on macOS that claims a key combination system-wide without
-//! watching every keystroke. The alternative — a `CGEventTap` — needs the Input Monitoring grant,
+//! watching every keystroke. The alternative (a `CGEventTap`) needs the Input Monitoring grant,
 //! which means asking a user for permission to see everything they type in order to notice one
 //! chord. For a product sold on privacy that trade is not close.
 //!
@@ -13,7 +13,7 @@
 //! # Main thread only, and the type system says so
 //!
 //! Carbon events are delivered to the application's event target, which is serviced by the main
-//! thread's run loop. [`Registration`] holds a raw reference and is therefore not `Send` — which is
+//! thread's run loop. [`Registration`] holds a raw reference and is therefore not `Send`, which is
 //! not an oversight to work around but the constraint being written down. A registration made on a
 //! worker thread would never fire.
 //!
@@ -38,13 +38,13 @@ type EventHandlerCallRef = *const c_void;
 
 const NO_ERROR: OSStatus = 0;
 
-/// `kEventClassKeyboard` — the four-character code `'keyb'`.
+/// `kEventClassKeyboard`: the four-character code `'keyb'`.
 const CLASS_KEYBOARD: u32 = 0x6B65_7962;
 /// `kEventHotKeyPressed`.
 const HOT_KEY_PRESSED: u32 = 5;
-/// `kEventParamDirectObject` — `'----'`.
+/// `kEventParamDirectObject`: `'----'`.
 const PARAM_DIRECT_OBJECT: u32 = 0x2D2D_2D2D;
-/// `typeEventHotKeyID` — `'hkid'`.
+/// `typeEventHotKeyID`: `'hkid'`.
 const TYPE_HOT_KEY_ID: u32 = 0x686B_6964;
 /// Our four-character signature, `'ntws'`, so a hotkey id of ours is identifiable in a trace.
 const SIGNATURE: u32 = 0x6E74_7773;
@@ -99,7 +99,7 @@ extern "C" {
 /// Which feature owns which registered id, for the callback to look up.
 ///
 /// Process-global because the Carbon handler is a bare `extern "C" fn` with no closure to capture
-/// into. The alternative — passing a pointer through `user_data` — would mean a raw pointer to Rust
+/// into. The alternative (passing a pointer through `user_data`) would mean a raw pointer to Rust
 /// state living for as long as the handler, which is a worse thing to have to reason about than a
 /// mutex.
 static FEATURES: OnceLock<Mutex<BTreeMap<u32, String>>> = OnceLock::new();
@@ -161,7 +161,7 @@ extern "C" fn on_hotkey_pressed(
 /// Returns the receiver once. A second call answers `None`, because there is one channel and two
 /// receivers would mean presses arriving at whichever happened to be polling.
 ///
-/// Must be called before [`register`], and from the main thread — installing the handler is a Carbon
+/// Must be called before [`register`], and from the main thread: installing the handler is a Carbon
 /// call like any other.
 pub fn listen() -> Option<Receiver<String>> {
     if PRESSES.get().is_some() {
@@ -198,7 +198,7 @@ pub fn listen() -> Option<Receiver<String>> {
 
 /// A live registration. Dropping it gives the combination back to the system.
 ///
-/// Not `Send` on purpose — see the module docs.
+/// Not `Send` on purpose: see the module docs.
 #[derive(Debug)]
 pub struct Registration {
     id: u32,

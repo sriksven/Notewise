@@ -2,8 +2,8 @@
  * Tests for how the meeting page reaches the engine.
  *
  * The bug these exist for: the content script fetched `http://127.0.0.1:<port>` itself. Chrome
- * treats a content script's request as the meeting page's, and a public page may not reach loopback
- * — so on a real Meet page every probe was refused, every refusal read as "the app is not running",
+ * treats a content script's request as the meeting page's, and a public page may not reach loopback,
+ * so on a real Meet page every probe was refused, every refusal read as "the app is not running",
  * and nothing ever reached the engine. The tests stayed green throughout, because they handed
  * `engine.js` a fake `fetch` and never asked where it would run.
  *
@@ -51,7 +51,7 @@ test("nothing the content script loads makes a request", async () => {
     assert.notEqual(
       path,
       "src/engine.js",
-      "the meeting page imports the engine client, so its requests would be the page's — refused",
+      "the meeting page imports the engine client, so its requests would be the page's and refused",
     );
     assert.doesNotMatch(
       await source(path),
@@ -63,7 +63,7 @@ test("nothing the content script loads makes a request", async () => {
 
 test("everything the content script loads is web-accessible", async () => {
   // A module missing from the list fails its dynamic import on the page, and content.js swallows
-  // that so the meeting is not broken — which makes it another way to do nothing silently.
+  // that so the meeting is not broken, which makes it another way to do nothing silently.
   const manifest = JSON.parse(await source("manifest.json"));
   const accessible = manifest.web_accessible_resources.flatMap((entry) => entry.resources);
 

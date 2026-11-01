@@ -15,7 +15,7 @@ import { api, ApiError, type SummaryTemplate } from "../lib/api";
  *
  * # Built-ins are editable and not deletable
  *
- * That asymmetry is the engine's, not this screen's invention — `SummaryRepository::delete_template`
+ * That asymmetry is the engine's, not this screen's invention: `SummaryRepository::delete_template`
  * refuses a seeded row, and editing one keeps `is_builtin` set. So the delete control is hidden on
  * those rather than shown and failing, which is the difference between a rule and a trap.
  *
@@ -97,7 +97,7 @@ export function SummaryTemplateSettings() {
     if (ok) void act(() => api.deleteSummaryTemplate(template.id));
   };
 
-  /** Shared by the add and edit forms — they differ only in which call they end in. */
+  /** Shared by the add and edit forms: they differ only in which call they end in. */
   const form = (
     <div className="space-y-2 px-4 py-3">
       <input
@@ -112,7 +112,7 @@ export function SummaryTemplateSettings() {
         value={draft.prompt}
         onChange={(event) => setDraft((d) => ({ ...d, prompt: event.target.value }))}
         rows={4}
-        placeholder="What the model should do with the transcript — e.g. “List only the decisions, with who made each one.”"
+        placeholder="What the model should do with the transcript, e.g. “List only the decisions, with who made each one.”"
         aria-label="Template prompt"
         className="w-full resize-y rounded border border-hairline bg-surface px-2 py-1.5 text-[12.5px]
                    leading-relaxed text-ink placeholder:text-ink-faint"
@@ -156,7 +156,7 @@ export function SummaryTemplateSettings() {
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
         Each template is one prompt. They appear under any summary, so a meeting can be summarised
-        more than one way — running another adds a summary rather than replacing the one you have.
+        more than one way: running another adds a summary rather than replacing the one you have.
       </p>
 
       <div className="card divide-y divide-hairline overflow-hidden">
@@ -232,7 +232,7 @@ export function SummaryTemplateSettings() {
       </div>
 
       <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-        Built-in templates can be edited but not deleted, and the original wording is not kept — so
+        Built-in templates can be edited but not deleted, and the original wording is not kept, so
         an edit to one cannot be undone from here.
       </p>
 

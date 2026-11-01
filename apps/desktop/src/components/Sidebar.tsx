@@ -43,7 +43,7 @@ interface Item {
 /**
  * Three groups, because they answer three different questions.
  *
- * *Capture* is what the app does while a meeting is happening — the two things a user reaches
+ * *Capture* is what the app does while a meeting is happening: the two things a user reaches
  * for with a call already ringing. *Workspace* is the material that outlives the meeting.
  * *Below the fold* is everything you go to deliberately and rarely.
  *
@@ -151,7 +151,7 @@ export function Sidebar({ view, onNavigate, isRecording, onGoLive }: Props) {
       ))}
 
       {/* Capture state, wherever the user has navigated to. The sidebar is the only thing on
-          screen from every view, so it is the only place this can always be seen — and it
+          screen from every view, so it is the only place this can always be seen, and it
           doubles as the way back to the meeting that is running. */}
       {isRecording && (
         <button
@@ -165,7 +165,7 @@ export function Sidebar({ view, onNavigate, isRecording, onGoLive }: Props) {
             className="recording-pulse h-2 w-2 shrink-0 rounded-full bg-record"
             aria-hidden
           />
-          Recording — go live
+          Recording - go live
         </button>
       )}
     </nav>

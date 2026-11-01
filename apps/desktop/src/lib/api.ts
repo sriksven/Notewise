@@ -37,7 +37,7 @@ export interface DownloadState {
   /**
    * Which catalogue this belongs to.
    *
-   * One engine-side manager tracks both, but progress is streamed by per-catalogue routes — so a
+   * One engine-side manager tracks both, but progress is streamed by per-catalogue routes, so a
    * caller reading {@link ApiClient.downloads} must check this before watching an entry. Watching
    * a `speaker` download through the transcription route answers 400.
    */
@@ -106,14 +106,14 @@ export interface GroundedAnswer {
   /**
    * Whether there was any material behind the answer at all.
    *
-   * False only when nothing was found — which is worth telling the user about, since retrieval
+   * False only when nothing was found, which is worth telling the user about, since retrieval
    * is by word and a rewording may find it.
    */
   grounded: boolean;
   /**
    * How many passages retrieval found before they were checked for relevance.
    *
-   * Tells "found nothing" (0: try other words) from "found some, none answer it" — the material
+   * Tells "found nothing" (0: try other words) from "found some, none answer it": the material
    * genuinely is not there. Absent from the per-note endpoint's older responses.
    */
   considered?: number;
@@ -213,7 +213,7 @@ export interface SummarizeResult {
   summary_id: string;
   text: string;
   model: string;
-  /** Counts, not the rows — read those from the meeting. */
+  /** Counts, not the rows; read those from the meeting. */
   decisions: number;
   action_items: number;
 }
@@ -311,7 +311,7 @@ export interface Speaker {
   segments: number;
   speaking_ms: number;
   first_at_ms: number;
-  /** A diarizer label rather than a person's name — the UI offers to fix these. */
+  /** A diarizer label rather than a person's name; the UI offers to fix these. */
   anonymous: boolean;
 }
 
@@ -337,7 +337,7 @@ export interface BackendInfo {
   requires_endpoint: boolean;
   /** Whether this backend can be asked which models it currently holds. */
   lists_models: boolean;
-  /** Whether a key is available — from the keychain or the environment. Never the key. */
+  /** Whether a key is available, from the keychain or the environment. Never the key. */
   has_key: boolean;
 }
 
@@ -352,7 +352,7 @@ export type AmbiguityKind =
 
 export interface ClarifyingQuestion {
   question: string;
-  /** The words that prompted it, as said — the engine drops a question whose quote is not. */
+  /** The words that prompted it, as said; the engine drops a question whose quote is not. */
   about: string;
   kind: AmbiguityKind;
   /** When the prompting statement was said, in meeting time. */
@@ -401,7 +401,7 @@ export interface RelatedNode {
   /**
    * What to call it, for the kinds that are their own destination.
    *
-   * Null for a transcript segment, a summary, a decision — things that belong to a meeting rather
+   * Null for a transcript segment, a summary, a decision: things that belong to a meeting rather
    * than standing beside it. Render only what can be named.
    */
   label: string | null;
@@ -445,8 +445,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
-  // Nothing to read. Two routes answer `204 No Content` — removing an API key and disconnecting
-  // a connector — and `response.json()` throws on an empty body, so both used to report failure
+  // Nothing to read. Two routes answer `204 No Content` (removing an API key and disconnecting
+  // a connector), and `response.json()` throws on an empty body, so both used to report failure
   // after succeeding, and skip the refresh that would have shown the change.
   if (response.status === 204) return undefined as T;
 
@@ -457,7 +457,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * One condition on a request, in the shape the engine serializes.
  *
  * A tagged union rather than a flat object with optional fields, because that is what
- * `ai_router::Predicate` is — and flattening it here would mean this file deciding which
+ * `ai_router::Predicate` is, and flattening it here would mean this file deciding which
  * combinations are legal, which the engine already validates.
  */
 export type RoutingPredicate =
@@ -483,7 +483,7 @@ export interface RoutingRules {
   /**
    * Names the running engine actually built, in evaluation order.
    *
-   * A stored rule missing from here failed to construct — usually a lost API key — and is not in
+   * A stored rule missing from here failed to construct, usually a lost API key, and is not in
    * force. Showing only `rules` would present it as working.
    */
   active: string[];
@@ -530,7 +530,7 @@ export interface SummaryTemplate {
   id: string;
   name: string;
   prompt: string;
-  /** Seeded. Editable, but not deletable — so the delete control is hidden rather than failing. */
+  /** Seeded. Editable, but not deletable, so the delete control is hidden rather than failing. */
   is_builtin: boolean;
 }
 
@@ -714,12 +714,16 @@ export interface DictationStatus {
   listening: boolean;
   started_at: string | null;
   mode: "raw" | "cleaned" | null;
+  /** Words already decoded properly, while a session started with `partials` is listening. */
+  committed: string | null;
+  /** A guess at the phrase still being spoken. The next read may revise it. */
+  interim: string | null;
 }
 
 /**
  * How dictated text got where it went.
  *
- * `clipboard_restored: false` means the clipboard was borrowed and could not be put back — worth
+ * `clipboard_restored: false` means the clipboard was borrowed and could not be put back, worth
  * telling the user at the time rather than letting them find out at their next paste.
  */
 export type Insertion =
@@ -791,7 +795,7 @@ export interface ActResult {
   note: string | null;
 }
 
-/** Why nothing is being suggested — the question inline completion generates most. */
+/** Why nothing is being suggested: the question inline completion generates most. */
 export type CompletionDecision =
   | "ask"
   | "still_typing"
@@ -837,7 +841,7 @@ export interface JoinOffer {
 export interface DetectionStatus {
   sources: Array<{
     source: "extension" | "calendar" | "native";
-    /** Null means it has never reported — for the extension, that is the whole answer. */
+    /** Null means it has never reported: for the extension, that is the whole answer. */
     last_seen_at: string | null;
   }>;
   offers: number;
@@ -850,7 +854,7 @@ export interface DetectionStatus {
 /**
  * A vault file edited outside Notewise.
  *
- * The mirror pauses for it rather than overwriting, which is the promise the vault makes — and until
+ * The mirror pauses for it rather than overwriting, which is the promise the vault makes, and until
  * now the pause was silent.
  */
 export interface VaultDivergence {
@@ -884,8 +888,8 @@ export interface DivergenceResolved {
  * Deliberately absent, and recorded here rather than re-added by the next person:
  *
  * - `POST /v1/import` by path, and `POST /v1/workspace/merge`, both name a file on disk. This
- *   frontend is a web app served over loopback with no filesystem access and no bridge to the shell
- *   — there are no Tauri commands and no dialog plugin — so a path is something it can never
+ *   frontend is a web app served over loopback with no filesystem access and no bridge to the shell:
+ *   there are no Tauri commands and no dialog plugin, so a path is something it can never
  *   truthfully supply. Importing here goes through `importUpload`, which hands over bytes; that
  *   replaced a `window.prompt` asking for an absolute path typed from memory. Both capabilities
  *   live on the CLI, as `notewise import` and `notewise merge`, where a path is a real thing.
@@ -908,7 +912,7 @@ export const api = {
   vaultDivergences: () => request<VaultDivergence[]>("/v1/vault/divergences"),
 
   /**
-   * Settle one. `copy_to_note` is the only choice that loses nothing — it saves what you wrote as a
+   * Settle one. `copy_to_note` is the only choice that loses nothing: it saves what you wrote as a
    * note before refreshing the file.
    */
   resolveDivergence: (id: string, resolution: "keep" | "overwrite" | "copy_to_note") =>
@@ -923,7 +927,7 @@ export const api = {
   meetings: (limit = 50) => request<Meeting[]>(`/v1/meetings?limit=${limit}`),
 
   /**
-   * One meeting by id, trashed or not — `deleted_at` says which.
+   * One meeting by id, trashed or not; `deleted_at` says which.
    *
    * For a meeting the newest-fifty list does not hold: one opened from a person, a search hit or
    * a citation, or an address that names a meeting since deleted.
@@ -945,7 +949,7 @@ export const api = {
     request<{ speakers: Speaker[] }>(`/v1/meetings/${id}/speakers`),
 
   /**
-   * Rename a speaker — which is also how two are merged.
+   * Rename a speaker, which is also how two are merged.
    *
    * Passing a `to` that another speaker already has folds the two together. That is the fix
    * for a diarizer having split one person in two, and the server reports `merged` so the UI
@@ -1103,7 +1107,7 @@ export const api = {
    * Summarize using a template's prompt instead of the backend's default instruction.
    *
    * Same route, same answer as {@link summarize}. It was typed as `{ summary, decisions[],
-   * action_items[] }`, which the engine has never sent — harmless only because no caller read it.
+   * action_items[] }`, which the engine has never sent, harmless only because no caller read it.
    */
   summarizeWithTemplate: (id: string, templateId: string) =>
     request<SummarizeResult>(
@@ -1157,7 +1161,7 @@ export const api = {
   /**
    * Which models a local backend currently holds.
    *
-   * Never rejects for a stopped daemon — `available: false` with a reason is the normal
+   * Never rejects for a stopped daemon: `available: false` with a reason is the normal
    * answer, because the engine's default model id is a guess and the whole point of this call
    * is to replace that guess with the exact tags installed on this machine.
    */
@@ -1169,7 +1173,7 @@ export const api = {
   /**
    * Start a download. Returns as soon as it has started, not when it finishes.
    *
-   * `large-v3` is 3.1 GB — a request held open that long is indistinguishable from a hang, and
+   * `large-v3` is 3.1 GB: a request held open that long is indistinguishable from a hang, and
    * a retry would start a second copy. Follow it with {@link watchDownload}.
    */
   downloadModel: (name: string) =>
@@ -1182,7 +1186,7 @@ export const api = {
   /**
    * What first-run setup still needs.
    *
-   * Never prompts — permission status is read without opening a device, so calling this on
+   * Never prompts: permission status is read without opening a device, so calling this on
    * mount cannot raise an OS dialog before the user has pressed anything.
    */
   setup: () => request<SetupReadiness>("/v1/setup"),
@@ -1192,7 +1196,7 @@ export const api = {
    *
    * Rejects with a 409 when a required step is unsatisfied, so a UI bug cannot let anyone past
    * the gate by accident. `skip` is the deliberate override, for a user who cannot satisfy a
-   * step — it records completion and reports back what was left unresolved. Completing twice
+   * step: it records completion and reports back what was left unresolved. Completing twice
    * returns the original timestamp.
    */
   completeSetup: (skip = false) =>
@@ -1209,7 +1213,7 @@ export const api = {
    * Stream a download's progress.
    *
    * Returns a cancel function. The stream is closed automatically on the terminal event, so a
-   * caller that only wants progress does not have to remember to tear it down — but a caller
+   * caller that only wants progress does not have to remember to tear it down, but a caller
    * that navigates away mid-download does.
    */
   watchDownload: (
@@ -1275,7 +1279,7 @@ export const api = {
   voiceprints: () =>
     request<{ enabled: boolean; stored: number }>("/v1/voiceprints"),
 
-  /** Turning it off also erases what is stored — the engine does both. */
+  /** Turning it off also erases what is stored; the engine does both. */
   setVoiceprintsEnabled: (enabled: boolean) =>
     request<{ enabled: boolean; stored: number }>("/v1/voiceprints", {
       method: "POST",
@@ -1336,7 +1340,7 @@ export const api = {
    * Mark a draft approved.
    *
    * Approving is not sending. There is no send endpoint anywhere in this product, so this records
-   * that a human read it and was happy — nothing leaves the machine as a result.
+   * that a human read it and was happy; nothing leaves the machine as a result.
    */
   approveEmailDraft: (id: string) =>
     request<EmailDraft>(`/v1/emails/${id}/approve`, { method: "POST" }),
@@ -1367,7 +1371,7 @@ export const api = {
   /**
    * Change the setting.
    *
-   * Turning it on before the model has downloaded is allowed on purpose — the setting is intent,
+   * Turning it on before the model has downloaded is allowed on purpose: the setting is intent,
    * and `blocked_by` explains what is still missing.
    */
   setDiarization: (patch: {
@@ -1406,7 +1410,7 @@ export const api = {
   /**
    * Save a provider API key.
    *
-   * Goes to the OS keychain and is never readable back — the listing reports only whether a
+   * Goes to the OS keychain and is never readable back: the listing reports only whether a
    * key exists. Switches to the backend on success, so adding a key is one action.
    */
   setApiKey: (kind: string, key: string) =>
@@ -1422,7 +1426,7 @@ export const api = {
    * Switch the active AI backend.
    *
    * No API key is sent: the engine reads keys from its own environment, so a key never
-   * travels over HTTP — not even on loopback — and never lands in a log.
+   * travels over HTTP, not even on loopback, and never lands in a log.
    */
   switchBackend: (kind: string, model?: string, endpoint?: string) =>
     request<{ kind: string; model: string; is_local: boolean }>("/v1/backend", {
@@ -1435,7 +1439,7 @@ export const api = {
    *
    * A browser file picker never reveals where a file came from, so the path endpoint below
    * cannot be driven from this window. Uploading is the price of a working "choose a file"
-   * button that needs no native dialog — and over loopback it is a local copy.
+   * button that needs no native dialog, and over loopback it is a local copy.
    */
   importUpload: (file: File, language?: string) =>
     request<{
@@ -1478,7 +1482,7 @@ export const api = {
   /**
    * Every ticket, whatever its status.
    *
-   * `?status=all` because the bare route answers open tickets only — the board has a Done column,
+   * `?status=all` because the bare route answers open tickets only: the board has a Done column,
    * and without it a ticket moved there vanished on the next load.
    */
   tickets: () => request<Ticket[]>("/v1/tickets?status=all"),
@@ -1495,7 +1499,7 @@ export const api = {
     }),
 
   /**
-   * Partial edit. An omitted field is left alone, never blanked — pass `clear_owner` or
+   * Partial edit. An omitted field is left alone, never blanked: pass `clear_owner` or
    * `clear_due_at` to actually remove one. Getting this wrong wipes fields the user never
    * touched, so the asymmetry is deliberate on both sides of the wire.
    */
@@ -1555,7 +1559,7 @@ export const api = {
    * Forget a decision the model got wrong.
    *
    * The engine has allowed this since decisions became first-class and nothing offered it, which
-   * left a wrong decision on the meeting permanently — and a wrong decision is worse than a missing
+   * left a wrong decision on the meeting permanently, and a wrong decision is worse than a missing
    * one, because it reads as a record of what the room agreed.
    */
   deleteDecision: (id: string) =>
@@ -1567,7 +1571,7 @@ export const api = {
     }),
 
   /**
-   * Turn an action item into a ticket. The item is kept — it is the record that the
+   * Turn an action item into a ticket. The item is kept: it is the record that the
    * meeting produced this work. Calling twice returns the existing ticket.
    */
   promoteActionItem: (id: string) =>
@@ -1634,7 +1638,7 @@ export const api = {
   /**
    * Move a meeting to the trash.
    *
-   * Recoverable with {@link restoreMeeting}. Refused while that meeting is being recorded —
+   * Recoverable with {@link restoreMeeting}. Refused while that meeting is being recorded:
    * deleting it out from under the capture pipeline is a crash with extra steps.
    */
   deleteMeeting: (id: string) =>
@@ -1711,7 +1715,7 @@ export const api = {
     id: string,
     target: string,
     options: {
-      /** A shared secret the connector needs — the Apps Script deployment key. Goes to the keychain. */
+      /** A shared secret the connector needs, the Apps Script deployment key. Goes to the keychain. */
       key?: string;
       /** `calendar`, `mail`, or both. Mail is opt-in. */
       scopes?: string[];
@@ -1725,7 +1729,7 @@ export const api = {
   /**
    * Begin a Microsoft sign-in. Returns the page to open; the engine catches the redirect.
    *
-   * Notewise ships no app registration of its own, so a client id from the tenant is required —
+   * Notewise ships no app registration of its own, so a client id from the tenant is required:
    * the request says so rather than failing at Microsoft with an error about an unknown app.
    */
   startMicrosoftSignIn: (input: { client_id?: string; scopes?: string[] } = {}) =>
@@ -1842,7 +1846,7 @@ export const api = {
       { method: "DELETE" },
     ),
 
-  /** Ask a model for one tool call. Sends nothing — the result needs confirming. */
+  /** Ask a model for one tool call. Sends nothing; the result needs confirming. */
   proposeToolCall: (input: { action_item_id?: string; text?: string }) =>
     request<ToolProposalResult>("/v1/mcp/proposals", {
       method: "POST",
@@ -1884,14 +1888,24 @@ export const api = {
 
   dictationStatus: () => request<DictationStatus>("/v1/dictation"),
 
-  /** Start listening. Nothing is transcribed until it stops. */
-  startDictation: (input: { mode?: "raw" | "cleaned" } = {}) =>
+  /**
+   * Start listening.
+   *
+   * `insert: false` hands the words back at the stop instead of typing them at the cursor, for a
+   * box inside this app. `partials: true` makes the status carry the words while they are said.
+   */
+  startDictation: (
+    input: { mode?: "raw" | "cleaned"; insert?: boolean; partials?: boolean } = {},
+  ) =>
     request<DictationStatus>("/v1/dictation", {
       method: "POST",
       body: JSON.stringify(input),
     }),
 
-  /** Stop listening, transcribe, and put the words at the cursor. */
+  /**
+   * Stop listening, transcribe, and put the words at the cursor, unless it was started with
+   * `insert: false`.
+   */
   stopDictation: () => request<Dictated>("/v1/dictation", { method: "DELETE" }),
 
   cancelDictation: () =>
@@ -1915,7 +1929,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  /** Ask for a continuation. Suggests only — accepting is a separate step. */
+  /** Ask for a continuation. Suggests only; accepting is a separate step. */
   suggestCompletion: (input: { text?: string; last_asked_ms?: number; force?: boolean }) =>
     request<Completion>("/v1/assistant/complete", {
       method: "POST",
@@ -1953,7 +1967,7 @@ export const api = {
   joinOffers: () => request<JoinOffer[]>("/v1/signals/join/offers"),
 
   /**
-   * Take an offer up. Returns what to call the recording — it does not start one, because
+   * Take an offer up. Returns what to call the recording; it does not start one, because
    * starting one already has its own endpoint with its own device and model errors.
    */
   acceptJoinOffer: (id: string) =>

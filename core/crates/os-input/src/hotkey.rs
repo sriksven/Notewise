@@ -9,7 +9,7 @@
 //! # Two kinds of conflict, and only one of them is ours
 //!
 //! A collision between two Notewise bindings is detectable here, before anything is registered with
-//! the OS. A collision with *another application* is not — the OS simply refuses, and all this layer
+//! the OS. A collision with *another application* is not: the OS simply refuses, and all this layer
 //! can do is report which binding failed and why. Keeping the two distinct matters because the fixes
 //! differ: one is a setting in this app, the other is a setting in somebody else's.
 
@@ -219,7 +219,7 @@ impl HotkeyRegistry {
 /// Combinations to keep away from by default.
 ///
 /// A hardcoded hotkey that collides with somebody's IDE is an uninstall, so the defaults avoid what
-/// the host OS and common editors claim. This is advisory — a user who wants one of these can have
+/// the host OS and common editors claim. This is advisory: a user who wants one of these can have
 /// it, because it is their machine.
 pub const AVOID_BY_DEFAULT: &[&str] = &[
     "super+space", // Spotlight, and most launchers
@@ -420,7 +420,7 @@ mod tests {
         assert!(!is_commonly_claimed(&binding("cmd+shift+d")));
     }
 
-    /// Advisory, not enforced — it is the user's machine.
+    /// Advisory, not enforced: it is the user's machine.
     #[test]
     fn a_commonly_claimed_binding_can_still_be_set_deliberately() {
         let mut registry = HotkeyRegistry::new();

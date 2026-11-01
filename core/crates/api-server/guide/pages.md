@@ -73,7 +73,7 @@ Notes holds everything you write, including notes taken on a meeting's Notes tab
 - The + button, or ⌘N from any page when you are not typing in a field, makes a new note.
 - Notes save themselves as you type; beside the title it says Saving, Saved or Not saved.
 - Type / on an empty line for the block menu: text, headings, bulleted and numbered lists, to-dos, quotes, code, dividers, tables and images. ⌘B, ⌘I, ⌘E and ⌘⇧X format the selection.
-- Ask, beside the title, opens a chat about that note only, drawn in a second colour.
+- The Ask button at the bottom right of Notes opens a chat about the open note only, beside it and drawn in a second colour.
 - The bin beside a note in the list moves it to the trash.
 
 Notes are kept as plain Markdown, which search, Ask and the agent can all read.
@@ -92,15 +92,15 @@ To get tasks, summarize a meeting: anything that sounded like a commitment lands
 
 ## Ask
 page: ask
-keywords: ask, question, questions, chat, answer, answers, query, citation, citations, sources, references, conversation, chatbot
+keywords: ask, question, questions, chat, answer, answers, query, citation, citations, sources, references, conversation, chatbot, voice, speak, spoken, talk, out loud, mic button
 
 Ask answers questions from your own meetings and notes. Every claim carries a numbered citation; click it to open the source. If nothing you have answers the question, Ask says so instead of guessing.
 
 - Ask in the sidebar opens it as a page.
-- The Ask button at the bottom right of most pages opens the same thing as a panel beside what you are looking at. It stays open as you move around, so a citation opens next to the answer.
-- Each meeting has an Ask tab and each note has its own Ask, for questions about just that one.
+- The Ask button at the bottom right of most pages opens the same thing as a panel beside what you are looking at. On a meeting it sits beside the record button. It stays open as you move around, so a citation opens next to the answer.
+- Each meeting has an Ask tab, and on Notes the same button asks the open note, for questions about just that one.
 
-Press Enter to send and ⇧Enter for a new line. Ask also answers questions about Notewise itself, such as where a setting is or how many recordings you have. It explains and links to the page; it never changes a setting. It matches words unless you turn on search by meaning under Settings, then Search.
+Press Enter to send and ⇧Enter for a new line. To ask out loud, press the mic beside the question box: your words show as you say them, in grey while they are still a guess. Press it again to stop and leave the question in the box to check and send, or press Esc to throw it away. Whisper listens on this machine. Ask also answers questions about Notewise itself, such as where a setting is or how many recordings you have. It explains and links to the page; it never changes a setting. It matches words unless you turn on search by meaning under Settings, then Search.
 
 ## Agent
 page: agent

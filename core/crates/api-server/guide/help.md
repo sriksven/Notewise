@@ -34,7 +34,7 @@ Models are downloaded under Settings, then Transcription, and stored beside the 
 page: help/docs
 keywords: ask, question, questions, citation, citations, sources, wrong answer, irrelevant, not found, nothing matches, refused, cannot find
 
-Ask is in the sidebar, and the Ask button at the bottom right of most screens opens the same thing beside whatever you are looking at. Every meeting has an Ask tab, every note has its own, and the Agent searches across all of it. Answers cite what they were drawn from, and clicking a citation opens it.
+Ask is in the sidebar, and the Ask button at the bottom right of most screens opens the same thing beside whatever you are looking at. Every meeting has an Ask tab, every note has its own, and the Agent searches across all of it. The mic beside any Ask box lets you ask out loud. Answers cite what they were drawn from, and clicking a citation opens it.
 
 By default Ask matches words: asking about "pricing" will not find a meeting that only ever said "cost structure". Building the search index under Settings, then Search, fixes that. It runs locally through Ollama, never through your chat provider.
 

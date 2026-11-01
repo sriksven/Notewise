@@ -7,8 +7,8 @@ import { offered } from "./scope";
 /**
  * Asking, in one place.
  *
- * Three surfaces ask the same kind of question — the Ask page, the panel that opens from any screen,
- * and a note's own Ask — and each used to keep its own copy of the conversation, its own citation
+ * Three surfaces ask the same kind of question (the Ask page, the panel that opens from any screen,
+ * and a note's own Ask), and each used to keep its own copy of the conversation, its own citation
  * handling and its own wording for "nothing answers this". The copies drifted: the note's still told
  * people matching was by word after semantic search made that false. One implementation means the
  * three behave the same and differ only in where they search.
@@ -47,7 +47,7 @@ export function notGroundedNote(answer: GroundedAnswer): string {
 /**
  * Where a citation leads, or `null` when this build has no page for it.
  *
- * A ticket can be cited — it is the user's material — while Tickets is held back; the citation then
+ * A ticket can be cited (it is the user's material) while Tickets is held back; the citation then
  * shows and does not open. See `scope`.
  *
  * An `app` citation names its page by address, so it opens the exact Settings page or screen it
@@ -91,7 +91,7 @@ export interface AskThread {
   error: string | null;
   /** Ask `text`, or the draft when called with nothing. */
   send: (text?: string) => Promise<void>;
-  /** Start over — a different note, or a closed panel opened fresh. */
+  /** Start over: a different note, or a closed panel opened fresh. */
   reset: () => void;
 }
 

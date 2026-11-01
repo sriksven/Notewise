@@ -4,16 +4,16 @@
 //!
 //! [`crate::MicrophoneSource`] opens its device on a thread of its own and waits for word back, so
 //! that a missing device or a refused permission surfaces when the recording starts rather than as
-//! silence once it has. That wait has to be bounded — a wedged audio driver must not hang the
-//! request that started a meeting — but it was one bound over two very different steps:
+//! silence once it has. That wait has to be bounded: a wedged audio driver must not hang the
+//! request that started a meeting, but it was one bound over two very different steps:
 //!
 //! 1. **Finding the device.** The first Core Audio call a process makes connects it to the audio
 //!    system and lists every device. On a Mac with a handful of virtual devices installed that
-//!    measured 4.5–7.1 s, every time, in a fresh process.
+//!    measured 4.5-7.1 s, every time, in a fresh process.
 //! 2. **Opening it.** Building and starting the stream, which is quick when it works.
 //!
 //! Five seconds over both meant the first recording in a fresh engine could fail with "did not
-//! open in time" on a machine that was merely slow to list its devices — and so did the test
+//! open in time" on a machine that was merely slow to list its devices, and so did the test
 //! asking for a device that does not exist, which never opens anything at all. Each step now has
 //! its own bound: a generous one for the listing, which is slow but finite, and the original five
 //! seconds for the open, which is what a driver that has stopped responding looks like.

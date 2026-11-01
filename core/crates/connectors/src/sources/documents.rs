@@ -9,7 +9,7 @@
 //! # Why a scan rather than a filesystem watcher
 //!
 //! No `FSEvents`, no `inotify`, no `ReadDirectoryChangesW`. A cross-platform watcher is a dependency
-//! and a source of platform-specific missed events, and the requirement is loose — a document edited
+//! and a source of platform-specific missed events, and the requirement is loose: a document edited
 //! now needs to be searchable in minutes, not milliseconds. Polling also composes with `Importer`,
 //! which is invoked rather than event-driven.
 //!
@@ -79,7 +79,7 @@ pub fn is_readable(path: &Path, byte_size: u64) -> bool {
 
 /// Walk a folder, bounded.
 ///
-/// Returns what it found, and stops at [`MAX_FILES`] rather than refusing — a folder with more files
+/// Returns what it found, and stops at [`MAX_FILES`] rather than refusing: a folder with more files
 /// than that should import some of them, not none.
 pub fn scan(root: &Path) -> Vec<Found> {
     let mut found = Vec::new();
@@ -199,7 +199,7 @@ impl SourceConnector for Documents {
         }
 
         // The high-water modification time from the last scan. Files older than it are unchanged, so
-        // re-reading their contents would be work for no new information — the same rolling-window
+        // re-reading their contents would be work for no new information: the same rolling-window
         // shape the Google bridge uses, and for the same reason: no change feed exists.
         let since_time = since
             .as_deref()
@@ -422,7 +422,7 @@ mod tests {
         }
     }
 
-    /// A moved file is a new document whose old row becomes missing — not the same document.
+    /// A moved file is a new document whose old row becomes missing, not the same document.
     #[tokio::test]
     async fn the_path_is_the_identity() {
         let dir = tempfile::tempdir().expect("tempdir");

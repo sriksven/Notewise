@@ -2,7 +2,7 @@
 //!
 //! Migrations are append-only: never edit a shipped migration, add a new one. The applied
 //! version is tracked in SQLite's built-in `user_version` pragma, which avoids a bootstrap
-//! problem — no table needs to exist before we can read it.
+//! problem: no table needs to exist before we can read it.
 
 use rusqlite::Connection;
 
@@ -10,7 +10,7 @@ use crate::error::{Result, StorageError};
 
 /// Every migration, in order. Index + 1 is the schema version it produces.
 const MIGRATIONS: &[&str] = &[
-    // v1 — foundation: workspace, projects, meetings, transcripts, summaries, and the
+    // v1 - foundation: workspace, projects, meetings, transcripts, summaries, and the
     // generic edge table backing the `graph` crate.
     r#"
     CREATE TABLE workspaces (
@@ -101,7 +101,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_edges_from ON edges(from_kind, from_id);
     CREATE INDEX idx_edges_to ON edges(to_kind, to_id);
     "#,
-    // v2 — workspace layer: notes, tickets, email drafts, notifications.
+    // v2 - workspace layer: notes, tickets, email drafts, notifications.
     r#"
     CREATE TABLE notes (
         id          TEXT PRIMARY KEY NOT NULL,
@@ -160,7 +160,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_notifications_recipient ON notifications(recipient, read_at);
     CREATE INDEX idx_notifications_source ON notifications(source_kind, source_id);
     "#,
-    // v3 — full-text search across transcripts, notes, and tickets.
+    // v3 - full-text search across transcripts, notes, and tickets.
     //
     // External-content FTS would avoid duplicating text, but it requires the content
     // table's rowid to be stable, and ours are TEXT uuids. A standalone FTS table keeps
@@ -208,7 +208,7 @@ const MIGRATIONS: &[&str] = &[
         DELETE FROM search_index WHERE entity_kind = 'transcript_segment' AND entity_id = old.id;
     END;
     "#,
-    // v4 — application-level configuration. A generic key/value table rather than an
+    // v4 - application-level configuration. A generic key/value table rather than an
     // `onboarding` table: this is not a domain object, it has no edges, and the next setting
     // to need persisting should not cost another migration.
     r#"
@@ -218,7 +218,7 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     "#,
-    // v5 — the connector seam: external artifact records, per-connector account state, and
+    // v5 - the connector seam: external artifact records, per-connector account state, and
     // the outbound delivery queue. No tokens live here; credentials go to the OS keychain.
     //
     // Timestamps are TEXT in the format rusqlite's chrono impl emits for `DateTime<Utc>`:
@@ -227,7 +227,7 @@ const MIGRATIONS: &[&str] = &[
     // displayed, and TEXT comparison is lexicographic. An RFC3339 `Z` literal sorts before
     // every space-separated value at byte 10, so a row written in that form would be due
     // forever and never claimed. Do not hand-write timestamp literals in another format, and
-    // do not reach for DEFAULT CURRENT_TIMESTAMP — SQLite emits a third, also-incompatible
+    // do not reach for DEFAULT CURRENT_TIMESTAMP; SQLite emits a third, also-incompatible
     // form with no offset.
     r#"
     CREATE TABLE external_items (
@@ -271,7 +271,7 @@ const MIGRATIONS: &[&str] = &[
 
     -- Partial, and keyed on next_attempt_at alone. A composite (status, next_attempt_at)
     -- index cannot serve the drain query's ORDER BY, because `status IN (...)` splits the
-    -- scan into two disjoint ranges and SQLite falls back to a temp b-tree — which also
+    -- scan into two disjoint ranges and SQLite falls back to a temp b-tree, which also
     -- defeats the LIMIT, sorting every due row before returning a handful. Partial also
     -- keeps completed rows out of the index entirely; they are retained forever but never
     -- looked up by status.
@@ -280,7 +280,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_outbox_failed ON connector_outbox(created_at DESC)
         WHERE status = 'failed';
     "#,
-    // v6 — people, meeting series, and work items that outlive their summary.
+    // v6 - people, meeting series, and work items that outlive their summary.
     //
     // Three changes in one migration because they interlock:
     //
@@ -292,8 +292,8 @@ const MIGRATIONS: &[&str] = &[
     //
     // (3) defuses a landmine rather than fixing an active bug, and the distinction matters
     // to anyone auditing this later. Both tables were ON DELETE CASCADE from `summaries`.
-    // Nothing deletes a summary today — `summarize_meeting` appends a new row and leaves
-    // the old one — so no data has actually been lost. But that is the only thing standing
+    // Nothing deletes a summary today; `summarize_meeting` appends a new row and leaves
+    // the old one, so no data has actually been lost. But that is the only thing standing
     // between the old schema and silent loss: the obvious next change to summarisation
     // (replace on regenerate, or prune old summaries so they stop accumulating) would have
     // deleted every action item derived from that summary, taking with it the owner, due
@@ -323,7 +323,7 @@ const MIGRATIONS: &[&str] = &[
         -- Which embedding model produced `voice_print`. Cosine distance between vectors
         -- from different models is meaningless and the bytes do not say which model made
         -- them, so without this a model swap silently produces confident wrong matches on
-        -- named people. `voice_dims` does not cover it — two models can share a width.
+        -- named people. `voice_dims` does not cover it; two models can share a width.
         voice_model  TEXT,
         created_at   TEXT NOT NULL,
         updated_at   TEXT NOT NULL
@@ -397,7 +397,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_decisions_meeting ON decisions(meeting_id);
     CREATE INDEX idx_decisions_summary ON decisions(summary_id);
     "#,
-    // v7 — a recoverable delete for notes.
+    // v7 - a recoverable delete for notes.
     //
     // A note is frequently the only copy of something a person typed, and the previous
     // `DELETE FROM notes` was unrecoverable behind a single confirm dialog. Soft delete
@@ -424,7 +424,7 @@ const MIGRATIONS: &[&str] = &[
         SELECT 'note', new.id, new.title, new.body WHERE new.deleted_at IS NULL;
     END;
     "#,
-    // v8 — vectors, so search can find "cost structure" when you asked about "pricing".
+    // v8 - vectors, so search can find "cost structure" when you asked about "pricing".
     //
     // Derived data, entirely. Every row here can be rebuilt from the entity it points at, and
     // deleting the whole table costs an indexing run and nothing else. That is why there are
@@ -432,7 +432,7 @@ const MIGRATIONS: &[&str] = &[
     // stale row is discarded on read rather than being a corruption.
     //
     // `model` is the column that matters. Cosine distance between vectors from two different
-    // models is not a small error — it is meaningless — and the bytes do not say which model
+    // models is not a small error: it is meaningless, and the bytes do not say which model
     // produced them. Without this, switching from nomic-embed-text to bge-m3 yields confident
     // nonsense instead of an obvious miss. `dims` does not cover it: two models can share a
     // width.
@@ -442,7 +442,7 @@ const MIGRATIONS: &[&str] = &[
     // transcript on every indexing pass.
     //
     // No vector index. There is no ANN structure here and no sqlite-vec extension, because
-    // `rusqlite` is `bundled` on purpose — loading an extension would break the reproducible
+    // `rusqlite` is `bundled` on purpose; loading an extension would break the reproducible
     // build across platforms that decision buys. Similarity is a linear scan in Rust, which
     // is microseconds for the thousands of chunks a personal workspace holds and would need
     // revisiting at a scale this product does not target.
@@ -465,7 +465,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_embeddings_entity ON embeddings(entity_kind, entity_id);
     CREATE INDEX idx_embeddings_model  ON embeddings(model);
     "#,
-    // v9 — put the speaker in the search index.
+    // v9 - put the speaker in the search index.
     //
     // Since v3 the segment triggers have written `''` into the indexed `title` column and only
     // `new.text` into the body, so **who said something has never been searchable**. "What did
@@ -474,8 +474,8 @@ const MIGRATIONS: &[&str] = &[
     // one piece of structure a transcript has that prose does not.
     //
     // The missing UPDATE trigger matters as much as the wrong INSERT one. Speaker attribution
-    // arrives *after* the segment does — diarization assigns it when a recording ends, and the
-    // browser extension can name someone later still — so a segment indexed at insert with no
+    // arrives *after* the segment does; diarization assigns it when a recording ends, and the
+    // browser extension can name someone later still, so a segment indexed at insert with no
     // speaker would never pick one up. Without `segments_au`, every name assigned after the
     // fact was invisible to search.
     r#"
@@ -499,7 +499,7 @@ const MIGRATIONS: &[&str] = &[
     INSERT INTO search_index(entity_kind, entity_id, title, body)
     SELECT 'transcript_segment', id, COALESCE(speaker, ''), text FROM transcript_segments;
     "#,
-    // v10 — a recoverable delete for meetings.
+    // v10 - a recoverable delete for meetings.
     //
     // Meetings were undeletable from the UI, which was defensible while there was no trash and
     // no undo: a meeting owns its transcript, its summaries, its decisions and its action
@@ -511,8 +511,8 @@ const MIGRATIONS: &[&str] = &[
     //
     // The segment triggers are conditional on the *meeting's* state, which is why they need
     // rewriting again one migration after v9. A trashed meeting whose lines stayed in the
-    // index would keep answering questions — including through the agent, which reads search
-    // results — after the user had deleted it. That is the same failure the v7 note trigger
+    // index would keep answering questions (including through the agent, which reads search
+    // results) after the user had deleted it. That is the same failure the v7 note trigger
     // exists to prevent, one level up.
     r#"
     ALTER TABLE meetings ADD COLUMN deleted_at TEXT;
@@ -547,7 +547,7 @@ const MIGRATIONS: &[&str] = &[
          WHERE meeting_id = new.id AND new.deleted_at IS NULL;
     END;
     "#,
-    // v11 — summary templates, and the template recorded on what it produced.
+    // v11 - summary templates, and the template recorded on what it produced.
     //
     // One prompt produced every summary, so a sales call and an architecture review got the same
     // treatment and a user who wanted "decisions and owners only" had no way to ask.
@@ -558,7 +558,7 @@ const MIGRATIONS: &[&str] = &[
     //
     // `template_id` is nullable because every summary that already exists was produced before
     // templates did, and deleting a template must not erase the record of what produced a
-    // summary — which is why the reference does not cascade.
+    // summary, which is why the reference does not cascade.
     //
     // The three built-ins are seeded rows rather than hardcoded constants, so a user can copy one
     // and edit it. `is_builtin` exists so the repository can refuse to delete the last way of
@@ -577,7 +577,7 @@ const MIGRATIONS: &[&str] = &[
 
     INSERT INTO summary_templates (id, name, prompt, is_builtin, created_at, updated_at) VALUES
         ('00000000-0000-4000-8000-000000000001', 'General meeting',
-         'Summarise this meeting. Lead with what was decided and who owes what. Keep it to what was actually said — omit a section rather than filling it.',
+         'Summarise this meeting. Lead with what was decided and who owes what. Keep it to what was actually said; omit a section rather than filling it.',
          1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00'),
         ('00000000-0000-4000-8000-000000000002', 'Sales call',
          'Summarise this sales call. Cover: what the customer asked for, objections raised, pricing discussed, and the agreed next step with its owner and date. Do not infer budget or intent that was not stated.',
@@ -586,10 +586,10 @@ const MIGRATIONS: &[&str] = &[
          'Summarise this engineering discussion. Cover: the decision reached, the alternatives rejected and why, any risk or unknown that was named, and follow-up work with owners. Prefer the reasoning over the conclusion.',
          1, '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00');
     "#,
-    // v12 — a pointer to retained audio, for the meetings whose owner asked for it.
+    // v12 - a pointer to retained audio, for the meetings whose owner asked for it.
     //
     // Audio was never kept: capture streamed into transcription and the samples were gone. That
-    // made two things impossible — hearing the moment a line was said, and re-transcribing with a
+    // made two things impossible: hearing the moment a line was said, and re-transcribing with a
     // better model when the first pass invented something.
     //
     // A path and a size rather than a blob. An hour of audio is tens of megabytes; in the database
@@ -603,11 +603,11 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE meetings ADD COLUMN audio_bytes INTEGER;
     CREATE INDEX idx_meetings_audio ON meetings(audio_path) WHERE audio_path IS NOT NULL;
     "#,
-    // v13 — jobs that run without anybody watching, and a durable account of what they did.
+    // v13 - jobs that run without anybody watching, and a durable account of what they did.
     //
     // `agent.rs` keeps its runs in memory, arguing that a trace matters only while it is happening
     // and that the note it wrote survives anyway. That argument assumes somebody was present. For a
-    // run at 6am nobody was, and "it failed on Tuesday and I need to know why" is the normal case —
+    // run at 6am nobody was, and "it failed on Tuesday and I need to know why" is the normal case,
     // so the trace is persisted here.
     //
     // Bounded on write rather than swept: a job firing every fifteen minutes would otherwise grow
@@ -617,7 +617,7 @@ const MIGRATIONS: &[&str] = &[
     // it explicitly makes a DST transition or a relocation interpretable rather than mysterious.
     //
     // `job_allowed_tools` from the design is deliberately *not* here. It governs which external
-    // tools a run may propose, which needs the MCP tables that do not exist yet — so it belongs in
+    // tools a run may propose, which needs the MCP tables that do not exist yet, so it belongs in
     // that migration, next to the tables it relates to, rather than sitting empty here.
     r#"
     CREATE TABLE jobs (
@@ -647,7 +647,7 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX idx_job_runs_job ON job_runs(job_id, started_at DESC);
     "#,
-    // v14 — things worth remembering about the person using this.
+    // v14 - things worth remembering about the person using this.
     //
     // Off by default and capped hard. Memory is injected into prompts that already carry retrieved
     // material and a transcript, so an unbounded list crowds out the actual content and makes every
@@ -683,9 +683,9 @@ const MIGRATIONS: &[&str] = &[
         processed_at TEXT NOT NULL
     );
     "#,
-    // v15 — calendar events, and who was invited to them.
+    // v15 - calendar events, and who was invited to them.
     //
-    // `external_items` records that a thing exists elsewhere and has nowhere to put a start time —
+    // `external_items` records that a thing exists elsewhere and has nowhere to put a start time;
     // nor should it, being the shared identity table for every connector. So the detail lives here,
     // foreign-keyed to that row and cascading from it: the detail is *owned* by the external record,
     // while the association between a meeting and its event is a `SyncedTo` edge. Getting that
@@ -694,8 +694,8 @@ const MIGRATIONS: &[&str] = &[
     // `is_all_day` exists because an all-day event has no meaningful instant. Storing one without
     // the flag makes a timezone bug indistinguishable from a real 00:00 meeting.
     //
-    // `recurrence_key` is the provider's own identifier — `recurringEventId` on Google,
-    // `seriesMasterId` on Graph — normalised to one nullable column. It is what replaces the title
+    // `recurrence_key` is the provider's own identifier (`recurringEventId` on Google,
+    // `seriesMasterId` on Graph), normalised to one nullable column. It is what replaces the title
     // matching that `series.rs` documents as a stopgap.
     //
     // `person_id` is ON DELETE SET NULL: an attendee is a fact about an event and survives the
@@ -737,11 +737,11 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX idx_calendar_attendees_person ON calendar_attendees(person_id);
     "#,
-    // v16 — documents read from a watched folder, and vault files edited behind our back.
+    // v16 - documents read from a watched folder, and vault files edited behind our back.
     //
     // `body` is stored rather than re-read on demand, so a search result or a grounded answer
     // survives the file being moved or the drive being unmounted. `updated_at` is what makes
-    // `indexing.rs` notice it needs re-embedding — the same rule that crate already applies.
+    // `indexing.rs` notice it needs re-embedding: the same rule that crate already applies.
     //
     // `missing_at` is not in the design's DDL, and the design's own prose requires it: a file that
     // disappears is marked missing rather than deleted, so existing embeddings stay and an answer
@@ -789,12 +789,12 @@ const MIGRATIONS: &[&str] = &[
         DELETE FROM search_index WHERE entity_kind = 'document' AND entity_id = old.id;
     END;
     "#,
-    // v17 — external tool servers, which tools of theirs are allowed, and every call proposed.
+    // v17 - external tool servers, which tools of theirs are allowed, and every call proposed.
     //
     // `enabled` defaults to 0 and a tool is allowed only by having a row: default-deny, mirroring
     // how `mcp-server` treats its own write scope. A server added and forgotten grants nothing.
     //
-    // Credentials — environment variables for a stdio server, headers for an HTTP one — are not
+    // Credentials (environment variables for a stdio server, headers for an HTTP one) are not
     // here. They go to the keychain, and these rows hold only the reference, the same split routing
     // rules make for provider keys.
     //
@@ -1054,7 +1054,7 @@ mod tests {
         assert_eq!(decisions, 1, "decision must outlive its summary");
     }
 
-    /// Deleting the *meeting* should still take its work items with it — the v6 rewrite
+    /// Deleting the *meeting* should still take its work items with it; the v6 rewrite
     /// moved ownership, it did not remove it.
     #[test]
     fn deleting_a_meeting_still_cascades_to_its_work_items() {

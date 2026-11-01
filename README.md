@@ -85,8 +85,9 @@ its specific state. Directories that are scaffolds say so at the top.
 
 ## Install
 
-Each tagged version attaches installers to
-[GitHub Releases](https://github.com/sriksven/Notewise/releases).
+Every push to `main` rebuilds the app on GitHub Actions and replaces the **latest build** on
+[GitHub Releases](https://github.com/sriksven/Notewise/releases), which is what the website's
+download buttons offer. A `v*` tag publishes a named version there too.
 
 | Platform | File | First launch |
 |---|---|---|
@@ -127,7 +128,7 @@ download uncommon; keep it. Run the `_x64-setup.exe`, and if **Windows protected
 appears, choose **More info**, then **Run anyway**. It installs for your account only, with no
 administrator prompt.
 
-On Windows, recording is from the microphone only — system audio is not built there yet —
+On Windows, recording is from the microphone only (system audio is not built there yet),
 transcription runs on the processor, and the desktop assistant is not available.
 
 ## Quick start

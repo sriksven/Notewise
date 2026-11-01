@@ -8,8 +8,8 @@
 //! # Why this is in the engine and not the shell
 //!
 //! The design's architecture says nothing in the engine depends on `os-input`. This does, and the
-//! reason is worth stating rather than hiding: with the `os-input` feature off — which is the
-//! default, and what CI builds — that crate is pure logic with no platform SDK, no `unsafe`, and no
+//! reason is worth stating rather than hiding: with the `os-input` feature off (which is the
+//! default, and what CI builds) that crate is pure logic with no platform SDK, no `unsafe`, and no
 //! grant of any kind. What the design was protecting against is the assistant's *platform*
 //! requirements leaking into an engine build, and a feature that is off does not leak.
 //!
@@ -20,7 +20,7 @@
 //!
 //! Raw transcription needs no model beyond Whisper, so it is the one thing here that works with no
 //! LLM configured at all. Cleaned sends the transcript to whichever backend is set to fix
-//! punctuation and casing — which is a round trip and, on a hosted backend, an upload. So it is a
+//! punctuation and casing, which is a round trip and, on a hosted backend, an upload. So it is a
 //! choice per session and not a default.
 //!
 //! # What a stop does, in order
@@ -66,7 +66,7 @@ const MODE_SETTING: &str = "assistant.dictation.mode";
 /// The default binding.
 ///
 /// Chosen from what nothing else claims. `super+shift+d` is not in the OS's set, not a common editor
-/// shortcut, and not one of the combinations [`notewise_os_input::AVOID_BY_DEFAULT`] lists — which a
+/// shortcut, and not one of the combinations [`notewise_os_input::AVOID_BY_DEFAULT`] lists, which a
 /// test checks, because a default hotkey that collides with somebody's IDE is an uninstall.
 pub const DEFAULT_HOTKEY: &str = "super+shift+d";
 
@@ -81,7 +81,7 @@ pub const DEFAULT_OVERLAY_HOTKEY: &str = "super+shift+a";
 /// Every feature that holds a global hotkey, and where its binding is stored.
 ///
 /// Held as data so the conflict check, the settings read, and the shell's registration cannot drift
-/// apart. Adding a third feature means adding a row, and the conflict detection covers it for free —
+/// apart. Adding a third feature means adding a row, and the conflict detection covers it for free,
 /// which is the whole reason [`HotkeyRegistry`] exists rather than two settings compared by hand.
 pub const HOTKEYS: &[(&str, &str, &str)] = &[
     (FEATURE, HOTKEY_SETTING, DEFAULT_HOTKEY),
@@ -98,6 +98,15 @@ pub const HOTKEYS: &[(&str, &str, &str)] = &[
 /// otherwise hold the microphone open until the app quits, which is both a recording nobody asked
 /// for and a battery complaint.
 pub const MAX_SESSION_SECS: i64 = 120;
+
+/// The shortest gap between two looks at the phrase still being spoken, for a session that asked
+/// for partial text.
+///
+/// Short enough that a word shows up about as soon as it is finished. The gap is counted from when
+/// the last look *finished*, and stretches to as long as that look took, so a slow machine shows
+/// text less often rather than falling behind the microphone: a look can never take more than half
+/// the time.
+pub const PREVIEW_EVERY_MS: u128 = 300;
 
 pub fn routes() -> AxumRouter<Shared> {
     AxumRouter::new()
@@ -166,11 +175,11 @@ pub fn join_segments(segments: &[Segment]) -> String {
 /// The instruction for the cleaned mode.
 ///
 /// Deliberately narrow. A model asked to "improve" dictation rewrites it, and a dictation surface
-/// that changes the user's words is worse than one that leaves a missing comma — they said what
+/// that changes the user's words is worse than one that leaves a missing comma: they said what
 /// they said, and this is not a drafting tool.
 pub fn cleanup_prompt() -> &'static str {
     "You fix the punctuation and capitalisation of dictated speech. Return the corrected text and \
-nothing else — no preamble, no quotes, no commentary.
+nothing else: no preamble, no quotes, no commentary.
 
 Rules:
 - Do not change the words. Do not add, remove, reorder, or rephrase anything.
@@ -205,6 +214,14 @@ pub fn cleaning_is_trustworthy(raw: &str, cleaned: &str) -> bool {
     (0.75..=1.25).contains(&ratio)
 }
 
+/// Whether it is time for another look at the phrase still being spoken.
+///
+/// `since_last_ms` is counted from when the last look finished and `last_look_ms` is how long it
+/// took. See [`PREVIEW_EVERY_MS`].
+pub fn preview_due(since_last_ms: u128, last_look_ms: u128) -> bool {
+    since_last_ms >= PREVIEW_EVERY_MS.max(last_look_ms)
+}
+
 // ---------------------------------------------------------------- the live session
 
 /// A dictation in progress.
@@ -213,8 +230,62 @@ struct Live {
     stop: Arc<AtomicBool>,
     started_at: DateTime<Utc>,
     mode: Mode,
+    /// Whether the words go to the cursor when it stops, or only back to whoever stops it.
+    insert: bool,
+    /// What has been heard so far, for a session that asked for partial text.
+    heard: Option<Arc<Heard>>,
     /// The transcript, when the capture thread is finished with it.
     done: oneshot::Receiver<std::result::Result<Vec<Segment>, String>>,
+}
+
+/// What a live dictation has heard so far, shared by the capture thread and the status route.
+///
+/// A plain mutex rather than tokio's: the writer is the capture thread, which is not on the
+/// runtime, and every hold is a string copy.
+#[derive(Debug, Default)]
+struct Heard(std::sync::Mutex<HeardSoFar>);
+
+/// The two kinds of text a client shows while somebody is talking.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct HeardSoFar {
+    /// Phrases the engine has cut at a pause and decoded properly. These do not change.
+    committed: String,
+    /// A guess at the phrase still being spoken. The next look may revise it.
+    interim: String,
+}
+
+#[cfg_attr(
+    not(all(feature = "record", feature = "whisper")),
+    allow(dead_code, reason = "written only by the gated capture path")
+)]
+impl Heard {
+    /// A phrase was cut. Its text is now kept, so the guess at it goes.
+    fn commit(&self, committed: String) {
+        if let Ok(mut heard) = self.0.lock() {
+            heard.committed = committed;
+            heard.interim.clear();
+        }
+    }
+
+    /// A new guess at the phrase still being spoken, replacing the last one.
+    fn guess(&self, interim: String) {
+        if let Ok(mut heard) = self.0.lock() {
+            heard.interim = interim;
+        }
+    }
+
+    fn snapshot(&self) -> HeardSoFar {
+        self.0.lock().map(|heard| heard.clone()).unwrap_or_default()
+    }
+}
+
+/// A session that has been stopped, with everything the stop needs to finish it.
+#[derive(Debug)]
+struct Ended {
+    segments: Vec<Segment>,
+    started_at: DateTime<Utc>,
+    mode: Mode,
+    insert: bool,
 }
 
 /// The at-most-one dictation.
@@ -239,6 +310,16 @@ impl DictationManager {
             .as_ref()
             .map(|live| (live.started_at, live.mode))
     }
+
+    /// What a live session that asked for partial text has heard so far.
+    async fn heard(&self) -> Option<HeardSoFar> {
+        self.live
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|live| live.heard.as_ref())
+            .map(|heard| heard.snapshot())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -250,10 +331,16 @@ struct StatusBody {
     listening: bool,
     started_at: Option<String>,
     mode: Option<&'static str>,
+    /// Text already decoded properly, for a session started with `partials`. Null otherwise.
+    committed: Option<String>,
+    /// A guess at the phrase still being spoken, for a session started with `partials`. The next
+    /// read may revise it, so a client shows it as provisional.
+    interim: Option<String>,
 }
 
 async fn status(State(state): State<Shared>) -> ApiResult<Json<StatusBody>> {
     let live = state.dictation().status().await;
+    let heard = state.dictation().heard().await;
 
     Ok(Json(StatusBody {
         supported: SUPPORTED,
@@ -261,6 +348,8 @@ async fn status(State(state): State<Shared>) -> ApiResult<Json<StatusBody>> {
         listening: live.is_some(),
         started_at: live.map(|(at, _)| at.to_rfc3339()),
         mode: live.map(|(_, mode)| mode.as_str()),
+        committed: heard.as_ref().map(|heard| heard.committed.clone()),
+        interim: heard.map(|heard| heard.interim),
     }))
 }
 
@@ -270,10 +359,10 @@ fn unsupported_reason() -> String {
         .to_string()
 }
 
-/// `device` and `language` are read only by the capture path, which is behind the feature flags —
-/// so a build that cannot record accepts them and has nothing to do with them. Kept rather than
-/// gated so the request shape does not change between builds, which would make one client work
-/// against one engine and not another.
+/// `device`, `language`, `insert` and `partials` are read only by the capture path, which is behind
+/// the feature flags, so a build that cannot record accepts them and has nothing to do with them.
+/// Kept rather than gated so the request shape does not change between builds, which would make
+/// one client work against one engine and not another.
 #[cfg_attr(
     not(all(feature = "record", feature = "whisper")),
     allow(dead_code, reason = "read only by the gated capture path")
@@ -286,6 +375,19 @@ struct StartBody {
     device: Option<String>,
     #[serde(default)]
     language: Option<String>,
+    /// Whether the stop puts the words at the cursor. Defaults to true, which is the hotkey.
+    ///
+    /// False is for a text box inside Notewise. The client places the words itself, and typing
+    /// them through the OS would borrow the clipboard to paste into a window that is already ours,
+    /// or land them twice. Decided at the start rather than the stop, so a session started for a
+    /// box never types into another application, whoever ends it.
+    #[serde(default)]
+    insert: Option<bool>,
+    /// Whether to decode the phrase still being spoken, so the status can show words as they are
+    /// said. Off by default: it costs a decode every [`PREVIEW_EVERY_MS`], which the hotkey, with
+    /// nothing to show them in, would spend for nothing.
+    #[serde(default)]
+    partials: Option<bool>,
 }
 
 /// Start listening.
@@ -321,6 +423,8 @@ async fn start(
     let session =
         spawn_capture(&body, mode, state.model_dir().to_path_buf()).map_err(ApiError::Internal)?;
     let started_at = session.started_at;
+    // Nothing heard yet, which for a session showing live text is empty rather than absent.
+    let heard = session.heard.as_ref().map(|heard| heard.snapshot());
     *live = Some(session);
 
     Ok(Json(StatusBody {
@@ -329,6 +433,8 @@ async fn start(
         listening: true,
         started_at: Some(started_at.to_rfc3339()),
         mode: Some(mode.as_str()),
+        committed: heard.as_ref().map(|heard| heard.committed.clone()),
+        interim: heard.map(|heard| heard.interim),
     }))
 }
 
@@ -341,18 +447,24 @@ struct DictatedBody {
     mode: &'static str,
     /// How the text got where it went, or why it did not.
     insertion: Option<Insertion>,
-    /// One sentence for the user, when there is something worth saying — a borrowed clipboard, or
+    /// One sentence for the user, when there is something worth saying: a borrowed clipboard, or
     /// a refusal and what to do about it.
     note: Option<String>,
     duration_ms: i64,
 }
 
-/// Stop listening, then put the words at the cursor.
+/// Stop listening, then put the words at the cursor, unless the session was started with
+/// `insert: false`.
 ///
 /// The text comes back either way. If insertion refused, the words were still said, and returning
 /// nothing because they could not be placed would lose them.
 async fn stop_and_insert(State(state): State<Shared>) -> ApiResult<Json<DictatedBody>> {
-    let (segments, started_at, mode) = take_session(&state).await?;
+    let Ended {
+        segments,
+        started_at,
+        mode,
+        insert,
+    } = take_session(&state).await?;
     let duration_ms = (Utc::now() - started_at).num_milliseconds();
 
     let raw = join_segments(&segments);
@@ -375,14 +487,11 @@ async fn stop_and_insert(State(state): State<Shared>) -> ApiResult<Json<Dictated
         },
     };
 
-    let (insertion, note) = match notewise_os_input::insert_at_cursor(&text) {
-        Ok(outcome) => {
-            let note = aftermath(&outcome);
-            (Some(outcome), note)
-        }
-        // A missing grant or an uncompiled platform layer. The text is still returned, and the
-        // message says which pane to open — the whole point of that error carrying it.
-        Err(error) => (None, Some(insertion_note(&error))),
+    let (insertion, note) = if insert {
+        place_at_cursor(&text)
+    } else {
+        // The client asked for the words back and will place them itself.
+        (None, None)
     };
 
     Ok(Json(DictatedBody {
@@ -395,22 +504,35 @@ async fn stop_and_insert(State(state): State<Shared>) -> ApiResult<Json<Dictated
     }))
 }
 
+/// Type the words wherever the cursor is, and say how it went.
+fn place_at_cursor(text: &str) -> (Option<Insertion>, Option<String>) {
+    match notewise_os_input::insert_at_cursor(text) {
+        Ok(outcome) => {
+            let note = aftermath(&outcome);
+            (Some(outcome), note)
+        }
+        // A missing grant or an uncompiled platform layer. The text is still returned, and the
+        // message says which pane to open, which is the whole point of that error carrying it.
+        Err(error) => (None, Some(insertion_note(&error))),
+    }
+}
+
 /// What to tell the user when insertion could not even be attempted.
 fn insertion_note(error: &OsInputError) -> String {
-    format!("{error} Your text is above — copy it from here.")
+    format!("{error} Your text is above. Copy it from here.")
 }
 
 /// Stop listening and throw the words away.
 async fn cancel(State(state): State<Shared>) -> ApiResult<Json<serde_json::Value>> {
-    let (_, started_at, _) = take_session(&state).await?;
+    let ended = take_session(&state).await?;
     Ok(Json(serde_json::json!({
         "cancelled": true,
-        "duration_ms": (Utc::now() - started_at).num_milliseconds(),
+        "duration_ms": (Utc::now() - ended.started_at).num_milliseconds(),
     })))
 }
 
 /// End the live session and wait for the transcript.
-async fn take_session(state: &Shared) -> ApiResult<(Vec<Segment>, DateTime<Utc>, Mode)> {
+async fn take_session(state: &Shared) -> ApiResult<Ended> {
     let session = state
         .dictation()
         .live
@@ -427,7 +549,12 @@ async fn take_session(state: &Shared) -> ApiResult<(Vec<Segment>, DateTime<Utc>,
         .map_err(|_| ApiError::Internal("the dictation thread stopped unexpectedly".into()))?
         .map_err(ApiError::Internal)?;
 
-    Ok((segments, session.started_at, session.mode))
+    Ok(Ended {
+        segments,
+        started_at: session.started_at,
+        mode: session.mode,
+        insert: session.insert,
+    })
 }
 
 /// Ask the configured backend to fix the punctuation.
@@ -514,7 +641,7 @@ async fn capabilities(State(state): State<Shared>) -> ApiResult<Json<Capabilitie
     let mode = stored_mode(&state).await;
 
     // Only the two the assistant actually needs. Screen recording and input monitoring belong to
-    // 9b and 9d, which are not built — listing them here would ask for grants nothing uses.
+    // 9b and 9d, which are not built; listing them here would ask for grants nothing uses.
     let permissions = [Capability::Microphone, Capability::Accessibility]
         .into_iter()
         .map(|capability| {
@@ -580,8 +707,8 @@ struct HotkeySaved {
 /// Set a global hotkey.
 ///
 /// Validated through the registry every feature's binding goes into, so a combination that would
-/// collide with another Notewise feature is refused here — at configuration time, with both names in
-/// the message — rather than at press time, when the symptom is a key that does nothing.
+/// collide with another Notewise feature is refused here (at configuration time, with both names in
+/// the message) rather than at press time, when the symptom is a key that does nothing.
 async fn set_hotkey(
     State(state): State<Shared>,
     Json(body): Json<HotkeyBody>,
@@ -651,7 +778,7 @@ async fn set_hotkey(
 ///
 /// Built from settings each time rather than kept in memory: the bindings change rarely and reading
 /// two rows is cheaper than a cache that can be stale. A stored binding that no longer parses is
-/// skipped rather than fatal — it would otherwise make the settings screen unopenable.
+/// skipped rather than fatal: it would otherwise make the settings screen unopenable.
 async fn load_registry(state: &Shared) -> HotkeyRegistry {
     let mut registry = HotkeyRegistry::new();
     let stored = stored_hotkeys(state).await;
@@ -697,7 +824,7 @@ struct ContextBody {
 /// What is on screen, as text.
 ///
 /// Exists so the foundation's screen-context reader is reachable and inspectable before 9b is built
-/// on top of it — and so a user can see exactly what an overlay assistant *would* be shown, which
+/// on top of it, and so a user can see exactly what an overlay assistant *would* be shown, which
 /// is the kind of thing that should be visible before it is used rather than after.
 async fn read_context() -> ApiResult<Json<ContextBody>> {
     let context = notewise_os_input::screen_context().map_err(|error| match error {
@@ -724,7 +851,7 @@ fn spawn_capture(
     use notewise_audio_capture::{CaptureConfig, MicrophoneSource};
     use notewise_transcription::{ModelRegistry, ModelStore, TranscriptionEngine, WhisperEngine};
 
-    // The smallest installed model, or the catalogue's default when none is installed — the
+    // The smallest installed model, or the catalogue's default when none is installed: the
     // availability check below is what turns that into a message the user can act on.
     let model = ModelRegistry::all()
         .into_iter()
@@ -737,7 +864,7 @@ fn spawn_capture(
 
     if !store.is_available(&model) {
         return Err(format!(
-            "the '{}' model is not installed — download it first",
+            "the '{}' model is not installed. Download it first",
             model.name
         ));
     }
@@ -756,6 +883,8 @@ fn spawn_capture(
     let poll = Arc::clone(&stop);
     let (tx, done) = oneshot::channel();
     let started_at = Utc::now();
+    let heard = body.partials.unwrap_or(false).then(Arc::<Heard>::default);
+    let writer = heard.clone();
 
     // A dedicated OS thread rather than a tokio task, for the same reason recording uses one:
     // `next_frame` blocks and Whisper inference is a long CPU burn, and either on a runtime worker
@@ -778,6 +907,9 @@ fn spawn_capture(
                 // microphone's buffers at that moment. The reader stops the device and keeps
                 // reading until that word is in, rather than leaving with it unread.
                 let mut reader = notewise_recorder::CaptureReader::new();
+                // When the last look at the unfinished phrase ended, and how long it took.
+                let mut last_look = std::time::Instant::now();
+                let mut last_look_ms = 0;
 
                 loop {
                     // A hotkey pressed by accident must not hold the microphone until the app
@@ -792,8 +924,29 @@ fn spawn_capture(
                         Ok(Some(frame)) => {
                             let ready = engine.feed(&frame.to_transcription_format()).await;
                             match ready {
-                                Ok(ready) => segments.extend(ready),
+                                Ok(ready) if !ready.is_empty() => {
+                                    segments.extend(ready);
+                                    if let Some(heard) = &writer {
+                                        heard.commit(join_segments(&segments));
+                                    }
+                                }
+                                Ok(_) => {}
                                 Err(e) => return Err(e.to_string()),
+                            }
+
+                            // Not once stopping: the final pass is about to decode the same words
+                            // properly, and a look now would only delay it.
+                            let look_due =
+                                preview_due(last_look.elapsed().as_millis(), last_look_ms);
+                            if let Some(heard) = writer.as_ref().filter(|_| look_due && !stop) {
+                                let started = std::time::Instant::now();
+                                match engine.preview() {
+                                    Ok(guess) => heard.guess(join_segments(&guess)),
+                                    // Only the guess is lost. The kept text is decoded separately.
+                                    Err(error) => tracing::debug!(%error, "a live look failed"),
+                                }
+                                last_look_ms = started.elapsed().as_millis();
+                                last_look = std::time::Instant::now();
                             }
                         }
                         // The stopped microphone has handed over its tail. Before a stop this
@@ -819,6 +972,8 @@ fn spawn_capture(
         stop,
         started_at,
         mode,
+        insert: body.insert.unwrap_or(true),
+        heard,
         done,
     })
 }
@@ -959,6 +1114,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_look_waits_for_the_interval() {
+        assert!(!preview_due(0, 0));
+        assert!(!preview_due(PREVIEW_EVERY_MS - 1, 0));
+        assert!(preview_due(PREVIEW_EVERY_MS, 0));
+    }
+
+    /// On a slow machine a look that took 800 ms must not be followed by another 300 ms later, or
+    /// looks would take most of the time and the microphone would get ahead of the decoder.
+    #[test]
+    fn a_slow_look_pushes_the_next_one_back_by_as_long_as_it_took() {
+        assert!(!preview_due(PREVIEW_EVERY_MS, 800));
+        assert!(!preview_due(799, 800));
+        assert!(preview_due(800, 800));
+    }
+
+    /// A phrase cut at a pause is decoded properly and kept. The guess at it must go, or a client
+    /// would show those words twice: once kept and once provisional.
+    #[test]
+    fn a_kept_phrase_replaces_the_guess_at_it() {
+        let heard = Heard::default();
+
+        heard.guess("what did we".into());
+        assert_eq!(heard.snapshot().interim, "what did we");
+
+        heard.commit("What did we decide?".into());
+        assert_eq!(
+            heard.snapshot(),
+            HeardSoFar {
+                committed: "What did we decide?".into(),
+                interim: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn each_guess_replaces_the_last_rather_than_adding_to_it() {
+        let heard = Heard::default();
+        heard.commit("First.".into());
+
+        heard.guess("about the".into());
+        heard.guess("about the launch".into());
+
+        let snapshot = heard.snapshot();
+        assert_eq!(snapshot.committed, "First.");
+        assert_eq!(snapshot.interim, "about the launch");
+    }
+
+    /// The hotkey sends no body. It must keep typing at the cursor and spend nothing on live text.
+    #[test]
+    fn a_start_without_a_body_inserts_and_shows_no_live_text() {
+        let body: StartBody = serde_json::from_value(serde_json::json!({})).expect("parses");
+        assert_eq!(body.insert, None);
+        assert_eq!(body.partials, None);
+
+        let body: StartBody =
+            serde_json::from_value(serde_json::json!({ "insert": false, "partials": true }))
+                .expect("parses");
+        assert_eq!(body.insert, Some(false));
+        assert_eq!(body.partials, Some(true));
+    }
+
     // ------------------------------------------------------------ over HTTP
 
     fn app() -> AxumRouter<()> {
@@ -1008,6 +1225,9 @@ mod tests {
             assert_eq!(status, StatusCode::OK);
             assert_eq!(body["supported"], SUPPORTED);
             assert_eq!(body["listening"], false);
+            // Nothing is listening, so there is no live text to show.
+            assert!(body["committed"].is_null(), "{body}");
+            assert!(body["interim"].is_null(), "{body}");
 
             if !SUPPORTED {
                 assert!(
@@ -1145,7 +1365,7 @@ mod tests {
     }
 
     /// Without the platform layer, reading the screen refuses with a reason rather than returning
-    /// an empty context — which would read as "there was nothing on screen".
+    /// an empty context, which would read as "there was nothing on screen".
     #[test]
     fn reading_the_screen_says_why_it_cannot_rather_than_answering_nothing() {
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -1163,7 +1383,7 @@ mod tests {
                 assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
                 // The reason differs by platform: a macOS build without the feature names it, and a
                 // Linux build says the platform cannot do this at all. Asserting the feature name
-                // passed on macOS and failed on Linux for a build behaving correctly — so what is
+                // passed on macOS and failed on Linux for a build behaving correctly, so what is
                 // asserted is the property that holds everywhere: the refusal explains itself, and
                 // does not point at a setting that cannot fix it.
                 let reason = body["error"].as_str().expect("a reason");

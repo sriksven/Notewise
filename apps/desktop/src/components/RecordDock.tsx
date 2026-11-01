@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Mic, MicOff, MoreHorizontal, Square } from "lucide-react";
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
    * A meeting exists and has not been ended, but nothing is being captured into it.
    *
    * Only reachable on an engine that cannot record, where pressing record creates a meeting
-   * to import a transcript into. The button has to say "End" there — labelling it "Record"
+   * to import a transcript into. The button has to say "End" there: labelling it "Record"
    * while the press would close the meeting is the worst of both.
    */
   openMeeting: boolean;
@@ -16,8 +16,8 @@ interface Props {
   /**
    * Whether the engine can actually capture audio.
    *
-   * The button stays enabled when false — it still creates a meeting for an imported
-   * transcript — but says what it will and will not do, rather than looking identical to a
+   * The button stays enabled when false, it still creates a meeting for an imported
+   * transcript, but says what it will and will not do, rather than looking identical to a
    * build that records.
    */
   canRecord: boolean;
@@ -31,6 +31,13 @@ interface Props {
   onImport: () => void;
   /** False when the engine cannot transcribe, or is already busy recording. */
   canImport: boolean;
+  /**
+   * Another floating control to sit in the dock's row, after the pill.
+   *
+   * Anything floated separately at the bottom of a meeting lands on the dock once the meeting
+   * column is narrow, so it shares the row instead.
+   */
+  beside?: ReactNode;
 }
 
 /** Elapsed time as mm:ss, or h:mm:ss once a meeting runs past an hour. */
@@ -46,7 +53,7 @@ function elapsed(sinceMs: number): string {
  * The floating record control.
  *
  * Docked bottom-centre and always present, because starting and stopping is the
- * only thing a user must be able to do without hunting — including mid-sentence
+ * only thing a user must be able to do without hunting, including mid-sentence
  * while looking at someone else.
  */
 export function RecordDock({
@@ -62,6 +69,7 @@ export function RecordDock({
   canExport,
   onImport,
   canImport,
+  beside,
 }: Props) {
   const [, tick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -99,14 +107,14 @@ export function RecordDock({
   const word = busy ? "Working" : isRecording ? "Stop" : openMeeting ? "End" : "Record";
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
+    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex items-center justify-center gap-2">
       <div
         className="pointer-events-auto relative flex items-center gap-1 rounded-full
                    border border-hairline bg-surface px-2 py-2 shadow-dock"
       >
         {/* Labelled, not a bare dot.
-            Starting a recording is the one irreversible thing in the app — it opens a
-            microphone — and a circle with an icon in it asks the user to remember which state
+            Starting a recording is the one irreversible thing in the app (it opens a
+            microphone), and a circle with an icon in it asks the user to remember which state
             they are in. The word says it, the colour reinforces it, and the shape changes so
             it reads at a glance and without colour. */}
         <button
@@ -229,8 +237,8 @@ export function RecordDock({
               Export summary only
             </button>
 
-            {/* Beside the exports because it is the same kind of act — getting this meeting out of
-                Notewise — and unlike them it can refuse: the vault may not be connected, and a file
+            {/* Beside the exports because it is the same kind of act (getting this meeting out of
+                Notewise), and unlike them it can refuse: the vault may not be connected, and a file
                 edited outside Notewise is not overwritten. The outcome is reported either way. */}
             <button
               type="button"
@@ -248,6 +256,8 @@ export function RecordDock({
           </div>
         )}
       </div>
+
+      {beside && <div className="pointer-events-auto">{beside}</div>}
     </div>
   );
 }

@@ -17,6 +17,13 @@ const REPO = "sriksven/Notewise";
 
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 
+/**
+ * The rolling release `release.yml` replaces on every push to main, so its tag never changes and
+ * says nothing about the build. It is published as a final release, which makes it what the cards
+ * below offer: the app as main stands.
+ */
+export const LATEST_BUILD_TAG = "latest-build";
+
 /** The three ways the same signed app is shipped. `release.yml` makes all three. */
 export type MacFormat = "dmg" | "zip" | "app";
 
@@ -31,6 +38,8 @@ export interface MacRelease {
   tag: string;
   prerelease: boolean;
   page: string;
+  /** When it was published, as GitHub's ISO timestamp. */
+  published: string | null;
   assets: Partial<Record<MacFormat, MacAsset>>;
 }
 
@@ -39,6 +48,7 @@ export interface WindowsRelease {
   tag: string;
   prerelease: boolean;
   page: string;
+  published: string | null;
   installer: { name: string; url: string; bytes: number };
 }
 
@@ -62,6 +72,7 @@ interface ApiRelease {
   html_url: string;
   draft: boolean;
   prerelease: boolean;
+  published_at: string | null;
   assets: ApiAsset[];
 }
 
@@ -104,6 +115,9 @@ function macAssets(release: ApiRelease): MacRelease["assets"] {
  * that the newest release candidate. Final first because a candidate is, by definition, not yet
  * the one we recommend, but a candidate is better than telling someone there is nothing.
  *
+ * Every push to main publishes the latest build as a final release, so once there is one, that is
+ * what this finds.
+ *
  * Per platform, because the platforms do not arrive together: rc.2 had a Mac build and no Windows
  * one, and a release with only a Windows fix would be the reverse.
  */
@@ -126,6 +140,7 @@ export function pickRelease(releases: ApiRelease[]): MacRelease | null {
     tag: chosen.release.tag_name,
     prerelease: chosen.release.prerelease,
     page: chosen.release.html_url,
+    published: chosen.release.published_at,
     assets: chosen.build,
   };
 }
@@ -141,11 +156,12 @@ export function pickWindowsRelease(releases: ApiRelease[]): WindowsRelease | nul
     tag: chosen.release.tag_name,
     prerelease: chosen.release.prerelease,
     page: chosen.release.html_url,
+    published: chosen.release.published_at,
     installer: chosen.build,
   };
 }
 
-const CACHE_KEY = "notewise.release.v2";
+const CACHE_KEY = "notewise.release.v3";
 const CACHE_MS = 10 * 60 * 1000;
 
 /**

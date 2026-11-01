@@ -2,7 +2,7 @@
 //!
 //! The other two diarizers in this crate reason about evidence we derived ourselves: gaps
 //! between segments ([`crate::PauseDiarizer`]) or the sound of a voice
-//! ([`crate::EmbeddingDiarizer`]). This module handles evidence someone else already computed —
+//! ([`crate::EmbeddingDiarizer`]). This module handles evidence someone else already computed:
 //! Google Meet, Zoom, and Teams all know exactly who is talking, because they are the ones
 //! routing the audio, and they display it in their own UI.
 //!
@@ -25,7 +25,7 @@
 //!
 //! **Turns overlap, because people talk over each other.** Nothing here assumes one speaker at
 //! a time. [`SpeakerTimeline::speaker_for`] resolves an overlap by total overlapping duration,
-//! which is a choice and not a fact — see its docs.
+//! which is a choice and not a fact: see its docs.
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ pub const TURN_COALESCE_TOLERANCE_MS: i64 = 250;
 /// A participant's identifier within one meeting.
 ///
 /// Opaque and platform-supplied. Meet, Zoom, and Teams each have their own format and none of
-/// them is a stable identity for the *person* across meetings — only within this one. Anything
+/// them is a stable identity for the *person* across meetings, only within this one. Anything
 /// wanting cross-meeting identity needs a `people` row, not this.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ParticipantId(String);
@@ -142,7 +142,7 @@ impl SpeakerTimeline {
     /// Record that a participant was speaking over `[start_ms, end_ms)`.
     ///
     /// Coalesces with that participant's most recent turn when the two are contiguous within
-    /// [`TURN_COALESCE_TOLERANCE_MS`] — see that constant for why.
+    /// [`TURN_COALESCE_TOLERANCE_MS`]: see that constant for why.
     ///
     /// # Errors
     ///
@@ -191,7 +191,7 @@ impl SpeakerTimeline {
             end_ms,
         };
 
-        // Append when already in order — the common case — and binary-search insert otherwise,
+        // Append when already in order (the common case) and binary-search insert otherwise,
         // so an out-of-order event costs a memmove rather than a re-sort.
         match self.turns.last() {
             Some(last) if last.start_ms > start_ms => {
@@ -233,15 +233,15 @@ impl SpeakerTimeline {
     /// # Why the local user has to come out
     ///
     /// The system audio tap records what the machine *plays*, which is everyone except the person
-    /// at it — their own voice goes to the microphone on a separate channel. A platform roster does
+    /// at it: their own voice goes to the microphone on a separate channel. A platform roster does
     /// not make that distinction: it reports the local user's turns alongside everyone else's.
     ///
     /// Applied unfiltered to the system channel, those turns are a hazard. When the user speaks and
     /// something bleeds into the tap, or a remote segment merely straddles their turn, the segment
     /// is named after the one person who provably did not say it.
     ///
-    /// Whoever produces the events knows which participant is local — a meeting UI marks the user's
-    /// own tile — so the caller removes them before refining the remote channel.
+    /// Whoever produces the events knows which participant is local: a meeting UI marks the user's
+    /// own tile, so the caller removes them before refining the remote channel.
     pub fn excluding(&self, id: &ParticipantId) -> Self {
         Self {
             participants: self
@@ -264,15 +264,15 @@ impl SpeakerTimeline {
     /// # Why the longest overlap, and what that costs
     ///
     /// During cross-talk several turns cover the same window. Picking the one with the most
-    /// milliseconds inside it is right for the common case — one person speaking while another
-    /// interjects "mm-hm" — and wrong when two people genuinely share a segment, where the
+    /// milliseconds inside it is right for the common case (one person speaking while another
+    /// interjects "mm-hm") and wrong when two people genuinely share a segment, where the
     /// quieter half of the exchange is dropped rather than split.
     ///
     /// Splitting is not available: a transcript segment is one string of text with one speaker
     /// field, so the choice is which single name to attach. This returns the better guess and
     /// [`TimelineDiarizer::confidence`] reports how much of the transcript rested on guesses.
     ///
-    /// `None` when no turn overlaps at all, which is honest rather than unhelpful — see
+    /// `None` when no turn overlaps at all, which is honest rather than unhelpful: see
     /// [`TimelineDiarizer::diarize`] for what it does with that.
     pub fn speaker_for(&self, start_ms: i64, end_ms: i64) -> Option<&Participant> {
         let mut best: Option<(i64, &ParticipantId)> = None;
@@ -352,7 +352,7 @@ impl Diarizer for TimelineDiarizer {
     /// the labels are anonymous, so a wrong guess mislabels `Speaker 2` as `Speaker 1`.
     ///
     /// Here the labels are people's names. Filling a gap from a neighbour would state that a
-    /// named colleague said words they did not say — in a transcript the user may forward,
+    /// named colleague said words they did not say, in a transcript the user may forward,
     /// quote, or act on. An empty speaker field is recoverable; a plausible wrong name is not,
     /// because nothing downstream can tell it from a right one.
     ///
@@ -377,7 +377,7 @@ impl Diarizer for TimelineDiarizer {
 
     /// The share of transcript time the platform actually reported a speaker for.
     ///
-    /// Not a measure of whether the names are right — the platform knows who was talking, so a
+    /// Not a measure of whether the names are right: the platform knows who was talking, so a
     /// covered segment is as good as attribution gets. It measures how much of the transcript
     /// this diarizer had any evidence about at all. A feed that dropped halfway through a
     /// meeting scores 0.5, and the user should be told the second half is unattributed.
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn a_segment_no_turn_covers_is_left_unlabelled_rather_than_guessed() {
         let diarizer = TimelineDiarizer::new(two_people());
-        // 20s–21s: the feed reported nobody.
+        // 20s-21s: the feed reported nobody.
         let output = diarizer.diarize(&transcript(&[(20_000, 21_000)])).unwrap();
 
         assert_eq!(
@@ -512,7 +512,7 @@ mod tests {
         let mut timeline = SpeakerTimeline::new();
         timeline.upsert_participant(Participant::new("p1", "Priya"));
         timeline.upsert_participant(Participant::new("p2", "Marcus"));
-        // Priya holds the floor 0–4s; Marcus interjects 3.5–4s.
+        // Priya holds the floor 0-4s; Marcus interjects 3.5-4s.
         timeline
             .add_turn(ParticipantId::new("p1"), 0, 4_000)
             .unwrap();

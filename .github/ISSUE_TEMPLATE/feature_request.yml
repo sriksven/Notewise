@@ -22,7 +22,7 @@ body:
     attributes:
       label: Would this work fully locally?
       description: >
-        Anything needing network access is cloud-tier by nature. Not a blocker — it affects
+        Anything needing network access is cloud-tier by nature. Not a blocker; it affects
         which phase it lands in.
       options:
         - Works entirely on-device

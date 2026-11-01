@@ -131,7 +131,7 @@ enum Command {
         /// Write to a file instead of stdout.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Summary, decisions, and action items only — no transcript.
+        /// Summary, decisions, and action items only: no transcript.
         #[arg(long)]
         brief: bool,
         /// Transcript only, with timestamps.
@@ -296,7 +296,7 @@ fn merge(config: &Config, from: &std::path::Path, dry_run: bool) -> Result<()> {
 
     if dry_run {
         // A real merge inside a transaction that is then rolled back. Counting rows by hand would
-        // be a second implementation of the merge rules, and the two would disagree — which is
+        // be a second implementation of the merge rules, and the two would disagree, which is
         // precisely the situation a dry run exists to prevent.
         let report = notewise_storage::merge_from(&db, from, notewise_storage::MergeMode::Preview)?;
         println!("would have {}", report.summary());
@@ -327,7 +327,7 @@ async fn status(config: &Config) -> Result<()> {
         MeetingRepository::new(&db).list_recent(u32::MAX)?.len()
     );
     // What will actually answer, not what was asked for. On a local daemon these differ
-    // whenever the configured name omits a tag — `llama3.1` is `llama3.1:8b` here — and
+    // whenever the configured name omits a tag (`llama3.1` is `llama3.1:8b` here) and
     // printing only the request is what sends someone looking for a model they never pulled.
     let requested = router.model_id().to_string();
     let resolved = router.resolved_model_id().await;
@@ -339,9 +339,9 @@ async fn status(config: &Config) -> Result<()> {
     println!(
         "ai location    {}",
         if router.is_local() {
-            "local — transcripts stay on this machine"
+            "local: transcripts stay on this machine"
         } else {
-            "remote — transcripts are sent to the provider"
+            "remote: transcripts are sent to the provider"
         }
     );
     Ok(())
@@ -516,7 +516,7 @@ async fn email(
         .map(|name| {
             EmailTone::parse(name).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "unknown tone '{name}' — expected one of: concise, detailed, formal, friendly"
+                    "unknown tone '{name}'; expected one of: concise, detailed, formal, friendly"
                 )
             })
         })
@@ -649,7 +649,7 @@ fn model_store_dir() -> Result<PathBuf> {
     }
 
     // A third hand-written copy of the platform data path used to live here, which is how the
-    // app and the CLI came to keep their models — and their workspaces — in different places.
+    // app and the CLI came to keep their models (and their workspaces) in different places.
     let data_dir = notewise_storage::data_dir()?;
 
     // Models an earlier build downloaded beside the old workspace. Best effort: a model that
@@ -722,7 +722,7 @@ async fn record(
     }
 
     // Ctrl-C sets the flag rather than killing the process, so the transcript is flushed
-    // and diarization still runs — otherwise stopping a meeting would lose its tail.
+    // and diarization still runs; otherwise stopping a meeting would lose its tail.
     let stop = Arc::new(AtomicBool::new(false));
     let signal_stop = Arc::clone(&stop);
     tokio::spawn(async move {
@@ -886,18 +886,18 @@ async fn serve(config: &Config, port: u16, ui: Option<PathBuf>) -> Result<()> {
             // started means a blank page and no explanation.
             if !dir.join("index.html").exists() {
                 anyhow::bail!(
-                    "no index.html in {} — run `npm install && npm run build` in apps/desktop",
+                    "no index.html in {}: run `npm install && npm run build` in apps/desktop",
                     dir.display()
                 );
             }
 
             println!("Notewise on http://{}", server.addr());
-            println!("Open that in a browser. Loopback only — not reachable from the network.");
+            println!("Open that in a browser. Loopback only: not reachable from the network.");
             server.serve_with_frontend(state, dir).await?;
         }
         None => {
             println!("Notewise API on http://{}", server.addr());
-            println!("Loopback only — not reachable from the network.");
+            println!("Loopback only: not reachable from the network.");
             println!("Pass --ui apps/desktop/dist to serve the web interface too.");
             server.serve(state).await?;
         }
@@ -916,7 +916,7 @@ async fn mcp(config: &Config, allow_writes: bool) -> Result<()> {
     // warning goes to stderr for the same reason.
     if allow_writes {
         eprintln!(
-            "notewise mcp: write access enabled — connected agents can create tickets, \
+            "notewise mcp: write access enabled. Connected agents can create tickets, \
              notes, and action items in this workspace"
         );
     }

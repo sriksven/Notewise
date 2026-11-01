@@ -100,15 +100,15 @@ jobs:
       # deliberate change, not something that happens because a dependency moved.
       #
       # Raised 1.82 → 1.86 → 1.87, each time verified by checking against the toolchain rather
-      # than inferred. Edition 2024 forces 1.85 — 22 crates already in the lockfile (clap,
-      # indexmap, hashbrown, rand, getrandom, zeroize, ort) have adopted it — and the `icu` crates
+      # than inferred. Edition 2024 forces 1.85: 22 crates already in the lockfile (clap,
+      # indexmap, hashbrown, rand, getrandom, zeroize, ort) have adopted it, and the `icu` crates
       # reqwest pulls in need 1.86 on top of that.
       #
       # 1.87 is `cron`, which calls `u32::is_multiple_of`; that stabilised in 1.87 and nothing else
       # in the tree needs it. The policy above says an MSRV should not move because a dependency
       # moved, and the alternative here is pinning `cron` to a release predating it and forgoing its
       # fixes for a scheduler that parses user-supplied expressions. So it moves, deliberately, with
-      # the reason written down — which is what the policy is actually asking for.
+      # the reason written down, which is what the policy is actually asking for.
       - uses: dtolnay/rust-toolchain@1.87.0
 
       - uses: Swatinem/rust-cache@v2
@@ -134,7 +134,7 @@ jobs:
       - name: audio-capture without OS backends
         run: cargo check -p notewise-audio-capture --no-default-features
 
-      # `onnx` without `onnx-download` expects a system ONNX Runtime, which would fail to *link* —
+      # `onnx` without `onnx-download` expects a system ONNX Runtime, which would fail to *link*;
       # `cargo check` stops before that, and `ort`'s build script does not need the library either
       # (verified by cleaning `ort` and re-checking). So this type-checks the acoustic diarization
       # path without a 50 MB download in CI.
@@ -144,7 +144,7 @@ jobs:
       - name: diarization with onnx
         run: cargo check -p notewise-diarization --features onnx --all-targets
 
-      # The desktop assistant's platform layer. Cheap to check — no cmake, no ONNX, no SDK — and the
+      # The desktop assistant's platform layer. Cheap to check (no cmake, no ONNX, no SDK) and the
       # only thing in the workspace that compiles `unsafe`, which makes it the last feature that
       # should go unchecked. On Linux it compiles to the refusal path, which is also worth knowing
       # still compiles.
@@ -156,7 +156,7 @@ jobs:
 
   # The direction the matrix above misses: code behind an *enabled* feature is never compiled by
   # the default build, so `cargo build --workspace` stays green while a real desktop build is
-  # broken. That happened — the import path moved a `ModelStore` a later line still needed, and
+  # broken. That happened: the import path moved a `ModelStore` a later line still needed, and
   # only a `record` build could see it.
   #
   # On macOS rather than Linux because that is the platform `os-capture` targets: `screencapturekit`
@@ -187,14 +187,14 @@ jobs:
 
       # No shell check here, deliberately. This workflow's own header says platform app builds are
       # separate because "a broken desktop toolchain must not block an engine fix", and I added one
-      # anyway — which then failed for a third reason: the shell's `frontendDist` points at a `dist/`
+      # anyway, which then failed for a third reason: the shell's `frontendDist` points at a `dist/`
       # that is gitignored, so `tauri-build` cannot run on a fresh checkout without the frontend
       # being built first. That is the frontend workflow's job, and the shell check belongs beside it.
 
   # The combination nothing else checks, on a schedule rather than never.
   #
   # `--features full` pulls a cmake build of whisper.cpp, which is minutes of CI for a dependency
-  # most changes have nothing to do with — so it is not on the per-push path. It is also the
+  # most changes have nothing to do with, so it is not on the per-push path. It is also the
   # combination that has actually broken: `Pipeline::retaining_audio` consumed `self` and could fail,
   # so the import path borrowed a moved value, and *nothing compiled that code* for long enough that
   # the break was discovered by hand. Weekly is not fast, and it is not never.

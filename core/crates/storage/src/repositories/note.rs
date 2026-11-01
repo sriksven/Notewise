@@ -164,7 +164,7 @@ impl<'a> NoteRepository<'a> {
 
     /// Destroy a note for good. The only path that reaches `DELETE`.
     ///
-    /// Callers must detach the note's graph edges first — the edge table has no foreign keys
+    /// Callers must detach the note's graph edges first; the edge table has no foreign keys
     /// and SQLite cannot cascade for it.
     pub fn purge(&self, id: Id) -> Result<()> {
         let changed = self

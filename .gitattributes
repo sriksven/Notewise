@@ -5,7 +5,7 @@
 # crate's own source: a search for "\n}\n" finds nothing when the file says "}\r\n". The test now
 # normalises what it reads, and this stops the next one from having to know that.
 #
-# No effect on committed content — everything in here is already LF. It only fixes what a checkout
+# No effect on committed content: everything in here is already LF. It only fixes what a checkout
 # hands to the working tree.
 * text=auto eol=lf
 

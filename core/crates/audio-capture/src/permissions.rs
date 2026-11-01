@@ -9,7 +9,7 @@ use crate::{CaptureKind, OsBackend};
 /// What the OS will let us do, as far as we have actually asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionStatus {
-    /// Obtainable, but nothing has prompted yet. Not a guess — a statement that we have not
+    /// Obtainable, but nothing has prompted yet. Not a guess: a statement that we have not
     /// asked, so the UI can offer the button instead of inventing an answer.
     NotRequested,
     Granted,
@@ -25,7 +25,7 @@ pub enum PermissionStatus {
 /// before the user pressed anything.
 ///
 /// This used to answer `NotRequested` for anything obtainable, without asking the system at
-/// all — which made pressing Enable look like it did nothing. The grant went through, and then
+/// all, which made pressing Enable look like it did nothing. The grant went through, and then
 /// the readiness this feeds re-read `NotRequested` and redrew the same button. Anything that
 /// reports state has to read that state.
 pub fn permission_status(kind: CaptureKind) -> PermissionStatus {
@@ -52,8 +52,8 @@ fn recorded_status(kind: CaptureKind) -> PermissionStatus {
         },
 
         // System audio is ScreenCaptureKit, gated by the screen-recording grant. Preflight is
-        // authoritative for "yes" and ambiguous for "no" — it cannot separate never-asked from
-        // refused — so a refusal we saw ourselves fills that gap. Without it, asking and being
+        // authoritative for "yes" and ambiguous for "no"; it cannot separate never-asked from
+        // refused, so a refusal we saw ourselves fills that gap. Without it, asking and being
         // turned down reads as never having asked, and the button appears to do nothing.
         CaptureKind::SystemAudio => {
             if notewise_macos_permissions::screen_recording_granted() {
@@ -72,7 +72,7 @@ fn recorded_status(kind: CaptureKind) -> PermissionStatus {
 /// Whether this process has already asked for screen recording and been turned down.
 ///
 /// Deliberately not persisted. The grant can be given in System Settings at any moment, and
-/// preflight reports that truthfully on the next launch — a remembered "denied" written to disk
+/// preflight reports that truthfully on the next launch: a remembered "denied" written to disk
 /// would outlive the refusal and tell the user they cannot do something they now can.
 #[cfg(all(target_os = "macos", feature = "os-capture"))]
 static SYSTEM_AUDIO_REFUSED: std::sync::atomic::AtomicBool =
@@ -114,7 +114,7 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
     }
 
     match kind {
-        // The microphone path is `cpal`, not `OsBackend` — it needs no app bundle, and is the
+        // The microphone path is `cpal`, not `OsBackend`: it needs no app bundle, and is the
         // one capability obtainable everywhere `cpal` runs.
         CaptureKind::Microphone => None,
         other => match OsBackend::for_host(other) {
@@ -133,7 +133,7 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
 /// Why a loose binary cannot hold a screen-recording grant.
 ///
 /// macOS ties the Screen & System Audio Recording permission to an application bundle. Run as a
-/// bare executable — `cargo run`, or the binary out of `target/` — there is nothing for the grant
+/// bare executable (`cargo run`, or the binary out of `target/`) there is nothing for the grant
 /// to attach to: the request is attributed to whatever launched it, and the OS reports a denial.
 ///
 /// Without this the refusal surfaces as "Declined. Grant it in System Settings, then re-check",
@@ -147,7 +147,7 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
 /// the user cannot change.
 ///
 /// A bundle is all it takes. This used to demand a Developer ID as well, which no build of this
-/// project has, so system audio was refused in every build that could have had it — see
+/// project has, so system audio was refused in every build that could have had it: see
 /// `notewise_macos_permissions::can_hold_screen_recording` for how that was measured.
 #[cfg(target_os = "macos")]
 fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
@@ -157,7 +157,7 @@ fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
 
     // Feature-gated because the crate that answers this is an optional dependency of
     // `os-capture`. Without that feature `unavailable_reason` has already returned, so this is
-    // unreachable rather than merely unused — but it still has to compile.
+    // unreachable rather than merely unused, but it still has to compile.
     #[cfg(feature = "os-capture")]
     let in_bundle = notewise_macos_permissions::can_hold_screen_recording();
 
@@ -165,7 +165,7 @@ fn outside_app_bundle_reason(kind: CaptureKind) -> Option<String> {
     let in_bundle = true;
 
     (!in_bundle).then(|| {
-        "system audio needs macOS to recognise this as an application — it is running as a \
+        "system audio needs macOS to recognise this as an application: it is running as a \
          loose binary, which cannot be granted screen recording"
             .to_string()
     })
@@ -184,7 +184,7 @@ fn probe(kind: CaptureKind) -> PermissionStatus {
 
     match kind {
         // macOS answers this properly, and opening a stream does not. An input stream opens
-        // without a grant and delivers silence, so a successful open proved nothing — it
+        // without a grant and delivers silence, so a successful open proved nothing: it
         // reported `Granted` on a machine that had never been asked, no dialog appeared, and
         // the readiness read straight afterwards disagreed with itself.
         #[cfg(target_os = "macos")]
@@ -219,8 +219,8 @@ fn probe(kind: CaptureKind) -> PermissionStatus {
                 return PermissionStatus::Granted;
             }
 
-            // Now that the app is registered, try the stream. It is the stronger check — a TCC
-            // record does not prove a stream can start — and it is what tells apart "declined"
+            // Now that the app is registered, try the stream. It is the stronger check: a TCC
+            // record does not prove a stream can start, and it is what tells apart "declined"
             // from "no display to capture".
             use crate::system_audio::SystemAudioSource;
 
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn system_audio_reports_a_reason_when_it_cannot_be_had() {
         // A test binary is a loose executable, so on macOS this is also the "not in a bundle"
-        // path — which is the same answer a developer running `cargo run` gets, and it must
+        // path, which is the same answer a developer running `cargo run` gets, and it must
         // name the build rather than blame the user for declining.
         match permission_status(CaptureKind::SystemAudio) {
             PermissionStatus::Unavailable(reason) => {
@@ -312,14 +312,14 @@ mod tests {
     /// The status must come from the operating system, not from a constant.
     ///
     /// This test previously asserted `NotRequested` unconditionally, which is exactly what the
-    /// code did — and it was wrong. A machine that had already granted the microphone was told
+    /// code did, and it was wrong. A machine that had already granted the microphone was told
     /// it had not, so pressing Enable granted the permission, the readiness re-read
     /// `NotRequested`, and the button redrew unchanged. The bug looked like a dead button and
     /// had a passing test over it.
     ///
     /// The grant on the machine running this cannot be controlled, so what is pinned is that
     /// the answer is a real reading: never `Unavailable` when capture is compiled in, and
-    /// stable across calls — a status that changed between two reads would mean something here
+    /// stable across calls: a status that changed between two reads would mean something here
     /// is prompting.
     #[test]
     #[cfg(feature = "os-capture")]
@@ -370,7 +370,7 @@ mod tests {
     /// The bug this pairs with, for the capability a test binary cannot reach.
     ///
     /// A test runs as a loose executable, where system audio is `Unavailable` before any of
-    /// this is consulted — so the interesting path only exists inside an application bundle.
+    /// this is consulted, so the interesting path only exists inside an application bundle.
     /// What it pins: asking and being refused must still read as refused afterwards. macOS
     /// preflight cannot say so on its own, and when the answer regressed to "not requested"
     /// the Enable button appeared to do nothing at all.

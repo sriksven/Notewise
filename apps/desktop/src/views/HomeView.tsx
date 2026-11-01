@@ -26,7 +26,7 @@ interface Props {
  * Time-of-day greeting.
  *
  * Local hours, from the machine's own clock. The cutoffs are the ordinary English ones rather
- * than anything clever — an app that says "good evening" at 4pm is more noticeable than one
+ * than anything clever: an app that says "good evening" at 4pm is more noticeable than one
  * that says nothing at all.
  */
 function greeting(now = new Date()): string {
@@ -41,7 +41,7 @@ function greeting(now = new Date()): string {
  * The landing page.
  *
  * Two jobs: start the next meeting, and get back into the last one. Everything else on this
- * screen is a shortcut to material the user already made — because a home page whose content
+ * screen is a shortcut to material the user already made, because a home page whose content
  * is all buttons is a menu, and a menu is what the sidebar is for.
  *
  * The empty state is not a decorative illustration. A workspace with nothing in it is the one
@@ -137,7 +137,7 @@ export function HomeView({
           <button
             type="button"
             onClick={onImport}
-            // Importing transcribes, which needs the same build features as recording — the
+            // Importing transcribes, which needs the same build features as recording: the
             // engine answers 501 otherwise, after the user has picked a file. The dock's menu
             // already gates on this; home and the library did not.
             disabled={isRecording || !canRecord}

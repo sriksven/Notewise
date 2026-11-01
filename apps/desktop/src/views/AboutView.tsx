@@ -87,7 +87,7 @@ export function AboutView({ health }: Props) {
             </dd>
 
             <dt className="text-ink-muted">AI backend</dt>
-            <dd className="text-ink">{health?.ai_model ?? "—"}</dd>
+            <dd className="text-ink">{health?.ai_model ?? "-"}</dd>
 
             <dt className="text-ink-muted">Recording</dt>
             <dd className={health?.can_record ? "text-ok-text" : "text-ink-muted"}>
@@ -95,7 +95,7 @@ export function AboutView({ health }: Props) {
                 ? health.can_record
                   ? "microphone capture available"
                   : "not available in this build"
-                : "—"}
+                : "-"}
             </dd>
 
             <dt className="text-ink-muted">Transcripts</dt>
@@ -104,7 +104,7 @@ export function AboutView({ health }: Props) {
                 ? health.ai_local
                   ? "processed on this machine"
                   : "sent to the configured provider"
-                : "—"}
+                : "-"}
             </dd>
           </dl>
         </section>
@@ -122,7 +122,7 @@ export function AboutView({ health }: Props) {
                 <span className={capability.done ? "text-ink" : "text-ink-faint"}>
                   {capability.label}
                   {capability.note && (
-                    <span className="text-ink-faint"> — {capability.note}</span>
+                    <span className="text-ink-faint"> - {capability.note}</span>
                   )}
                 </span>
               </li>

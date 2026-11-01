@@ -7,7 +7,7 @@ edition = "2021"
 # `plist` and `serde_with` all require 1.88, which is the sort of thing a GUI toolchain drags in and
 # part of why this crate is outside the workspace.
 #
-# It said 1.82 until this was checked, which was wrong by six releases — nothing in CI builds this
+# It said 1.82 until this was checked, which was wrong by six releases: nothing in CI builds this
 # crate, so the declaration had never been tested against anything.
 rust-version = "1.88"
 license = "MIT"
@@ -44,12 +44,12 @@ notewise-os-input = { path = "../../../core/crates/os-input", optional = true }
 
 [features]
 # A default `cargo build` produces a shell that can browse, search, summarize, and export but
-# not capture — it needs no platform audio SDK and no cmake, so it builds anywhere.
+# not capture: it needs no platform audio SDK and no cmake, so it builds anywhere.
 default = []
 
 # What a shipped app is built with: microphone capture plus Metal-accelerated Whisper.
 # Recording is driven through the engine's HTTP surface, so these are forwarded rather than
-# implemented here — the shell owns the window, not the pipeline.
+# implemented here: the shell owns the window, not the pipeline.
 record = ["notewise-api-server/record"]
 # The desktop assistant: a global hotkey that dictates into whatever has focus.
 #
@@ -60,9 +60,9 @@ assistant = ["notewise-api-server/assistant", "dep:notewise-os-input", "notewise
 whisper = ["notewise-api-server/whisper"]
 whisper-metal = ["notewise-api-server/whisper-metal"]
 # What a shipped macOS app is built with. Metal is an Apple GPU API, so this feature cannot be
-# used anywhere else — see `bundle-cpu`.
+# used anywhere else. See `bundle-cpu`.
 bundle = ["record", "whisper-metal", "assistant"]
 # The same for Windows and Linux: capture plus Whisper on the CPU. Metal has no equivalent here
-# that is safe to assume — CUDA needs an NVIDIA card and Vulkan needs a working loader, and a
+# that is safe to assume: CUDA needs an NVIDIA card and Vulkan needs a working loader, and a
 # release build that fails on machines without either is worse than one that is merely slower.
 bundle-cpu = ["record", "whisper", "assistant"]

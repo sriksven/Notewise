@@ -25,7 +25,7 @@ pub const SIGNING_KEY: &str = "signing_secret";
 /// `api-server` serves, which is the only list the interface reads.
 ///
 /// They disagreed. The Google bridge, Microsoft, and the watched folder were all buildable and none
-/// of them was in the catalogue — so the engine could have used them and the app could not offer
+/// of them was in the catalogue, so the engine could have used them and the app could not offer
 /// them, which is "half a connector that fails invisibly" moved one layer further out than the
 /// check that phrase was written for. A test now compares both against this.
 pub const ALL_CONNECTOR_IDS: &[&str] = &[
@@ -38,7 +38,7 @@ pub const ALL_CONNECTOR_IDS: &[&str] = &[
 
 /// A fresh shared secret for signing webhook deliveries.
 ///
-/// Two v4 UUIDs, hex, for 244 bits of entropy — well past what an HMAC key needs, and it
+/// Two v4 UUIDs, hex, for 244 bits of entropy, well past what an HMAC key needs, and it
 /// avoids taking a dependency on an RNG crate for one call site.
 pub fn generate_signing_secret() -> Secret {
     Secret::new(format!(
@@ -86,7 +86,7 @@ pub fn build_registry(
                     Some(key) => {
                         // Registered in both maps: one deployment reads the calendar and creates
                         // drafts, which is what the direction-split traits are for. Registering only
-                        // as a source was the drift the missing sink implementation left behind — the
+                        // as a source was the drift the missing sink implementation left behind: the
                         // comment above claimed both and the code did one.
                         let bridge = Arc::new(GoogleBridge::new(target, key));
                         registry.register_source(bridge.clone());

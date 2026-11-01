@@ -4,13 +4,13 @@
  * # Why this is separate from speaker tracking
  *
  * The speaker tracker runs only while the engine is already recording, which is a privacy property
- * and not an optimisation. Join detection cannot work that way — the whole point is to speak
+ * and not an optimisation. Join detection cannot work that way: the whole point is to speak
  * *before* anything is recording, because the user has not pressed record yet and that is the
  * problem being solved.
  *
  * So the two are separate, and what they send is separate. Speaker tracking sends names and speaking
  * times, and only during a recording. This sends the platform and an opaque key, once, and reads no
- * DOM at all — the meeting is recognised from the URL. Nothing here can see the roster, the chat, or
+ * DOM at all: the meeting is recognised from the URL. Nothing here can see the roster, the chat, or
  * the page.
  *
  * # Why it gives up
@@ -18,7 +18,7 @@
  * If the desktop app is not running there is nobody to tell, and the sensible thing is to try again
  * shortly in case it is starting. But a meeting page left open all afternoon must not knock on ten
  * loopback ports forever, and a prompt to record a meeting that began twenty minutes ago is worse
- * than no prompt — so the attempts are bounded and then it stops for good.
+ * than no prompt, so the attempts are bounded and then it stops for good.
  */
 
 /** How often to retry while nobody is listening. */
@@ -61,7 +61,7 @@ export class JoinAnnouncer {
    */
   async tick(meeting) {
     if (!meeting) {
-      // Left the call, or never in one. Forget the meeting so returning to it announces again —
+      // Left the call, or never in one. Forget the meeting so returning to it announces again:
       // the engine deduplicates, so a repeat costs nothing, and a user who rejoined after an hour
       // should not be silently skipped by this side.
       this.reset();

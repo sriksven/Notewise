@@ -14,20 +14,20 @@ interface Props {
  *
  * # Read from the meeting, not the summary
  *
- * `IntelPanel` used to render `summary.decisions`, which is `SummaryRepository::decisions(summary_id)`
- * — the decisions belonging to *one* summary. Summarising appends rather than updates and the newest
+ * `IntelPanel` used to render `summary.decisions`, which is `SummaryRepository::decisions(summary_id)`,
+ * the decisions belonging to *one* summary. Summarising appends rather than updates and the newest
  * row wins, so running a second template hid every decision the first run found. They were still
  * there; `decisions_for_meeting` exists for exactly this and its doc says so: "every decision made in
  * a meeting, whichever summary first surfaced it."
  *
  * This is the same correction already made for action items, in the same panel, for the same reason.
- * Decisions were the half left behind — invisible until now because nothing could add one by hand
+ * Decisions were the half left behind, invisible until now because nothing could add one by hand
  * either, so there was never a decision that no summary had proposed.
  *
  * # Why removing one matters
  *
  * A wrong decision is worse than a missing one: it reads as a record of what a group agreed. So the
- * remove control stays, and adding one is offered beside it — a decision the model missed is at
+ * remove control stays, and adding one is offered beside it: a decision the model missed is at
  * least as common as one it invented.
  */
 /**
@@ -35,7 +35,7 @@ interface Props {
  *
  * The intelligence panel stays mounted while the library switches meetings under it. Without the
  * key a half-typed decision stayed open on the next meeting and Enter added it there, and the last
- * meeting's decisions stayed on screen until — or, if the request failed, instead of — this one's.
+ * meeting's decisions stayed on screen until (or, if the request failed, instead of) this one's.
  */
 export function Decisions(props: Props) {
   return <DecisionsForMeeting key={props.meetingId} {...props} />;

@@ -6,7 +6,7 @@
 //! and local.
 //!
 //! It may not execute an external tool. Spec 6 requires a human to confirm every external tool call,
-//! every time, and a scheduled job is by definition unattended — those two cannot both hold, and the
+//! every time, and a scheduled job is by definition unattended: those two cannot both hold, and the
 //! confirmation is the one that stays. That holds now that the MCP client exists: `job_allowed_tools`
 //! scopes which tools a run may *propose*, [`crate::tools`] is where a proposal becomes a call, and
 //! only a request from the interface moves a row to `confirmed`. Nothing here generates proposals
@@ -19,7 +19,7 @@
 //!
 //! `api-server` already owns the tokio runtime, the backend, the repositories, and the agent. A
 //! separate crate would need all of that handed to it for no isolation benefit. The part that is
-//! genuinely tricky — given cron expressions and a clock, what is due — is [`crate::schedule`],
+//! genuinely tricky (given cron expressions and a clock, what is due) is [`crate::schedule`],
 //! which is pure.
 
 use std::sync::Arc;
@@ -45,7 +45,7 @@ type Shared = Arc<AppState>;
 /// How often the scheduler wakes.
 ///
 /// A minute is the finest granularity standard cron expresses, so checking more often cannot fire
-/// anything sooner — it would only burn wakeups.
+/// anything sooner: it would only burn wakeups.
 pub const TICK: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How many jobs may run at once.
@@ -274,7 +274,7 @@ async fn run_now(
 
 /// Start a run and drive it to completion.
 ///
-/// Returns once the run has been *recorded as started*, not once it has finished — a digest over a
+/// Returns once the run has been *recorded as started*, not once it has finished: a digest over a
 /// year of meetings can take minutes, and an HTTP request should not hold open for it.
 async fn execute(state: Shared, job: Job) -> ApiResult<Id> {
     let run_id = {
@@ -339,7 +339,7 @@ fn parse_id(raw: &str) -> ApiResult<Id> {
 
 /// The scheduler loop. Runs for the life of the process.
 ///
-/// Every decision about *whether* to run comes from [`crate::schedule::due`], which is pure — this
+/// Every decision about *whether* to run comes from [`crate::schedule::due`], which is pure; this
 /// only acts on the answer.
 pub fn spawn(state: Shared) {
     tokio::spawn(async move {
@@ -610,7 +610,7 @@ mod tests {
         assert_eq!(jobs.as_array().expect("array").len(), 0);
     }
 
-    /// A run-now on the mock backend goes all the way through, which is what proves the wiring —
+    /// A run-now on the mock backend goes all the way through, which is what proves the wiring:
     /// job to agent to run record.
     #[tokio::test]
     async fn running_a_job_records_a_run() {
@@ -643,7 +643,7 @@ mod tests {
     }
 
     /// Two concurrent runs of one job would both write a note and both cost model calls. The mock
-    /// backend finishes in milliseconds, so the in-flight row is created directly — otherwise the
+    /// backend finishes in milliseconds, so the in-flight row is created directly; otherwise the
     /// race is unobservable and the guard would be untested.
     #[tokio::test]
     async fn run_now_is_refused_while_a_run_is_in_flight() {

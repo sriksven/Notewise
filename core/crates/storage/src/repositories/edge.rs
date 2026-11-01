@@ -48,7 +48,7 @@ impl<'a> EdgeRepository<'a> {
     /// Create an edge, or return the existing one if identical.
     ///
     /// Idempotent because edge creation is frequently derived from re-processing the same
-    /// meeting — re-summarizing should not multiply edges.
+    /// meeting: re-summarizing should not multiply edges.
     pub fn create(&self, new: NewEdge) -> Result<EdgeRecord> {
         if let Some(existing) = self.find(&new)? {
             return Ok(existing);
@@ -156,7 +156,7 @@ impl<'a> EdgeRepository<'a> {
 
     /// Remove every edge touching a node.
     ///
-    /// Entity tables cascade on delete, but the edge table cannot — it has no foreign keys,
+    /// Entity tables cascade on delete, but the edge table cannot; it has no foreign keys,
     /// precisely because it references heterogeneous kinds. Callers deleting an entity must
     /// call this, which is why `graph` wraps both in one operation.
     pub fn delete_touching(&self, kind: &str, id: Id) -> Result<usize> {

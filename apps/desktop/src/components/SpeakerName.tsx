@@ -25,7 +25,7 @@ interface Props {
   /** Everyone in this meeting, so a typed name can be recognised as a merge. */
   all: Speaker[];
   onRename: (from: string | null, to: string) => Promise<void>;
-  /** False while a meeting is recording — see the note on the trigger below. */
+  /** False while a meeting is recording; see the note on the trigger below. */
   editable: boolean;
 }
 
@@ -36,7 +36,7 @@ interface Props {
  *
  * "Speaker 2 is Dana" is a realisation someone has while reading what Speaker 2 said. Sending
  * them to a panel to act on it means holding the mapping in their head on the way there, and
- * the panel cannot show the one thing that identifies an anonymous cluster — its words.
+ * the panel cannot show the one thing that identifies an anonymous cluster, its words.
  *
  * # Merging is a rename
  *
@@ -72,7 +72,7 @@ export function SpeakerName({ speaker, all, onRename, editable }: Props) {
   /**
    * Pin the popover to the trigger in viewport coordinates.
    *
-   * The transcript scrolls, and a scroll container clips its overflow on *both* axes — so an
+   * The transcript scrolls, and a scroll container clips its overflow on *both* axes, so an
    * absolutely-positioned popover inside it gets cut off at the column edge no matter what its
    * z-index is. Rendering into `document.body` and positioning by measurement is what makes it
    * whole, and it is also what lets it flip rather than run off the window.
@@ -127,7 +127,7 @@ export function SpeakerName({ speaker, all, onRename, editable }: Props) {
       await onRename(speaker.label, to);
       setOpen(false);
     } catch (e) {
-      // Most likely a stale label — someone renamed it in another window. Say so rather than
+      // Most likely a stale label: someone renamed it in another window. Say so rather than
       // closing, so the typed name is not lost.
       setError(e instanceof Error ? e.message : "Could not rename this speaker.");
     } finally {
@@ -147,7 +147,7 @@ export function SpeakerName({ speaker, all, onRename, editable }: Props) {
         onClick={() => setOpen((wasOpen) => !wasOpen)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`Name this speaker — ${countOf(speaker)}, ${duration(speaker.speaking_ms)}`}
+        title={`Name this speaker: ${countOf(speaker)}, ${duration(speaker.speaking_ms)}`}
         className={`rounded-md px-1 -mx-1 text-[13px] font-semibold transition-colors
                     hover:bg-overlay hover:text-ink
                     ${speaker.anonymous ? "text-ink-muted decoration-dotted underline underline-offset-4" : "text-ink"}`}

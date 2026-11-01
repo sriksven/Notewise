@@ -24,7 +24,7 @@ const DEFAULT_ENDPOINT: &str = "http://localhost:11434/api/chat";
 /// The preferred model when nobody has chosen one.
 ///
 /// A *preference*, not an assertion. Ollama expands an untagged name to `:latest`, so this
-/// string alone is a claim that the user pulled `llama3.1:latest` specifically — and it is a
+/// string alone is a claim that the user pulled `llama3.1:latest` specifically, and it is a
 /// 404 on a machine holding `llama3.1:8b`. It is resolved against the daemon's actual model
 /// list before any request; see [`OllamaBackend::resolve`] and `crate::tags`.
 const DEFAULT_MODEL: &str = "llama3.1";
@@ -41,7 +41,7 @@ fn is_model_missing(status: u16, body: &str) -> bool {
 /// The installed tag to send for `model`, or `None` when nothing installed will do.
 ///
 /// Pure for the same reason [`is_model_missing`] is. A name a human chose resolves only within
-/// its own family — substituting another model would attribute output to a choice they did not
+/// its own family: substituting another model would attribute output to a choice they did not
 /// make. Our own default may fall back to any chat model: a machine with only `mistral` should
 /// summarize the meeting rather than report that our preference is missing.
 fn choose_tag(model: &str, chosen: bool, installed: &[String]) -> Option<String> {
@@ -61,7 +61,7 @@ pub struct OllamaBackend {
     /// Whether a human picked `model`.
     ///
     /// The difference decides what happens when it is not installed. A name the user chose
-    /// must fail loudly — substituting another model would attribute output to a choice they
+    /// must fail loudly: substituting another model would attribute output to a choice they
     /// did not make. Our own default may fall back to whatever the daemon holds, because
     /// "llama3.1 is missing" is not a useful thing to tell someone who never asked for it.
     chosen: bool,
@@ -69,7 +69,7 @@ pub struct OllamaBackend {
     ///
     /// Shared across clones rather than per-clone, so the resolution costs one `/api/tags`
     /// per backend rather than one per caller that happened to clone it. Empty until a daemon
-    /// answers — see [`OllamaBackend::resolve`] for why a guess is never stored here.
+    /// answers: see [`OllamaBackend::resolve`] for why a guess is never stored here.
     resolved: Arc<tokio::sync::OnceCell<String>>,
     endpoint: String,
     http: reqwest::Client,
@@ -113,7 +113,7 @@ impl OllamaBackend {
 
     /// Build a request body.
     ///
-    /// `stream: false` matters — Ollama streams by default, and a streaming response does not
+    /// `stream: false` matters: Ollama streams by default, and a streaming response does not
     /// deserialize as a single JSON object.
     fn body(&self, model: &str, messages: Value, json_mode: bool) -> Value {
         let mut body = json!({
@@ -302,7 +302,7 @@ impl AiBackend for OllamaBackend {
     /// backend would send.
     ///
     /// A reachable daemon is not enough. One holding only `nomic-embed-text`, or not the model
-    /// the user chose, passes a reachability check and then fails every summary — and this
+    /// the user chose, passes a reachability check and then fails every summary, and this
     /// answer is what setup reports as "the AI backend is ready" and what a routing rule reads
     /// as "the local model is healthy". Both questions are about whether work can be done here.
     ///
@@ -350,10 +350,10 @@ impl OllamaBackend {
     ///
     /// Costs one `/api/tags` on the first request of a process and nothing afterwards. That
     /// is the whole price of never shipping a default that names a model the user does not
-    /// have — the daemon was already being asked this question to build the model picker.
+    /// have: the daemon was already being asked this question to build the model picker.
     ///
     /// Only an answer the daemon *confirmed* is remembered. This used to cache whatever the
-    /// first request produced, including the fallback for a daemon that was not up yet — so an
+    /// first request produced, including the fallback for a daemon that was not up yet, so an
     /// engine started at login a moment before Ollama sent the bare `llama3.1` for the rest of
     /// its life, and on a machine holding `llama3.1:8b` every summary failed with "model not
     /// found" until the app was restarted. A fallback is now used for the one request it was
@@ -369,8 +369,8 @@ impl OllamaBackend {
         }
     }
 
-    /// `Ok` is a tag the daemon holds, safe to remember. `Err` is the name to send this once —
-    /// the daemon could not be asked, or holds nothing that fits — and must not be remembered,
+    /// `Ok` is a tag the daemon holds, safe to remember. `Err` is the name to send this once;
+    /// the daemon could not be asked, or holds nothing that fits, and must not be remembered,
     /// because the answer changes the moment the daemon starts or the user pulls a model.
     async fn resolve_uncached(&self) -> std::result::Result<String, String> {
         let Ok(installed) = self.installed_models().await else {
@@ -402,7 +402,7 @@ impl OllamaBackend {
             .http
             .post(format!("{}/api/show", self.base()))
             .json(&json!({ "model": model }))
-            // Metadata only — this loads nothing, so a second is generous.
+            // Metadata only: this loads nothing, so a second is generous.
             .timeout(std::time::Duration::from_secs(1))
             .send()
             .await;
@@ -535,7 +535,7 @@ mod tests {
         assert!(is_model_missing(404, r#"{"error":"Model 'x' NOT FOUND"}"#));
     }
 
-    /// The message is what reaches the user — it is rendered verbatim in the Ask panel — so
+    /// The message is what reaches the user (it is rendered verbatim in the Ask panel) so
     /// it has to name both the model that failed and the ones that would work.
     #[test]
     fn the_missing_model_error_names_the_alternatives() {
@@ -675,7 +675,7 @@ mod tests {
     /// nothing listens on it, so this exercises the failure path without a network.
     /// Windows takes about two seconds to refuse a connection to a closed local port, and
     /// `tags()` gives up after two. The timeout won that race, so a stopped Ollama was reported
-    /// on Windows as one that was slow — "try again" — rather than as one to open. Only the
+    /// on Windows as one that was slow, "try again", rather than as one to open. Only the
     /// `windows-latest` CI job saw it.
     ///
     /// A non-routable address never answers the connection at all, which reproduces the race on
@@ -711,7 +711,7 @@ mod tests {
     use crate::stub::{Recorded, Reply, Stub};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// A daemon holding exactly `models`, whose model list fails `down_for` times first — the
+    /// A daemon holding exactly `models`, whose model list fails `down_for` times first: the
     /// shape of an Ollama that is still starting when the engine sends its first request.
     ///
     /// Chat answers only for a tag it holds, and 404s anything else with Ollama's own wording,
@@ -757,7 +757,7 @@ mod tests {
     }
 
     /// The defect: the first request's fallback was cached for the life of the process, so an
-    /// engine that started a moment before Ollama sent the bare `llama3.1` forever — and on a
+    /// engine that started a moment before Ollama sent the bare `llama3.1` forever, and on a
     /// machine holding only `llama3.1:8b`, every summary after that was "model not found".
     #[tokio::test]
     async fn a_daemon_that_was_not_up_yet_is_asked_again_on_the_next_request() {
@@ -838,7 +838,7 @@ mod tests {
         assert_eq!(backend.model_id(), "llama3.1:8b");
     }
 
-    /// The rules have to reach the model, and the reminder has to be the last thing it reads —
+    /// The rules have to reach the model, and the reminder has to be the last thing it reads;
     /// that ordering is what stopped a colleague's family emergency becoming an action item.
     #[tokio::test]
     async fn summaries_and_action_items_send_the_shared_rules_with_the_reminder_last() {
@@ -874,7 +874,7 @@ mod tests {
         assert!(user.ends_with(prompts::ACTION_ITEMS_REMINDER), "{user}");
     }
 
-    /// A request with its own instruction must not be framed as a question about meetings — that
+    /// A request with its own instruction must not be framed as a question about meetings; that
     /// framing is why "fix the grammar of this" came back as "I don't have any information about
     /// your meetings".
     #[tokio::test]

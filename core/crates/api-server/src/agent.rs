@@ -3,7 +3,7 @@
 //! # What this is modelled on
 //!
 //! Notion's AI agent is given a task in plain language, then searches the workspace, reads
-//! what it finds, and writes a page — running for minutes across many steps rather than
+//! what it finds, and writes a page, running for minutes across many steps rather than
 //! answering in one shot. The useful part is not the model; it is that the work is *multi-step
 //! and inspectable*: you can see what it looked at before you trust what it wrote.
 //!
@@ -11,7 +11,7 @@
 //!
 //! It can do exactly two things to this workspace: search/read, and create one note. It cannot
 //! edit or delete anything that already exists, cannot touch tickets, cannot reach a
-//! connector, and — like every other surface in this codebase — has no path to sending an
+//! connector, and (like every other surface in this codebase) has no path to sending an
 //! email. An agent that runs unattended is the last place to widen a blast radius, and "it
 //! wrote a new note you can throw away" is a failure mode a user can recover from without
 //! help.
@@ -19,7 +19,7 @@
 //! # Why a text protocol rather than tool calling
 //!
 //! [`AiBackend`] has no tool-calling method, and adding one would mean implementing it for
-//! every backend — including a local llama.cpp model whose tool support depends on the GGUF
+//! every backend, including a local llama.cpp model whose tool support depends on the GGUF
 //! someone downloaded. So the agent asks for one JSON action per turn and parses it. That
 //! works identically on every backend, at the cost of needing to tolerate a model that wraps
 //! its JSON in prose or a code fence. [`parse_action`] does tolerate exactly that, and a turn
@@ -72,7 +72,7 @@ pub struct Step {
     pub n: usize,
     /// The tool name, or `think` when the model produced no parseable action.
     pub action: String,
-    /// The model's own one-line reason, when it gave one. Shown to the user verbatim — it is
+    /// The model's own one-line reason, when it gave one. Shown to the user verbatim: it is
     /// the only window into why the agent did what it did.
     pub reason: Option<String>,
     /// What the tool returned, trimmed for display.
@@ -182,7 +182,7 @@ pub enum Action {
     Finish {
         message: String,
     },
-    /// The model said something that was not an action. Not an error — models narrate, and a
+    /// The model said something that was not an action. Not an error: models narrate, and a
     /// run that died on the first stray sentence would be useless.
     Unparseable(String),
 }
@@ -229,8 +229,8 @@ life. Never write those down, even when they explain a delay.
 /// Pull an action out of whatever the model actually said.
 ///
 /// Models wrap JSON in code fences, prefix it with "Sure!", or emit a paragraph and then the
-/// JSON. All three are recovered here. What is not recovered — no JSON object at all, or an
-/// unknown action name — comes back as [`Action::Unparseable`] and is handed to the model as
+/// JSON. All three are recovered here. What is not recovered (no JSON object at all, or an
+/// unknown action name) comes back as [`Action::Unparseable`] and is handed to the model as
 /// an observation, which in practice corrects it on the next turn.
 pub fn parse_action(raw: &str) -> Action {
     let Some(value) = object_with(raw, "action") else {
@@ -281,7 +281,7 @@ pub fn parse_action(raw: &str) -> Action {
 /// being looked for. `{search}` fails both tests and the scan moves on.
 ///
 /// A third: models put real line breaks inside string values. A `write_note` body is markdown,
-/// and `llama3.1:8b` writes it with literal newlines between the bullets — which JSON forbids, so
+/// and `llama3.1:8b` writes it with literal newlines between the bullets, which JSON forbids, so
 /// the strict parse rejected the one action the whole run exists to reach. Observed on the last
 /// step of a real run, which then ended "Ran out of steps" with the write-up discarded. So a
 /// candidate that fails strictly is tried once more with its control characters escaped.
@@ -388,7 +388,7 @@ fn balanced_span(raw: &str, start: usize) -> Option<&str> {
 pub struct RunFailure {
     pub message: String,
     /// Distinguished from an ordinary failure because it means the schedule or the timeout is wrong,
-    /// not the task — and that is a different thing for a user to fix.
+    /// not the task, and that is a different thing for a user to fix.
     pub timed_out: bool,
 }
 
@@ -505,7 +505,7 @@ async fn drive(
         let memories = crate::memory::for_prompt(state, None, task).await;
 
         // The protocol is the system prompt, not "material" under the meetings question-answerer
-        // the backend would otherwise put first — see `ChatRequest::system`.
+        // the backend would otherwise put first; see `ChatRequest::system`.
         let mut system = system_prompt(task);
         if !memories.is_empty() {
             system.push_str("\n\n");
@@ -608,7 +608,7 @@ async fn execute(
         Action::Search { query } => {
             // Hybrid, so the agent finds a meeting that discussed "cost structure" when it
             // searched for "pricing". Falls back to lexical on its own when the workspace has
-            // no embeddings — the agent should never have to know which is running.
+            // no embeddings; the agent should never have to know which is running.
             let found = match retrieval::gather_hybrid(state, query).await {
                 Ok(found) => found,
                 Err(e) => return ("search", format!("Search failed: {e}"), None),
@@ -812,7 +812,7 @@ struct StartRun {
 
 /// The longest task a run may be given.
 ///
-/// Not a security boundary — the engine is loopback-only and single-user. It stops a pasted
+/// Not a security boundary: the engine is loopback-only and single-user. It stops a pasted
 /// document from becoming a system prompt that crowds out the instructions themselves, which
 /// produces a run that ignores its own protocol and looks like a bug in the agent.
 const MAX_TASK_CHARS: usize = 2_000;
@@ -1057,8 +1057,8 @@ mod tests {
     ///
     /// The mock backend answers everything with the same text, which would put the agent in a
     /// loop repeating one action. Driving the loop needs replies that *change*, and driving it
-    /// through a specific path — search, read, write, finish — needs them chosen in advance.
-    /// Shared with the test, so replies can be queued *after* the state exists — which is
+    /// through a specific path (search, read, write, finish) needs them chosen in advance.
+    /// Shared with the test, so replies can be queued *after* the state exists, which is
     /// necessary whenever a scripted action has to name an id the seed data only just created.
     type Script = Arc<std::sync::Mutex<std::collections::VecDeque<String>>>;
 
@@ -1253,7 +1253,7 @@ mod tests {
     }
 
     /// The loop must stop on its own. Without the ceiling a model that never emits `finish`
-    /// runs until someone kills the process — on a metered backend, expensively.
+    /// runs until someone kills the process, on a metered backend, expensively.
     #[tokio::test]
     async fn a_run_that_never_finishes_stops_at_the_step_ceiling() {
         let state = state_with(&["not json, ever"; MAX_STEPS + 10]);

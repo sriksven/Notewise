@@ -6,7 +6,7 @@ use crate::error::Result;
 /// Application-level key/value configuration.
 ///
 /// Deliberately untyped: values are strings and the caller owns the meaning. A typed column
-/// per setting would mean a migration every time the app grows a preference, for no benefit —
+/// per setting would mean a migration every time the app grows a preference, for no benefit;
 /// nothing joins against these.
 #[derive(Debug)]
 pub struct SettingsRepository<'a> {

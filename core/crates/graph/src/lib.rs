@@ -6,7 +6,7 @@
 //!
 //! # Ownership vs association
 //!
-//! `notewise-storage` models **ownership** with foreign keys — a transcript segment belongs
+//! `notewise-storage` models **ownership** with foreign keys: a transcript segment belongs
 //! to exactly one meeting. This crate models **association**: many-to-many, heterogeneous,
 //! and traversable to arbitrary depth. Encoding association as foreign keys would mean a
 //! schema migration every time the product grows a new kind of link.
@@ -83,7 +83,7 @@ impl<'a> Graph<'a> {
         EdgeRepository::new(self.db)
     }
 
-    /// Link two nodes. Idempotent — connecting the same pair twice is a no-op.
+    /// Link two nodes. Idempotent; connecting the same pair twice is a no-op.
     pub fn connect(&self, from: NodeRef, kind: EdgeKind, to: NodeRef) -> Result<()> {
         self.edges().create(NewEdge {
             from_kind: from.kind.as_str().to_string(),
@@ -154,7 +154,7 @@ impl<'a> Graph<'a> {
         traverse::breadth_first(self, start, depth)
     }
 
-    /// Related nodes filtered to a single kind — "which tickets came out of this meeting?"
+    /// Related nodes filtered to a single kind: "which tickets came out of this meeting?"
     pub fn related_of_kind(
         &self,
         start: NodeRef,
@@ -170,7 +170,7 @@ impl<'a> Graph<'a> {
 
     /// Remove a node's edges.
     ///
-    /// The edge table has no foreign keys — it references heterogeneous kinds, so SQLite
+    /// The edge table has no foreign keys; it references heterogeneous kinds, so SQLite
     /// cannot cascade for it. Deleting an entity without calling this leaves edges pointing
     /// at something that no longer exists.
     pub fn detach(&self, node: NodeRef) -> Result<usize> {

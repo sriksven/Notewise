@@ -1,7 +1,7 @@
 /**
  * Tests for the platform-independent half of the extension.
  *
- * Run with `node --test apps/browser-extension/` — no browser, no bundler, no dependencies. The DOM
+ * Run with `node --test apps/browser-extension/`: no browser, no bundler, no dependencies. The DOM
  * adapters in `platforms.js` are not covered here: they assert against markup owned by Google,
  * Zoom, and Microsoft, so a passing test would only prove the fixture matches itself and would go
  * stale silently. What is testable without lying is everything after the DOM, which is where the
@@ -73,7 +73,7 @@ test("a flicker shorter than the minimum turn is dropped", () => {
   const clock = fakeClock();
   const tracker = new SpeakerTracker(clock.now, 0);
 
-  // A single sample of Marcus — a cough, or two people colliding.
+  // A single sample of Marcus: a cough, or two people colliding.
   tracker.observe([person("p2", "Marcus", { speaking: true })]);
   clock.advance(250);
   tracker.observe([person("p2", "Marcus")]);
@@ -185,7 +185,7 @@ test("nothing is sent for a silent meeting", () => {
 
 test("elapsed time never goes negative", () => {
   // A caller passing an offset larger than the clock has advanced must not produce a turn before
-  // the recording started — the engine rejects those.
+  // the recording started: the engine rejects those.
   const clock = fakeClock(0);
   const tracker = new SpeakerTracker(clock.now, 5_000);
 

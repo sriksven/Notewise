@@ -26,7 +26,7 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
  * The thing the transcript cannot be: what *you* thought, as opposed to what was said. A
  * transcript is a record; this is the margin.
  *
- * Notes are real notes — they appear under Notes, survive the meeting, and can be asked
+ * Notes are real notes: they appear under Notes, survive the meeting, and can be asked
  * questions. The link is a graph edge rather than a column on the note, because a note is not
  * owned by the meeting it was taken in: it outlives it, and can reference more than one.
  *
@@ -115,7 +115,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
       creating.current = true;
       try {
         const note = await api.createMeetingNote(meetingId, {
-          title: meetingTitle ? `Notes — ${meetingTitle}` : "Meeting notes",
+          title: meetingTitle ? `Notes - ${meetingTitle}` : "Meeting notes",
           body: initial,
         });
         setNotes((current) => [note, ...current]);
@@ -135,7 +135,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
   /**
    * What is on screen, for the moment it stops being on screen.
    *
-   * Moving to another meeting by address — Back, a link from search or the join prompt — or
+   * Moving to another meeting by address (Back, a link from search or the join prompt) or
    * leaving the tab without a click in the editor never blurs it, so the debounce was cancelled
    * with the last few keystrokes still unsaved.
    */
@@ -180,7 +180,7 @@ export function MeetingNotes({ meetingId, meetingTitle, isRecording, onNavigate 
     }
     try {
       const note = await api.createMeetingNote(meetingId, {
-        title: meetingTitle ? `Notes — ${meetingTitle}` : "Meeting notes",
+        title: meetingTitle ? `Notes - ${meetingTitle}` : "Meeting notes",
         body: "",
       });
       setNotes((current) => [note, ...current]);

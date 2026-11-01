@@ -4,7 +4,7 @@
 //!
 //! Nothing in this module can send a tool call without a row moving from `proposed` to `confirmed`
 //! first, and only a request from the interface moves it. There is no "always allow this tool", no
-//! batch confirm, and no path that starts a call from a background task — see [`crate::jobs`],
+//! batch confirm, and no path that starts a call from a background task; see [`crate::jobs`],
 //! which says the same thing from the other side.
 //!
 //! The reason is that an external tool's blast radius is unknowable. `mcp-server`'s `MUTATING_TOOLS`
@@ -16,7 +16,7 @@
 //!
 //! `propose` asks a model for a call and stores it, sending nothing. `confirm` records that a human
 //! approved it. `execute` sends it. `confirm` calls `execute` for the caller's convenience, but the
-//! transition is written first and `execute` refuses a row that is not `confirmed` — so the
+//! transition is written first and `execute` refuses a row that is not `confirmed`, so the
 //! guarantee is enforced by the database and not by the order in which handlers happen to run.
 
 use std::collections::BTreeMap;
@@ -57,7 +57,7 @@ const MAX_TOOLS_IN_PROMPT: usize = 40;
 ///
 /// Environment variables for a stdio server, headers for an HTTP one. Stored as one JSON object per
 /// server so reaching them costs a single keychain read, and stored *there* rather than in
-/// `mcp_servers` because they are credentials — the same split routing rules make for provider keys.
+/// `mcp_servers` because they are credentials: the same split routing rules make for provider keys.
 fn secret_scope(server_id: Id) -> String {
     format!("mcp.{server_id}")
 }
@@ -171,7 +171,7 @@ struct AddServerBody {
 
 /// Add a server. It is disabled, and none of its tools are allowed.
 ///
-/// Connecting a client must not grant capability as a side effect of having typed a command in —
+/// Connecting a client must not grant capability as a side effect of having typed a command in:
 /// the same reasoning `mcp-server` applies to its own write scope.
 async fn add_server(
     State(state): State<Shared>,
@@ -232,7 +232,7 @@ struct EnabledBody {
 /// Turn a server on or off.
 ///
 /// Turning it off stops it and withdraws all of its tools, without forgetting which ones were
-/// allowed — a user who disables a server in a hurry should not have to reconstruct their choices.
+/// allowed: a user who disables a server in a hurry should not have to reconstruct their choices.
 async fn set_enabled(
     State(state): State<Shared>,
     Path(id): Path<String>,
@@ -292,7 +292,7 @@ async fn remove_server(
         McpServerRepository::new(&db).delete(id)?;
     }
     // Left behind, the secret would outlive every reference to it and be unreachable through this
-    // API — a credential nobody can see and nobody can delete.
+    // API: a credential nobody can see and nobody can delete.
     let _ = crate::state::Keychain::new().delete(&secret_scope(id), SECRET_KEY);
 
     Ok(Json(serde_json::json!({ "deleted": true })))
@@ -705,7 +705,7 @@ async fn store_proposal(
 ///
 /// A server that will not start contributes nothing and does not fail the request: its tools are
 /// absent from the proposal rather than proposed and then refused, because a confirmation for a
-/// call that cannot run spends the only thing this feature costs — the user's attention.
+/// call that cannot run spends the only thing this feature costs: the user's attention.
 async fn gather_tools(state: &Shared) -> ApiResult<Vec<(McpServer, ToolDef)>> {
     let (servers, allowed) = {
         let db = state.db().await;
@@ -762,7 +762,7 @@ fn proposal_prompt(task: &str, available: &[(McpServer, ToolDef)]) -> String {
             tool.name,
             tool.description
                 .as_deref()
-                .map(|d| format!(" — {d}"))
+                .map(|d| format!(" - {d}"))
                 .unwrap_or_default(),
             tool.input_schema
         ));
@@ -775,7 +775,7 @@ your proposal and decide whether it runs. Nothing happens until they do.
 THE TASK:
 {task}
 
-TOOLS YOU MAY USE — nothing else exists:
+TOOLS YOU MAY USE (nothing else exists):
 {tools}
 Reply with EXACTLY ONE JSON object and no other text.
 
@@ -821,7 +821,7 @@ impl From<ToolExecution> for ExecutionBody {
             tool_name: execution.tool_name,
             // A value rather than a string, so the interface can render the fields as fields. On
             // the impossible path where it will not parse, the raw text goes through instead of
-            // the request failing — a record of something that ran must stay readable.
+            // the request failing: a record of something that ran must stay readable.
             arguments: serde_json::from_str(&execution.arguments)
                 .unwrap_or(Value::String(execution.arguments.clone())),
             status: execution.status.as_str(),
@@ -860,7 +860,7 @@ async fn list_executions(
     ))
 }
 
-/// A human approved it — so run it.
+/// A human approved it. So run it.
 ///
 /// The transition is written before anything is sent, and [`execute`] refuses a row that is not
 /// `confirmed`. So the "no execution without confirmation" guarantee is the database's and not
@@ -918,7 +918,7 @@ async fn execute_confirmed(
 /// Send a confirmed call and record what came back.
 ///
 /// A call that fails is not an error of this request: the request did its job, and the row says
-/// what happened. So this returns `Ok` with a `failed` or `unknown` row rather than a 502 — the
+/// what happened. So this returns `Ok` with a `failed` or `unknown` row rather than a 502: the
 /// interface has to show the user which of those it was, and an error body cannot carry it.
 async fn execute(state: &Shared, execution: ToolExecution) -> ApiResult<ToolExecution> {
     let id = execution.id;
@@ -926,8 +926,8 @@ async fn execute(state: &Shared, execution: ToolExecution) -> ApiResult<ToolExec
     let (server, allowlist) = {
         let db = state.db().await;
         // Claimed before anything is read or sent, under the same lock. The row stays `confirmed`
-        // until the server answers, and without the claim a second request in that window — the
-        // "it never went out" button, another window — sent the same call again.
+        // until the server answers, and without the claim a second request in that window (the
+        // "it never went out" button, another window) sent the same call again.
         ToolExecutionRepository::new(&db).claim(id)?;
         let repo = McpServerRepository::new(&db);
         let server = repo.get(execution.server_id)?;
@@ -943,7 +943,7 @@ async fn execute(state: &Shared, execution: ToolExecution) -> ApiResult<ToolExec
 
     let secrets = secrets_for(&server, &crate::state::Keychain::new()).unwrap_or_default();
     // Failed rather than returned: the row is claimed now, and an error here would leave it
-    // claimed and unfinished — refused for ever, though nothing was sent.
+    // claimed and unfinished, refused for ever, though nothing was sent.
     let config = match config_of(&server, secrets) {
         Ok(config) => config,
         Err(e) => return fail(state, id, e.to_string()).await,
@@ -1444,7 +1444,7 @@ mod tests {
             assert!(
                 !agent.contains(forbidden),
                 "agent.rs mentions '{forbidden}'. An agent that runs unattended is the last \
-                 place to widen a blast radius — external tools need a human, and the agent \
+                 place to widen a blast radius: external tools need a human, and the agent \
                  does not have one."
             );
         }
@@ -1727,7 +1727,7 @@ done
         }
 
         /// A confirmed call already being sent must not be sent again. The row is `confirmed` for
-        /// as long as the server takes to answer, and the task list offers "it never went out —
+        /// as long as the server takes to answer, and the task list offers "it never went out -
         /// send" for exactly that status.
         #[tokio::test]
         async fn a_call_being_sent_is_not_sent_a_second_time() {

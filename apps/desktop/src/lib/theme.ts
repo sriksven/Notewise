@@ -18,7 +18,7 @@ export interface Accent {
    * For the dark theme, lighter.
    *
    * Not a nicety: the same colour cannot serve both. Graphite at `#3f3f46` is a readable button
-   * on white and disappears entirely against a `#141416` background — the logo and every
+   * on white and disappears entirely against a `#141416` background: the logo and every
    * primary action would be a dark shape on a dark surface.
    */
   darkBase: string;
@@ -32,7 +32,7 @@ export interface Accent {
  * Eleven accents, deliberately muted.
  *
  * This is an app someone stares at for the length of a meeting, so these are desaturated rather
- * than vivid — a saturated accent is legible for a minute and tiring for an hour. Each one is
+ * than vivid: a saturated accent is legible for a minute and tiring for an hour. Each one is
  * checked to hold contrast against both the light and dark surfaces below.
  */
 export const ACCENTS: Accent[] = [
@@ -108,8 +108,8 @@ const LIGHT: Palette = {
 };
 
 /**
- * Not black. A true `#000` background against light text produces halation — the text appears
- * to smear — and is the single most common mistake in a dark theme. `#141416` reads as black
+ * Not black. A true `#000` background against light text produces halation (the text appears
+ * to smear), and is the single most common mistake in a dark theme. `#141416` reads as black
  * and does not.
  */
 const DARK: Palette = {
@@ -146,8 +146,8 @@ export const DEFAULT_THEME: Theme = { mode: "dark", accent: DEFAULT_ACCENT };
  *
  * Tailwind can only apply an opacity modifier (`bg-accent/20`) to a colour written as
  * `rgb(var(--x) / <alpha-value>)`. Written as a plain `var(--accent)`, every such class compiled to
- * nothing at all — the selected meeting in the library had no highlight and the recording badge no
- * fill — so the colours those classes use are also published as channels.
+ * nothing at all (the selected meeting in the library had no highlight and the recording badge no
+ * fill), so the colours those classes use are also published as channels.
  */
 export function channels(hex: string): string {
   const n = parseInt(hex.slice(1), 16);
@@ -166,7 +166,7 @@ export function resolveMode(mode: Mode): "light" | "dark" {
 /**
  * Write a theme onto the document.
  *
- * Idempotent, and safe to call on every change — setting a custom property that already holds
+ * Idempotent, and safe to call on every change: setting a custom property that already holds
  * the same value does not cause a repaint.
  */
 export function applyTheme(theme: Theme): void {
@@ -206,7 +206,7 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty("--note-accent-on", dark ? note.darkOn : note.on);
 
   // Recording is always red, in every theme. It is the one signal that must not be confusable
-  // with decoration — if it is red, audio is being captured — so it does not follow the accent.
+  // with decoration (if it is red, audio is being captured), so it does not follow the accent.
   root.style.setProperty("--record", "#e2382e");
   root.style.setProperty("--record-rgb", channels("#e2382e"));
   root.style.setProperty("--record-hover", "#c92f26");

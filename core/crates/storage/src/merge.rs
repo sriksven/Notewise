@@ -3,7 +3,7 @@
 //! # Why this is a feature and not a migration
 //!
 //! [`crate::location`] adopts a workspace left at an old path when there is nothing at the new
-//! one — a rename, which loses nothing. When *both* hold data it refuses and says so, because
+//! one: a rename, which loses nothing. When *both* hold data it refuses and says so, because
 //! combining two populated stores is not a rename. That refusal is correct, and this module is the
 //! thing it refuses in favour of: an explicit action, run when the user asks, that reports exactly
 //! what it did.
@@ -12,7 +12,7 @@
 //!
 //! Every primary key in this schema is a v4 UUID ([`crate::Id`]), so rows from two independently
 //! created stores cannot collide. There is no id to remap and no edge to rewrite for the vast
-//! majority of the data — the work is inserting in foreign-key order and handling the handful of
+//! majority of the data; the work is inserting in foreign-key order and handling the handful of
 //! `UNIQUE` constraints that are *not* ids.
 //!
 //! There is exactly one real remapping case. `people` is unique on email, so the same colleague
@@ -22,8 +22,8 @@
 //! # What it will not do
 //!
 //! It does not write to the source. It runs in one transaction, so a failure leaves this workspace
-//! exactly as it was. It never overwrites: where both stores configured the same thing — a
-//! setting, a connector account — this workspace wins and the incoming value is skipped, because
+//! exactly as it was. It never overwrites: where both stores configured the same thing (a
+//! setting, a connector account), this workspace wins and the incoming value is skipped, because
 //! the alternative is a merge that silently changes settings the user is currently looking at.
 
 use std::collections::HashMap;
@@ -72,7 +72,7 @@ impl MergeReport {
     /// One line worth showing a user.
     pub fn summary(&self) -> String {
         if self.is_empty() {
-            return "nothing to merge — that workspace held no content".to_string();
+            return "nothing to merge: that workspace held no content".to_string();
         }
         format!(
             "merged {} meetings, {} transcript segments, {} notes, {} tickets, {} summaries; \
@@ -92,7 +92,7 @@ impl MergeReport {
 ///
 /// [`MergeMode::Preview`] runs the real merge and then rolls it back, so the counts it reports come
 /// from the same code that would apply them. Counting rows separately would be a second
-/// implementation of the merge rules, and the two would eventually disagree — which is the exact
+/// implementation of the merge rules, and the two would eventually disagree, which is the exact
 /// situation a preview exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeMode {
@@ -103,7 +103,7 @@ pub enum MergeMode {
 /// Fold the workspace at `source` into `db`.
 ///
 /// The source is opened read-only and never written to. Everything happens in one transaction on
-/// the destination, so an error — or [`MergeMode::Preview`] — leaves it untouched.
+/// the destination, so an error, or [`MergeMode::Preview`], leaves it untouched.
 pub fn merge_from(db: &Database, source: &Path, mode: MergeMode) -> Result<MergeReport> {
     if !source.is_file() {
         return Err(StorageError::Merge(format!(
@@ -139,7 +139,7 @@ pub fn merge_from(db: &Database, source: &Path, mode: MergeMode) -> Result<Merge
     let result = merge_attached(conn, mode);
 
     // Detach whatever happened, so a failed merge does not leave the connection holding the other
-    // file open — which would make a retry fail for a different reason than the first attempt.
+    // file open, which would make a retry fail for a different reason than the first attempt.
     let _ = conn.execute("DETACH DATABASE incoming", []);
 
     result
@@ -179,19 +179,19 @@ fn merge_attached(conn: &rusqlite::Connection, mode: MergeMode) -> Result<MergeR
 
         // Deliberately not merged:
         //
-        // `app_settings` and `connector_accounts` — this workspace's configuration wins. A merge
+        // `app_settings` and `connector_accounts`: this workspace's configuration wins. A merge
         // that changed the active backend or repointed a vault would be changing settings the user
         // is looking at, to values from a store they just described as secondary.
         //
-        // `embeddings` — derived data, and labelled with the model that produced it. Copying
+        // `embeddings`: derived data, and labelled with the model that produced it. Copying
         // vectors risks mixing models; the indexing pass rebuilds them for free.
         //
-        // `connector_outbox` — pending deliveries for a workspace that is being retired. Replaying
+        // `connector_outbox`: pending deliveries for a workspace that is being retired. Replaying
         // them would push artifacts to a vault or webhook a second time.
         //
-        // `notifications` — about events the user has already lived through.
+        // `notifications`: about events the user has already lived through.
         //
-        // `search_index*` — FTS5 shadow tables, repopulated by the triggers the inserts above fire.
+        // `search_index*`: FTS5 shadow tables, repopulated by the triggers the inserts above fire.
         report.skipped_conflicts += count_skipped(conn)?;
 
         Ok(())
@@ -444,7 +444,7 @@ mod tests {
             "a preview must not write anything"
         );
 
-        // And applying afterwards still works — the rollback must not have left the connection or
+        // And applying afterwards still works; the rollback must not have left the connection or
         // the temp mapping table in a state that breaks the real run.
         let applied = merge_from(&canonical, &legacy_path, MergeMode::Apply).expect("apply");
         assert_eq!(applied.meetings, 1);

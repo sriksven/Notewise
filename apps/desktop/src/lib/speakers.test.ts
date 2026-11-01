@@ -73,7 +73,7 @@ group("outcomeOf", () => {
     });
   });
 
-  // A meeting's own null-labelled group is not a merge target — there is no name to merge into.
+  // A meeting's own null-labelled group is not a merge target: there is no name to merge into.
   it("does not merge into the unattributed group", () => {
     const nobody = speaker(null, 2);
     const one = speaker("Speaker 1");

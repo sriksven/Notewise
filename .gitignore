@@ -5,7 +5,7 @@ Cargo.lock.bak
 *.pdb
 
 # Agent worktrees. Full checkouts of this repository live here, so committing one would nest
-# the repo inside itself — and they are scratch space by definition.
+# the repo inside itself, and they are scratch space by definition.
 .claude/worktrees/
 
 # Node
@@ -16,13 +16,13 @@ dist/
 build/
 *.tsbuildinfo
 
-# Models — large binaries, downloaded on demand by scripts/download-models.sh
+# Models: large binaries, downloaded on demand by scripts/download-models.sh
 models/
 *.gguf
 *.bin
 *.onnx
 
-# Local data — never commit a user's meetings
+# Local data: never commit a user's meetings
 *.db
 *.db-shm
 *.db-wal
@@ -66,7 +66,7 @@ Thumbs.db
 # Long-form documentation.
 #
 # Kept out of the repository on purpose. `docs/` holds detail that goes stale faster than the
-# code it describes — build walkthroughs, endpoint listings, generated design specs — and a
+# code it describes (build walkthroughs, endpoint listings, generated design specs) and a
 # published document that disagrees with the source is worse than no document. What a reader
 # genuinely needs to trust lives at the root (README, ARCHITECTURE, ROADMAP, SECURITY) or in
 # the code's own doc comments, which cannot drift from what they document.
@@ -74,7 +74,7 @@ Thumbs.db
 # `docs/superpowers/` is the one exception, and for the opposite reason: a design spec records
 # *why* a decision was made and which alternatives were rejected, which the code cannot say and
 # which stops being recoverable once everyone who was there has forgotten. It is dated and
-# historical by construction, so it does not drift — a spec from August describes what was
+# historical by construction, so it does not drift: a spec from August describes what was
 # decided in August whether or not the code still agrees. `docs/*` rather than `docs/` because
 # git will not descend into an excluded directory, so the negation below needs a traversable path.
 docs/*

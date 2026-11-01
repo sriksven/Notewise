@@ -10,7 +10,7 @@
 //! # Nothing here is on by default
 //!
 //! This crate stores; it does not decide to remember. Automatic extraction is gated by a setting
-//! that ships off, and the manual path works whether or not that is ever turned on — adding a
+//! that ships off, and the manual path works whether or not that is ever turned on; adding a
 //! memory by hand is a deliberate act and needs no feature switch.
 
 use chrono::{DateTime, Utc};

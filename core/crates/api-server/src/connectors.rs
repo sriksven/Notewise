@@ -6,7 +6,7 @@
 //! a URL for the webhook there is nothing to deliver to.
 //!
 //! Configuration is written to `connector_accounts` and the keychain, and the in-memory
-//! registry is rebuilt from both afterwards — the registry is derived state, never the record.
+//! registry is rebuilt from both afterwards: the registry is derived state, never the record.
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use notewise_connectors::{
 /// Two strings, not an enum: `ConnectorAccount.scopes` is a `Vec<String>` shared by every connector,
 /// and an enum here would have to grow a variant for every future capability of every vendor.
 pub const CALENDAR_SCOPE: &str = "calendar";
-/// The scope name for creating mail drafts. Never for sending — see the sinks.
+/// The scope name for creating mail drafts. Never for sending; see the sinks.
 pub const MAIL_SCOPE: &str = "mail";
 use notewise_storage::{ConnectorAccountRepository, Database, OutboxRepository};
 use serde::{Deserialize, Serialize};
@@ -99,7 +99,7 @@ pub struct AvailableConnector {
 
 /// Everything this build can connect to.
 ///
-/// Distinct from [`list_connectors`], which reports what is *configured* — that list is empty
+/// Distinct from [`list_connectors`], which reports what is *configured*: that list is empty
 /// on a fresh install and so cannot answer "what could I connect?". Compiled in rather than
 /// fetched: this is the set of sinks the binary actually contains, and a catalogue served from
 /// elsewhere could offer something this build has no code for.
@@ -108,7 +108,7 @@ pub async fn list_available_connectors(
 ) -> Json<Vec<AvailableConnector>> {
     let registry = state.connectors();
 
-    // Both maps. A source-only connector — a watched folder — is registered as a source and would
+    // Both maps. A source-only connector (a watched folder) is registered as a source and would
     // read as never connected if this asked only about sinks, which is how a connector ends up
     // configured and invisible.
     let mut connected = registry.sink_ids();
@@ -157,7 +157,7 @@ pub async fn list_available_connectors(
             target_label: "Client id",
             target_hint: "an app registration in your tenant",
             description: "Reads your calendar and can put follow-up drafts in Outlook. One \
-                          sign-in, and drafts only — never sending.",
+                          sign-in, and drafts only, never sending.",
             connected: is_connected(MicrosoftGraph::ID),
         },
         AvailableConnector {
@@ -166,7 +166,7 @@ pub async fn list_available_connectors(
             is_local: true,
             target_label: "Folder",
             target_hint: "e.g. ~/Documents/Specs",
-            description: "Imports text and Markdown files so answers can cite them. Read only — \
+            description: "Imports text and Markdown files so answers can cite them. Read only. \
                           Notewise never writes to this folder.",
             connected: is_connected(notewise_connectors::Documents::ID),
         },
@@ -177,7 +177,7 @@ pub async fn list_failed_deliveries(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<FailedDelivery>>> {
     // `db()` already returns the guard; there is no second `.lock()`. Held across synchronous
-    // calls only — `Database` is `Send` but not `Sync`, so keeping it alive across an `.await`
+    // calls only: `Database` is `Send` but not `Sync`, so keeping it alive across an `.await`
     // would make this future non-`Send` and axum would reject the route.
     let db = state.db().await;
     Ok(Json(describe_failures(&db, 50)?))
@@ -205,7 +205,7 @@ pub struct ConnectRequest {
 #[derive(Debug, Serialize)]
 pub struct ConnectResponse {
     pub id: String,
-    /// Returned exactly once, at connect time. Notewise cannot show it again — it lives in
+    /// Returned exactly once, at connect time. Notewise cannot show it again: it lives in
     /// the OS keychain, and a receiver that loses it must reconnect to get a new one.
     pub signing_secret: Option<String>,
 }
@@ -221,7 +221,7 @@ pub(crate) fn apply_connect(
     }
 
     // Reject ids this build has no connector for. Without this, POST /v1/connectors/jira
-    // succeeds, writes an account row, and then `build_registry` quietly skips it — the
+    // succeeds, writes an account row, and then `build_registry` quietly skips it: the
     // "half a connector that fails invisibly" failure this design exists to avoid, moved
     // from the registry to the API boundary.
     if !matches!(
@@ -239,7 +239,7 @@ pub(crate) fn apply_connect(
 
     // The Google bridge is a URL plus a key the user chose when they deployed the script. Without
     // the key `build_registry` skips it, so a connect that stored only the URL would report success
-    // and produce a connector that never appears — which is the failure this whole check exists to
+    // and produce a connector that never appears, which is the failure this whole check exists to
     // avoid, one field further in.
     if id == GoogleBridge::ID {
         if !request.target.starts_with("https://script.google.com/")
@@ -259,7 +259,7 @@ pub(crate) fn apply_connect(
             .filter(|key| !key.is_empty())
             .ok_or_else(|| {
                 ApiError::BadRequest(
-                    "the deployment key is required — it is the SHARED_KEY you set in the script"
+                    "the deployment key is required: it is the SHARED_KEY you set in the script"
                         .into(),
                 )
             })?;
@@ -271,7 +271,7 @@ pub(crate) fn apply_connect(
 
     // A folder that is not there is a typo, and one that appears later can be connected then. Checked
     // here because the alternative is a connector that reports connected and reads nothing, with the
-    // reason only in a log — `Documents::pull` reports it as transient, which is right for a drive
+    // reason only in a log: `Documents::pull` reports it as transient, which is right for a drive
     // that was unmounted and wrong as a first impression.
     if id == notewise_connectors::Documents::ID && !std::path::Path::new(&request.target).is_dir() {
         return Err(ApiError::BadRequest(format!(
@@ -282,7 +282,7 @@ pub(crate) fn apply_connect(
 
     // Microsoft's target is a client id, and the refresh token arrives from the sign-in flow rather
     // than from this call. Connecting without one leaves an account row with no credential, which
-    // `build_registry` skips — so it is refused here instead.
+    // `build_registry` skips, so it is refused here instead.
     if id == MicrosoftGraph::ID
         && credentials
             .get(MicrosoftGraph::ID, REFRESH_TOKEN_KEY)
@@ -290,12 +290,12 @@ pub(crate) fn apply_connect(
             .is_none()
     {
         return Err(ApiError::Conflict(
-            "sign in to Microsoft first — connecting only records which account to use".into(),
+            "sign in to Microsoft first: connecting only records which account to use".into(),
         ));
     }
 
     // Generate a signing secret only when there isn't one. `connect` is an upsert, so
-    // "change my webhook URL" is the same call as "connect my webhook" — rotating the key
+    // "change my webhook URL" is the same call as "connect my webhook": rotating the key
     // there would silently break every receiver still validating the old one, and since the
     // secret is shown exactly once, a user who changed the URL could not recover it.
     // Rotation should be an explicit act, not a side effect of editing a field.
@@ -346,7 +346,7 @@ pub(crate) fn apply_disconnect(
     // question is which one you want.
     //
     // Deleting the credential first leaves an account still marked Connected with no secret,
-    // which `build_registry` skips — so the connector goes silently dark while the UI still
+    // which `build_registry` skips, so the connector goes silently dark while the UI still
     // shows it connected. Deleting the row first leaves an orphaned keychain entry, which is
     // inert: nothing reads a credential except by way of an account row, and the next
     // `connect` overwrites it. `disconnect` on an absent account already succeeds, so
@@ -631,7 +631,7 @@ mod route_smoke {
     /// and this omits is a capability the engine has and the app cannot offer.
     ///
     /// Asserted against what the build can construct rather than a hardcoded list, because the
-    /// hardcoded version passed while three connectors were missing — Google, Microsoft, and the
+    /// hardcoded version passed while three connectors were missing: Google, Microsoft, and the
     /// watched folder were all buildable, none of them was here, and the calendar setup screen
     /// looked for "google" in a list that never contained it and rendered nothing.
     #[tokio::test]
@@ -821,7 +821,7 @@ mod setup_tests {
     }
 
     /// Connecting Microsoft without a token would leave an account row with no credential, which
-    /// `build_registry` skips — a connector that reports connected and does nothing.
+    /// `build_registry` skips, a connector that reports connected and does nothing.
     #[test]
     fn microsoft_cannot_be_connected_before_signing_in() {
         let db = Database::open_in_memory().expect("db");
@@ -969,8 +969,8 @@ mod setup_tests {
 
     /// An in-memory engine with nothing connected has nothing to sync, and that is the answer.
     ///
-    /// Syncing does need a workspace on disk — a second connection cannot be opened to an in-memory
-    /// database — but the check is where it bites, in `sync::on_a_worker`, and is tested there. This
+    /// Syncing does need a workspace on disk: a second connection cannot be opened to an in-memory
+    /// database, but the check is where it bites, in `sync::on_a_worker`, and is tested there. This
     /// asserts the ordering: a limitation that is not blocking anything is not reported as an error,
     /// which is the difference between "nothing to do" and "this build cannot".
     #[tokio::test]
@@ -1142,7 +1142,7 @@ pub struct SignInStarted {
 
 /// Begin a Microsoft sign-in.
 ///
-/// Opens a loopback listener, returns the consent URL, and completes in the background — the request
+/// Opens a loopback listener, returns the consent URL, and completes in the background: the request
 /// does not wait, because the thing being waited on is a person reading a permissions screen.
 ///
 /// # Why a client id is required
@@ -1324,7 +1324,7 @@ pub async fn sync_now(State(state): State<Arc<AppState>>) -> ApiResult<Json<Sync
 /// against it, rather than getting one that fails at the provider with a 403.
 ///
 /// Enqueue and drain in the same call, so an approval that can reach a mailbox reaches it now
-/// rather than on the next background pass — see [`crate::vault`] for the same reasoning at more
+/// rather than on the next background pass; see [`crate::vault`] for the same reasoning at more
 /// length, and [`crate::sync`] for the pass that catches whatever this misses.
 pub async fn enqueue_mail_draft(
     state: &Arc<AppState>,
@@ -1360,7 +1360,7 @@ pub async fn enqueue_mail_draft(
     })
     .to_string();
 
-    // Keyed on the draft, so approving twice cannot make two drafts in the mailbox — and the sink
+    // Keyed on the draft, so approving twice cannot make two drafts in the mailbox, and the sink
     // returns the existing artifact even if a row somehow reached it twice.
     let key = format!("{connector_id}:email_draft:{}", draft.id);
     let draft_id = draft.id;

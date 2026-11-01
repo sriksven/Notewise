@@ -2,7 +2,7 @@
 #
 # ScreenCaptureKit reaches `audio-capture` through bindings carrying a Swift shim, and Swift's
 # runtime (`libswift_Concurrency.dylib` and friends) resolves from the dyld shared cache via
-# `/usr/lib/swift` — nowhere the default search path looks.
+# `/usr/lib/swift`, nowhere the default search path looks.
 #
 # `audio-capture/build.rs` emits the same rpath, but a `cargo:rustc-link-arg` from a *library*
 # build script is not propagated to the final binary link. Only the crate being linked can

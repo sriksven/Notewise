@@ -46,7 +46,7 @@ const ICONS: Record<string, typeof Search> = {
  *
  * The step list is the point of this screen. An agent that hands back a paragraph asks to be
  * trusted; one that shows what it searched for and what it read can be checked. When it gets
- * something wrong — and a lexical search plus a local model will — the trace is what tells you
+ * something wrong (and a lexical search plus a local model will), the trace is what tells you
  * whether it looked in the wrong place or read the right thing and drew the wrong conclusion.
  *
  * What it can do to the workspace is exactly one thing: create a note. It cannot edit or
@@ -67,7 +67,7 @@ export function AgentView({ onNavigate }: Props) {
    *
    * The polling effect below claims the run "continues in the engine, and coming back re-reads it".
    * It did not: the id lived only in this component's state, so navigating away lost it and a run
-   * that was still working became invisible — still running, still writing a note, with nothing on
+   * that was still working became invisible: still running, still writing a note, with nothing on
    * screen to say so. `agentRuns` is what makes that comment true.
    *
    * An in-flight run is adopted rather than listed, because someone returning to this screen while
@@ -93,7 +93,7 @@ export function AgentView({ onNavigate }: Props) {
   }, []);
 
   // Poll while it works. Stops on the terminal status rather than running forever, and the
-  // interval is torn down if the user navigates away mid-run — the run itself continues in the
+  // interval is torn down if the user navigates away mid-run: the run itself continues in the
   // engine, and coming back re-reads it.
   useEffect(() => {
     if (!run || run.status !== "running") return;
@@ -153,7 +153,7 @@ export function AgentView({ onNavigate }: Props) {
         <h1 className="text-[14px] font-semibold text-ink">Agent</h1>
         <span className="flex-1 text-[12px] text-ink-faint">
           {running
-            ? `Working — step ${run.steps.length}`
+            ? `Working: step ${run.steps.length}`
             : run
               ? run.status === "failed"
                 ? "Failed"
@@ -200,7 +200,7 @@ export function AgentView({ onNavigate }: Props) {
               </div>
 
               {/* Earlier runs. Each one wrote a note, so this is also the only index of what the
-                  agent has produced — without it a finished run is unreachable the moment this
+                  agent has produced: without it a finished run is unreachable the moment this
                   screen is left. */}
               {recent.length > 0 && (
                 <div className="mt-8">
@@ -237,7 +237,7 @@ export function AgentView({ onNavigate }: Props) {
                             </span>
                             <span className="text-[11px] text-ink-faint">
                               {relativeTime(earlier.started_at)}
-                              {earlier.note_title && ` — ${earlier.note_title}`}
+                              {earlier.note_title && ` - ${earlier.note_title}`}
                             </span>
                           </span>
                         </button>
@@ -272,7 +272,7 @@ export function AgentView({ onNavigate }: Props) {
                             {label(step.action)}
                             {step.reason && (
                               <span className="font-normal text-ink-muted">
-                                {" — "}
+                                {" - "}
                                 {step.reason}
                               </span>
                             )}

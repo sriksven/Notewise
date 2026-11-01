@@ -1,7 +1,7 @@
 //! Markdown export.
 //!
 //! Lives in `storage` because it reads across every repository and nothing else would own it
-//! without a crate whose only job is string formatting. It writes no SQL of its own — it
+//! without a crate whose only job is string formatting. It writes no SQL of its own; it
 //! composes repository calls, so the rule that SQL stays in this crate is unaffected.
 //!
 //! Markdown specifically: it is the format that survives. A user who stops using Notewise
@@ -42,7 +42,7 @@ impl Default for ExportOptions {
 }
 
 impl ExportOptions {
-    /// Summary, decisions, and action items — no transcript.
+    /// Summary, decisions, and action items, no transcript.
     ///
     /// What someone actually pastes into a follow-up message.
     pub fn brief() -> Self {
@@ -141,7 +141,7 @@ pub fn meeting_to_markdown(
                     out.push_str(&format!("- {checkbox} {}", item.text.trim()));
 
                     if let Some(owner) = &item.owner {
-                        out.push_str(&format!(" — **{owner}**"));
+                        out.push_str(&format!(" - **{owner}**"));
                     }
                     if let Some(due) = item.due_at {
                         out.push_str(&format!(" (due {})", due.format("%Y-%m-%d")));
@@ -500,7 +500,7 @@ mod tests {
 /// Putting a draft in Gmail or Outlook needs an account connected, and most people trying Notewise
 /// for the first time have not connected one. They still have a mail client. An `.eml` file is what
 /// every one of them can open, and opening it puts the draft in front of the user with the recipients
-/// and subject already filled in — the same end state the connectors reach, by a route that needs no
+/// and subject already filled in: the same end state the connectors reach, by a route that needs no
 /// vendor, no token, and no review.
 ///
 /// # Why the envelope is all that is new
@@ -512,12 +512,12 @@ mod tests {
 /// # What is not attempted
 ///
 /// No MIME multipart, no attachments, no HTML alternative. The body is plain text, so it is declared
-/// as plain text — and a message that says `text/plain` and means it needs no boundary machinery.
+/// as plain text, and a message that says `text/plain` and means it needs no boundary machinery.
 pub fn draft_to_eml(draft: &crate::models::EmailDraft) -> String {
     let mut out = String::new();
 
     // Through `header_value` like the subject, and for the same reason: a recipient is free text
-    // from whoever filled the draft in, and one carrying a CRLF wrote its own headers — a hidden
+    // from whoever filled the draft in, and one carrying a CRLF wrote its own headers; a hidden
     // `Bcc:` in a message the user is about to send was one string away.
     let recipients: Vec<String> = draft
         .recipients
@@ -549,7 +549,7 @@ pub fn draft_to_eml(draft: &crate::models::EmailDraft) -> String {
 
 /// A header value with the characters that would end the header removed.
 ///
-/// A newline inside a subject is header injection — it would let a subject add its own headers, and
+/// A newline inside a subject is header injection; it would let a subject add its own headers, and
 /// the subject here is model-generated text. Folding it correctly would be the other answer;
 /// stripping is the one with no way to be subtly wrong.
 fn header_value(raw: &str) -> String {

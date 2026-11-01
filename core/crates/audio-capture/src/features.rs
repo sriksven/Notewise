@@ -1,7 +1,7 @@
 //! Mel filterbank features.
 //!
 //! Speech models do not take waveforms. Speaker-embedding networks and most ASR encoders take
-//! a **log-mel filterbank** — a time-frequency image on a perceptual frequency scale — and the
+//! a **log-mel filterbank** (a time-frequency image on a perceptual frequency scale) and the
 //! extraction has to match what the model was trained on almost exactly. A filterbank that is
 //! off by a window function or a normalisation step does not fail loudly; it produces
 //! plausible-looking features and quietly worse results, which is the hardest kind of bug to
@@ -13,7 +13,7 @@
 //! 1. DC offset removed per frame
 //! 2. Pre-emphasis, `x[n] - 0.97·x[n-1]`, applied per frame against the *original* previous
 //!    sample rather than the already-filtered one
-//! 3. Povey window — Hann raised to 0.85, Kaldi's default
+//! 3. Povey window: Hann raised to 0.85, Kaldi's default
 //! 4. Power spectrum from a real FFT, padded to the next power of two
 //! 5. Triangular mel filters, equally spaced on the mel scale
 //! 6. Natural log, floored to avoid `log(0)`
@@ -27,7 +27,7 @@ use rustfft::FftPlanner;
 /// Analysis window shape.
 ///
 /// Kaldi and NeMo disagree, and the models trained under each expect their own. The difference
-/// is a few percent per sample — invisible in a plot, and consistently wrong in the features.
+/// is a few percent per sample, invisible in a plot, and consistently wrong in the features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowType {
     /// Hann raised to 0.85. Kaldi's default; WeSpeaker and 3D-Speaker expect it.
@@ -65,7 +65,7 @@ pub struct FbankConfig {
     pub num_mel_bins: usize,
     pub low_freq_hz: f32,
     /// Upper edge. Negative means "Nyquist plus this", Kaldi's convention for trimming the
-    /// top band — `-400` at 16 kHz gives 7600 Hz.
+    /// top band: `-400` at 16 kHz gives 7600 Hz.
     pub high_freq_hz: f32,
     pub preemphasis: f32,
     pub window: WindowType,
@@ -79,7 +79,7 @@ pub struct FbankConfig {
     ///
     /// Kaldi computes filterbanks over **int16-scaled** audio (-32768..32767), not the
     /// -1.0..1.0 floats the rest of this codebase uses. Every model trained through Kaldi's
-    /// pipeline — WeSpeaker, 3D-Speaker, NeMo — therefore saw features about `2·ln(32768)`
+    /// pipeline (WeSpeaker, 3D-Speaker, NeMo) therefore saw features about `2·ln(32768)`
     /// ≈ 20.8 larger than the same audio produces here. Cepstral mean normalisation cancels a
     /// constant offset, which is why the mismatch hides when it is on and bites when it is off.
     pub input_scale: f32,
@@ -288,7 +288,7 @@ impl FbankExtractor {
 
 /// Centre each bin across time, optionally scaling it to unit variance.
 ///
-/// Removes the constant part of the channel — microphone response, room, gain — which is
+/// Removes the constant part of the channel (microphone response, room, gain), which is
 /// otherwise a strong, content-independent signal a model will happily latch onto.
 fn normalize_features(fbank: &mut Fbank, scale: bool) {
     if fbank.frames == 0 {
@@ -527,7 +527,7 @@ mod tests {
     }
 
     /// Louder audio must produce larger features. With a natural log, doubling amplitude adds
-    /// `2·ln(2) ≈ 1.386` to every bin — a base-10 log would add 0.602, and that constant factor
+    /// `2·ln(2) ≈ 1.386` to every bin; a base-10 log would add 0.602, and that constant factor
     /// is exactly the silent mismatch this test exists to catch.
     #[test]
     fn the_log_is_natural_not_base_ten() {
@@ -558,7 +558,7 @@ mod tests {
     }
 
     /// Povey is Hann^0.85, not Hamming. The shapes are close enough that a mismatch never
-    /// looks obviously wrong — only slightly worse.
+    /// looks obviously wrong, only slightly worse.
     #[test]
     fn the_window_is_povey_not_hamming() {
         let window = povey_window(400);
@@ -615,7 +615,7 @@ mod tests {
     }
 
     /// Filters must be ordered by frequency, or the feature vector is a permutation of what
-    /// the model expects — which produces output without producing an error.
+    /// the model expects, which produces output without producing an error.
     #[test]
     fn mel_filters_are_ordered_by_frequency() {
         let config = FbankConfig::default();

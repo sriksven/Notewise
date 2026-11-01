@@ -26,8 +26,8 @@ jobs:
       - name: Audit
         run: cargo audit --deny warnings
 
-      # The desktop app sits outside the workspace with a lockfile of its own, and that lockfile —
-      # not the one above — is what every installer is built from. Nothing audited it: the
+      # The desktop app sits outside the workspace with a lockfile of its own, and that lockfile,
+      # not the one above, is what every installer is built from. Nothing audited it: the
       # quinn-proto and rustls advisories that turned this job red on 2026-08-31 were in it too.
       #
       # The ignores are Tauri's to fix, not ours. glib (unsound) and proc-macro-error (unmaintained)

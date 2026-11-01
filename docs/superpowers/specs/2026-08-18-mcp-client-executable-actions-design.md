@@ -1,4 +1,4 @@
-# MCP client and executable action items — design
+# MCP client and executable action items - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -16,7 +16,7 @@ the auth regression" becomes a row, and a human still opens Linear.
 The asymmetry is stark in the current architecture: `mcp-server` lets *other* agents act on the
 Notewise workspace, with a considered write-access model. Notewise cannot act on anything else.
 It is a tool provider and not a tool consumer, which means every integration has to be built as a
-connector by us, one vendor at a time — the exact cost `cloud/integrations` is scoped to absorb
+connector by us, one vendor at a time, the exact cost `cloud/integrations` is scoped to absorb
 and the exact reason it is still a scaffold.
 
 An MCP client inverts that. Any tool the user already trusts becomes reachable, and the
@@ -30,7 +30,7 @@ check cannot drift from the dispatch table, and **nothing deletes** even when wr
 
 **`api-server/src/agent.rs`** deliberately has a narrow blast radius: search, read, and create
 one note. It cannot edit or delete anything existing, cannot touch tickets, and cannot reach a
-connector. Its module docs state the reasoning — "an agent that runs unattended is the last place
+connector. Its module docs state the reasoning: "an agent that runs unattended is the last place
 to widen a blast radius."
 
 **`AiBackend` has no tool-calling method,** and `agent.rs` explains why: adding one means
@@ -61,13 +61,13 @@ All three of those hold. This spec is designed inside them, not around them.
 
 ## Decisions
 
-### M1 — A new `core/crates/mcp-client` crate, not an addition to `mcp-server`
+### M1 - A new `core/crates/mcp-client` crate, not an addition to `mcp-server`
 
 `CLAUDE.md` rule 2: surfaces never depend on each other. `mcp-server` is a surface;
 `mcp-client` is a capability that `api-server` consumes. They must not import one another even
 though they speak the same wire protocol.
 
-That means the JSON-RPC framing is written twice — once in `mcp-server/src/protocol.rs` and once
+That means the JSON-RPC framing is written twice: once in `mcp-server/src/protocol.rs` and once
 here. That duplication is accepted rather than resolved by extracting a shared `mcp-protocol`
 crate, because doing so mid-spec would refactor a working surface to serve a new one. It is the
 obvious follow-up and is recorded as a risk, not hidden.
@@ -75,7 +75,7 @@ obvious follow-up and is recorded as a risk, not hidden.
 `mcp-client` depends on neither `storage` nor `graph`: it manages child processes and speaks a
 protocol. Persistence is the caller's business.
 
-### M2 — Every external tool call is confirmed by a human, every time
+### M2 - Every external tool call is confirmed by a human, every time
 
 There is no auto-execute, no "always allow this tool", and no batch execute.
 
@@ -88,38 +88,38 @@ gate moves from "which tools are safe" to "a person looked at this call."
 A remembered per-tool allow would collapse to auto-execute within a week of use, which is why it
 is absent rather than merely defaulted off.
 
-**Rejected — a trusted-tools allowlist that skips confirmation.** It is the obvious convenience
+**Rejected: a trusted-tools allowlist that skips confirmation.** It is the obvious convenience
 and it is exactly how an unattended agent ends up sending an email. The product has no send path
 anywhere by design; this must not become one by transitivity.
 
-### M3 — Proposals come through the text JSON protocol, not a new trait method
+### M3 - Proposals come through the text JSON protocol, not a new trait method
 
 `agent.rs`'s reasoning applies unchanged: `AiBackend::call_tool` would have to be implemented for
 five backends including local ones with unpredictable tool support, and the local path is the one
 the product's promise depends on.
 
 So a proposal is produced by asking the model for JSON describing one tool call, and parsing it
-the way `parse_action` already parses agent actions — tolerating prose and code fences, and
+the way `parse_action` already parses agent actions, tolerating prose and code fences, and
 feeding an unparseable response back as an observation rather than failing.
 
 This costs accuracy relative to native tool calling. It buys working identically on Ollama and
 Anthropic, which is the trade this codebase has already made once and should not un-make in a
 feature that touches external systems.
 
-### M4 — Arguments are validated against the discovered schema before a human sees them
+### M4 - Arguments are validated against the discovered schema before a human sees them
 
-MCP `tools/list` returns a JSON Schema per tool. A proposal is checked against it — required
-fields present, types correct, no unknown fields — before the confirmation UI renders.
+MCP `tools/list` returns a JSON Schema per tool. A proposal is checked against it (required
+fields present, types correct, no unknown fields) before the confirmation UI renders.
 
 A model-authored argument object shown to a user unvalidated invites the worst version of this
 feature: a plausible-looking confirmation dialog for a call that will fail, or worse, one whose
 extra field means something to the server. Validation failure sends the proposal back to the
 model as an observation, which is the same recovery path `parse_action` already uses.
 
-The confirmation UI shows the validated arguments verbatim — the "View Arguments" idea, which is
+The confirmation UI shows the validated arguments verbatim, the "View Arguments" idea, which is
 the one genuinely good trust affordance in AnythingLLM's version of this.
 
-### M5 — Servers and tools are default-denied, mirroring `WriteAccess`
+### M5 - Servers and tools are default-denied, mirroring `WriteAccess`
 
 A configured MCP server is not a usable one. Each server is explicitly enabled, and within it
 each tool is explicitly enabled. Nothing is reachable by having been added to a config file.
@@ -128,10 +128,10 @@ This is `WriteAccess`'s reasoning generalised: connecting a client should not gr
 a side effect. It also gives Spec 7's scheduled jobs the per-job tool subset they need, because
 the allowlist is already a first-class object rather than a global switch.
 
-Enabled tools are stored as data and checked at dispatch, so — as with `MUTATING_TOOLS` — adding
+Enabled tools are stored as data and checked at dispatch, so, as with `MUTATING_TOOLS`, adding
 a handler without listing it fails a test rather than silently widening access.
 
-### M6 — Servers start lazily and can be pinned off
+### M6 - Servers start lazily and can be pinned off
 
 Stdio servers are child processes. They start on first use, not at app launch, and a server may be
 configured `auto_start: false` so a resource-heavy one starts only when explicitly requested.
@@ -143,10 +143,10 @@ tools and nothing else.
 Both stdio and streamable HTTP transports are supported. Stdio is the common case for local tools;
 HTTP is what remote servers use.
 
-### M7 — Executions are persisted, unlike agent runs
+### M7 - Executions are persisted, unlike agent runs
 
 `agent.rs` keeps runs in memory and argues correctly that a trace is only interesting while it is
-happening, and that what matters — the note it wrote — survives already.
+happening, and that what matters, the note it wrote, survives already.
 
 That argument does not transfer. An external tool call's effect is *outside* Notewise: a ticket was
 filed, a message was posted. Losing the record on restart leaves the user unable to answer "did
@@ -157,7 +157,7 @@ So a `tool_executions` table records what was proposed, what was confirmed, what
 came back. This is the same reasoning that puts `connector_outbox` on disk while agent runs stay in
 memory: irreversible external effects get durable records.
 
-### M8 — `agent.rs` does not get external tools
+### M8 - `agent.rs` does not get external tools
 
 The autonomous agent's action set stays exactly as it is. External tools are reachable only from
 paths where a human is present to confirm.
@@ -235,7 +235,7 @@ CREATE TABLE tool_executions (
 
 Environment variables and headers for a server hold credentials and therefore go to
 `CredentialStore`, never into `mcp_servers`. The row holds a reference; the keychain holds the
-value — the same split Spec 2 applies to route keys.
+value, the same split Spec 2 applies to route keys.
 
 `action_item_id` is `ON DELETE SET NULL`: deleting an action item must not erase the record that
 something was executed in another system on its behalf.
@@ -291,14 +291,14 @@ In CI, with a stub MCP server implemented in-process:
 - Lazy start: no process until first use; `auto_start: false` requires explicit start.
 - Default deny: a configured-but-not-enabled server exposes nothing; an enabled server with no
   enabled tools exposes nothing.
-- A dispatch attempt on a non-enabled tool is refused — and a test that fails if a handler exists
+- A dispatch attempt on a non-enabled tool is refused, and a test that fails if a handler exists
   whose name is not in the enabled-tool check, mirroring the `MUTATING_TOOLS` drift test.
 - Proposal parsing: clean JSON, fenced JSON, JSON in prose, "none", garbage.
 - Schema validation: missing required field, wrong type, unknown field, valid.
 - State machine: proposed → confirmed → succeeded / failed; proposed → rejected sends nothing;
   no path from proposed to succeeded without confirmed.
 - Failure does not retry; timeout records unknown.
-- `agent.rs`'s action set is unchanged — a test asserting the agent cannot reach a tool dispatch.
+- `agent.rs`'s action set is unchanged: a test asserting the agent cannot reach a tool dispatch.
 
 Marked `#[ignore]` with a reason: anything requiring a real third-party MCP server.
 
@@ -306,7 +306,7 @@ Marked `#[ignore]` with a reason: anything requiring a real third-party MCP serv
 
 ## What this delivers
 
-1. `core/crates/mcp-client` — stdio and HTTP transports, lifecycle, discovery, schema validation.
+1. `core/crates/mcp-client`: stdio and HTTP transports, lifecycle, discovery, schema validation.
 2. Server and per-tool configuration, default denied, credentials in the keychain.
 3. Action items that carry a proposed tool call, with arguments shown verbatim before running.
 4. Durable `tool_executions` records, because the effects are outside Notewise.
@@ -319,7 +319,7 @@ Marked `#[ignore]` with a reason: anything requiring a real third-party MCP serv
   protocol crate is the right follow-up and is deliberately not in this spec.
 - **Confirmation fatigue is the real failure mode.** M2 forbids the remembered-allow that would
   fix it. If users find per-call confirmation intolerable, the answer is fewer and better
-  proposals, not a trust shortcut — and that tension is unresolved.
+  proposals, not a trust shortcut, and that tension is unresolved.
 - **Child process management** is where this will actually break: zombie processes, servers that
   hang on shutdown, stdio deadlocks on large payloads. It deserves more attention than the
   protocol work.

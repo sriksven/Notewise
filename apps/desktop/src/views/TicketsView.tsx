@@ -16,7 +16,7 @@ function advance(status: string): string {
 }
 
 /**
- * Native tickets — the work a meeting produced, tracked without an external tracker.
+ * Native tickets, the work a meeting produced, tracked without an external tracker.
  *
  * The roadmap's bet is that the free local product should be useful with nothing connected,
  * which means tickets have to live here before they can be pushed anywhere. Pushing to Linear
@@ -24,7 +24,7 @@ function advance(status: string): string {
  *
  * A board rather than a list because status is the thing a user scans for. Columns are driven
  * by `COLUMNS` rather than by whatever statuses happen to exist, so an empty column still
- * appears — "nothing in progress" is information, and a column that vanishes when it empties
+ * appears: "nothing in progress" is information, and a column that vanishes when it empties
  * makes the board jump around as work moves.
  */
 export function TicketsView() {
@@ -70,7 +70,7 @@ export function TicketsView() {
    *
    * Asks first, unlike removing an action item. A ticket is deliberately created work with a status
    * someone has been moving along, there is no trash to recover it from, and the card it lives on is
-   * a click target for advancing status — so a delete control beside that is one slip away from
+   * a click target for advancing status, so a delete control beside that is one slip away from
    * being pressed by mistake.
    */
   async function remove(ticket: Ticket) {

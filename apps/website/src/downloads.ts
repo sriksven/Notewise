@@ -2,12 +2,13 @@
  * The download cards, shared by the overview and the install page.
  *
  * macOS and Windows are resolved against the real release; Ubuntu says plainly that its build is
- * coming. Windows says so too until a release carries its installer — the card follows GitHub
+ * coming. Windows says so too until a release carries its installer: the card follows GitHub
  * rather than this file, so it changes when such a release is published, with no redeploy. Someone on Windows should learn what exists here, not by clicking a button that hands
  * them a disk image they cannot open.
  */
 
 import {
+  LATEST_BUILD_TAG,
   RELEASES_PAGE,
   findReleases,
   formatBytes,
@@ -104,13 +105,32 @@ function soonCard(os: Os, name: string, icon: string, files: string, current: Os
 const LINK = "text-ink-muted underline decoration-hairline underline-offset-2 hover:text-ink";
 
 /**
+ * Which release a card's files come from. The latest build is named by its date: its tag is the
+ * same for every build, and a visitor can tell from a date whether it is the one they already have.
+ */
+function provenance(release: MacRelease | WindowsRelease): string {
+  const published = release.published ? new Date(release.published) : null;
+  const date =
+    published && !Number.isNaN(published.getTime())
+      ? published.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : null;
+  const link = (text: string) =>
+    `<a class="${LINK}" href="${release.page}" target="_blank" rel="noreferrer noopener">${text}</a>`;
+
+  if (release.tag === LATEST_BUILD_TAG && date) {
+    return `Latest build, ${link(date)} · straight from GitHub Releases.`;
+  }
+  const kind = release.prerelease ? "Release candidate" : "Latest release";
+  return `${kind} ${link(release.tag)} · straight from GitHub Releases.`;
+}
+
+/**
  * The Windows card's contents once a release carries the installer.
  *
  * Contents rather than the whole card: the card already on the page has been given its tilt and
- * its reveal, and a replacement would arrive with neither — invisible, since reveal starts hidden.
+ * its reveal, and a replacement would arrive with neither: invisible, since reveal starts hidden.
  */
 function windowsContents(release: WindowsRelease): string {
-  const kind = release.prerelease ? "Release candidate" : "Latest release";
   return `
       <div class="dl-sheen" aria-hidden="true"></div>
       <div class="flex items-center justify-between gap-3">
@@ -134,7 +154,7 @@ function windowsContents(release: WindowsRelease): string {
       </p>
 
       <p class="mt-3 border-t border-hairline pt-3 text-[12px] leading-relaxed text-ink-faint">
-        ${kind} <a class="${LINK}" href="${release.page}" target="_blank" rel="noreferrer noopener">${release.tag}</a> · straight from GitHub Releases.
+        ${provenance(release)}
       </p>
       <p class="mt-2 text-[12px] leading-relaxed text-ink-faint">
         Not signed yet, so Windows warns on the first run: choose <span class="text-ink-muted">More info</span>, then <span class="text-ink-muted">Run anyway</span>.
@@ -274,8 +294,7 @@ export function mountDownloads(
       // A remembered format the release does not have falls back to the dmg, which every Mac
       // release carries.
       if (!release.assets[format]) format = release.assets.dmg ? "dmg" : (Object.keys(release.assets)[0] as MacFormat);
-      const kind = release.prerelease ? "Release candidate" : "Latest release";
-      status.innerHTML = `${kind} <a class="${LINK}" href="${release.page}" target="_blank" rel="noreferrer noopener">${release.tag}</a> · straight from GitHub Releases.`;
+      status.innerHTML = provenance(release);
       paint();
       return;
     }

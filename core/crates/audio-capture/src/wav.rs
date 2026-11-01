@@ -4,7 +4,7 @@
 //!
 //! A RIFF header states the size of the file and of its data chunk, and neither is known while a
 //! meeting is still being recorded. Buffering until it is would mean holding the whole recording in
-//! memory — an hour of 16 kHz mono float is over two hundred megabytes — so the header is written
+//! memory (an hour of 16 kHz mono float is over two hundred megabytes) so the header is written
 //! with zeroed sizes, samples are appended as they arrive, and the two length fields are patched
 //! once on [`WavWriter::finish`].
 //!
@@ -13,7 +13,7 @@
 //! A crash before `finish` leaves a file whose header claims zero samples. That is a deliberate
 //! choice between two bad options: the alternative is rewriting the header on every frame, which is
 //! a seek and a write per frame for the whole meeting. A zero-length recording is recognisably
-//! broken, which is better than a plausible file of the wrong length — and the transcript, which is
+//! broken, which is better than a plausible file of the wrong length, and the transcript, which is
 //! what the product is actually for, was written to the database as it went.
 //!
 //! The samples are all there on disk regardless, so a file like this is recoverable by patching two
@@ -163,7 +163,7 @@ fn write_header(out: &mut impl Write, format: AudioFormat, data_len: u32) -> Res
 
     header.extend(b"fmt ");
     header.extend(16u32.to_le_bytes());
-    // 3 is IEEE float, matching what `decode_wav` reads and what the pipeline works in natively —
+    // 3 is IEEE float, matching what `decode_wav` reads and what the pipeline works in natively:
     // there is no conversion here, so nothing to lose.
     header.extend(3u16.to_le_bytes());
     header.extend(channels.to_le_bytes());

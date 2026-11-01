@@ -11,7 +11,7 @@
 //!
 //! `kAXValueAttribute` and friends are `CFStringRef` constants exported by the framework, and their
 //! values are exactly the strings written here. Linking the constants would mean six more extern
-//! declarations for no additional safety — the string is the contract either way, and a typo fails
+//! declarations for no additional safety: the string is the contract either way, and a typo fails
 //! the same way in both versions.
 
 use super::cf;
@@ -21,11 +21,11 @@ type AXError = i32;
 
 /// `kAXErrorSuccess`.
 const SUCCESS: AXError = 0;
-/// `kAXErrorAPIDisabled` — the Accessibility grant is missing.
+/// `kAXErrorAPIDisabled`: the Accessibility grant is missing.
 const API_DISABLED: AXError = -25211;
-/// `kAXErrorNoValue` — the attribute exists and holds nothing. Not a failure.
+/// `kAXErrorNoValue`: the attribute exists and holds nothing. Not a failure.
 const NO_VALUE: AXError = -25212;
-/// `kAXErrorAttributeUnsupported` — this element has no such attribute.
+/// `kAXErrorAttributeUnsupported`: this element has no such attribute.
 const ATTRIBUTE_UNSUPPORTED: AXError = -25205;
 
 pub const FOCUSED_ELEMENT: &str = "AXFocusedUIElement";
@@ -132,7 +132,7 @@ impl Element {
         cf::to_string(value.as_ptr()).ok_or(AxFailure::Absent)
     }
 
-    /// An attribute that is itself an element — focus, the frontmost app, the focused window.
+    /// An attribute that is itself an element: focus, the frontmost app, the focused window.
     pub fn element_attribute(&self, attribute: &str) -> Result<Element, AxFailure> {
         Ok(Element(self.copy_attribute(attribute)?))
     }
@@ -140,7 +140,7 @@ impl Element {
     /// Whether an attribute can be written.
     ///
     /// Asked before writing rather than after failing, because a failed write into the wrong place
-    /// is not always visible — and this is the check that decides which insertion tier runs.
+    /// is not always visible, and this is the check that decides which insertion tier runs.
     pub fn is_settable(&self, attribute: &str) -> bool {
         let Some(name) = cf::cfstring(attribute) else {
             return false;
@@ -161,8 +161,8 @@ impl Element {
         let name = cf::cfstring(attribute).ok_or(AxFailure::Absent)?;
         let text = cf::cfstring(value).ok_or(AxFailure::Absent)?;
 
-        // SAFETY: both arguments are borrowed for the duration of the call — the setter copies what
-        // it needs — and both are released when the locals drop.
+        // SAFETY: both arguments are borrowed for the duration of the call: the setter copies what
+        // it needs, and both are released when the locals drop.
         let status =
             unsafe { AXUIElementSetAttributeValue(self.0.as_ptr(), name.as_ptr(), text.as_ptr()) };
 
@@ -197,7 +197,7 @@ mod tests {
         assert!(!AxFailure::Absent.to_string().contains("Accessibility"));
     }
 
-    /// The root element is available without any grant — it is reading *through* it that is gated.
+    /// The root element is available without any grant: it is reading *through* it that is gated.
     /// So this runs, and proves the framework is linked and the call convention is right.
     #[test]
     fn the_system_wide_element_can_be_created() {
@@ -208,7 +208,7 @@ mod tests {
     ///
     /// Deliberately not asserting *which* failure. macOS answers this with at least three
     /// different codes depending on the version and on whether assistive access is on for anything
-    /// else on the machine — `kAXErrorAPIDisabled` when it is off globally, `kAXErrorCannotComplete`
+    /// else on the machine: `kAXErrorAPIDisabled` when it is off globally, `kAXErrorCannotComplete`
     /// when the frontmost app will not answer us. Pinning one of them would make this test a
     /// report on the machine it ran on. What matters, and what is checked, is that the call comes
     /// back at all: this is the path every development build takes.

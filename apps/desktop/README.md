@@ -1,7 +1,7 @@
 # Desktop app
 
 > **Status: implemented.** The React frontend runs against the engine's loopback REST API, and
-> the Tauri shell in `src-tauri/` starts the engine and shows that UI in a window — see the root
+> the Tauri shell in `src-tauri/` starts the engine and shows that UI in a window. See the root
 > README for running and installing it. macOS system audio needs the Screen & System Audio
 > Recording permission and has not yet been run end to end in a release build.
 
@@ -63,7 +63,7 @@ WebSocket is not worth the protocol for a same-machine request.
 
 ## Design decisions in the new views
 
-**The questions panel never interrupts.** No toast, no sound, no focus steal — a panel a user
+**The questions panel never interrupts.** No toast, no sound, no focus steal: a panel a user
 can ignore is one they leave open. Only the two highest-cost ambiguity kinds get colour; if
 everything is highlighted, nothing is.
 
@@ -77,7 +77,7 @@ The conversation resets when the meeting changes, so answers are never grounded 
 material.
 
 **History is a list, not a month grid.** There is no calendar integration yet, so there is
-nothing in the future to show — a grid of empty squares would imply scheduling this cannot do.
+nothing in the future to show: a grid of empty squares would imply scheduling this cannot do.
 
 **About states the gaps.** A user who finds out system audio does not work by recording a call
 and getting half a transcript is worse off than one who was told up front.

@@ -1,4 +1,4 @@
-# Summary templates, transcript editing, and meeting titles — design
+# Summary templates, transcript editing, and meeting titles - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -21,7 +21,7 @@ permanent in the search index too. `d63ce93 feat(transcription): the models that
 transcript` improved the input; nothing lets a human fix the output.
 
 **Rename a meeting.** `Meeting.title` is set at `create` and never again. There is no
-`set_title`, and nothing generates a title from content — so a recording started from a hotkey
+`set_title`, and nothing generates a title from content, so a recording started from a hotkey
 is titled whatever the caller guessed before the meeting happened.
 
 ## Goals
@@ -34,7 +34,7 @@ is titled whatever the caller guessed before the meeting happened.
 
 ## Non-goals
 
-- **Click-to-seek from a transcript segment.** See D3.4 — this needs audio retention, which is
+- **Click-to-seek from a transcript segment.** See D3.4. This needs audio retention, which is
   a privacy decision, not a UI feature. Separate spec.
 - **Real-time transcription.** The pipeline question is separate from the editing question.
 - **Editing segment timings or splitting/merging segments.** Text only.
@@ -45,7 +45,7 @@ is titled whatever the caller guessed before the meeting happened.
 
 ## Decisions
 
-### D3.1 — Summaries stay append-only; regenerate creates a new row
+### D3.1 - Summaries stay append-only; regenerate creates a new row
 
 `SummaryRepository` already has `create`, `list_for_meeting`, `latest_for_meeting`, and
 `delete`, with no `update`. Regenerating therefore means creating another summary and letting
@@ -59,7 +59,7 @@ can still see it.
 `delete` remains available for pruning. The UI shows the latest and offers previous versions
 rather than presenting a list nobody asked for.
 
-### D3.2 — Templates are rows; the template that ran is recorded on the summary
+### D3.2 - Templates are rows; the template that ran is recorded on the summary
 
 Two additions:
 
@@ -92,10 +92,10 @@ Three built-ins seeded by the migration, matching the shapes that actually diffe
 v11; if Spec 3 is implemented first it takes v11 and Spec 1 takes v12. Nothing here depends on
 Spec 1.
 
-### D3.3 — Editing a segment invalidates its embedding, and the FTS index takes care of itself
+### D3.3 - Editing a segment invalidates its embedding, and the FTS index takes care of itself
 
 The v9 migration added `segments_au AFTER UPDATE ON transcript_segments`, so an `UPDATE` to
-`text` re-indexes FTS automatically. Transcript editing needs no trigger work — this was already
+`text` re-indexes FTS automatically. Transcript editing needs no trigger work; this was already
 solved, for the speaker column, and it generalises.
 
 The semantic index does not take care of itself. `indexing.rs` decides staleness by comparing an
@@ -105,23 +105,23 @@ find the text the user just corrected.
 
 Rather than add a column and teach the indexing pass a fourth staleness rule,
 `set_segment_text` calls `EmbeddingRepository::delete_for_entity("transcript_segment", id)` in
-the same transaction. A missing vector is already a state the indexing pass handles — it is what
-a never-indexed entity looks like — so the next pass rebuilds it and nothing new has to be
+the same transaction. A missing vector is already a state the indexing pass handles; it is what
+a never-indexed entity looks like, so the next pass rebuilds it and nothing new has to be
 understood.
 
-**Rejected — adding `updated_at` to `transcript_segments`.** It is the more general fix and
+**Rejected: adding `updated_at` to `transcript_segments`.** It is the more general fix and
 would be right if segments were edited often. They are not, the column would be written on every
 one of thousands of inserts per meeting to serve a rare update, and the delete-and-rebuild path
 reuses machinery that already exists and is already tested.
 
-### D3.4 — Click-to-seek is excluded, because audio is not retained
+### D3.4 - Click-to-seek is excluded, because audio is not retained
 
 There is no `audio_path` on `Meeting`, no audio column in any table, and nothing in `recorder`
 writes a file: capture streams to transcription and the samples are gone. Jumping from a
 transcript line to the moment it was said has nothing to jump into.
 
 Making it work means keeping raw meeting audio on disk, which is a decision about a recording of
-other people's voices — the same class of decision the `people` table's `voice_print` columns are
+other people's voices, the same class of decision the `people` table's `voice_print` columns are
 already gated on, with an explicit note that populating them waits for a consent and
 encryption-at-rest decision. Retention length, encryption, and what happens on trash and on
 export all have to be answered together.
@@ -129,14 +129,14 @@ export all have to be answered together.
 That is a spec, not a checkbox, and bundling it here would smuggle a privacy decision in behind
 a convenience feature.
 
-### D3.5 — Title generation is an `ai-router` module, not a prompt in `api-server`
+### D3.5 - Title generation is an `ai-router` module, not a prompt in `api-server`
 
-`ai-router` already holds `email.rs` and `clarify.rs` — prompt-and-orchestration modules that
+`ai-router` already holds `email.rs` and `clarify.rs`: prompt-and-orchestration modules that
 own a task's wording and its failure modes. A new `title.rs` follows them.
 
 Putting the prompt in `api-server` would work, and would put the first model prompt outside the
 crate whose entire purpose is to be the only place model interaction lives. The rule in
-`CLAUDE.md` is about provider SDKs, so this would not break it — it would just start the drift
+`CLAUDE.md` is about provider SDKs, so this would not break it; it would just start the drift
 it exists to prevent.
 
 Titles are generated from the first few minutes of transcript rather than the whole thing:
@@ -144,16 +144,16 @@ a title is established early, and sending ninety minutes to name a meeting is th
 Spec 2's routing exists to eliminate. This call is `TaskKind::Chat`-shaped and lands on the cheap
 route.
 
-Generation is explicit — a button, and optionally an automatic pass when a recording ends and
+Generation is explicit: a button, and optionally an automatic pass when a recording ends and
 its title is still the placeholder the caller supplied. Never overwrites a title a human typed.
 
-### D3.6 — Diarization tiers name what exists rather than adding modes
+### D3.6 - Diarization tiers name what exists rather than adding modes
 
 The engine already supports no diarization, diarization, and diarization plus acoustic
 separation (`500df1a`, off by default). Three behaviours with no user-facing names.
 
-This spec names them **Off**, **Basic**, and **Full**, and surfaces the cost of each — Full's
-extra processing time and its preference for a GPU — at the point of choosing. No new
+This spec names them **Off**, **Basic**, and **Full**, and surfaces the cost of each (Full's
+extra processing time and its preference for a GPU) at the point of choosing. No new
 diarization capability, one new setting and the honest labelling of an existing trade-off.
 
 The default stays where it is. A tier list is not an invitation to change a default that was
@@ -274,7 +274,7 @@ All in CI, no model and no hardware:
 - **Prompt injection through templates** is a smaller version of the problem `email.rs`
   documents. A user-authored template is trusted input in a way a transcript is not, but a
   template that says "ignore the transcript and write a resignation letter" will do that. Local,
-  user-authored, single-user — acceptable, worth stating.
+  user-authored, single-user: acceptable, worth stating.
 - **Version history has no pruning policy.** Someone who regenerates fifty times keeps fifty
   summaries. `delete` exists; nothing calls it automatically.
 - **Title generation on the cheap route** may produce weak titles precisely because it is routed

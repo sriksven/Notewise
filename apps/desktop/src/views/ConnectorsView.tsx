@@ -68,7 +68,7 @@ export function ConnectorsView() {
         <div className="mx-auto max-w-2xl">
           <p className="mb-5 text-[12.5px] leading-relaxed text-ink-muted">
             Everything below ships inside this build. There is nothing to install and no
-            catalogue to browse — a connector this binary has no code for would appear to
+            catalogue to browse: a connector this binary has no code for would appear to
             connect and then deliver nothing.
           </p>
 
@@ -102,7 +102,7 @@ export function ConnectorsView() {
             onChanged={load}
           />
 
-          {/* Above failed deliveries, because a divergence is not a failure — it is the vault
+          {/* Above failed deliveries, because a divergence is not a failure: it is the vault
               keeping its promise, and it needs an answer rather than a retry. */}
           <div className="mt-7">
             <VaultDivergences />
@@ -124,7 +124,7 @@ export function ConnectorsView() {
                     </p>
                     <p className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">
                       {failure.attempts} attempt{failure.attempts === 1 ? "" : "s"}
-                      {failure.last_error && ` — ${failure.last_error}`}
+                      {failure.last_error && `: ${failure.last_error}`}
                     </p>
                   </li>
                 ))}
@@ -150,7 +150,7 @@ function ConnectorCard({
   /**
    * The webhook's signing secret, shown exactly once.
    *
-   * The engine cannot show it again — it lives in the keychain — so this is the only moment
+   * The engine cannot show it again: it lives in the keychain, so this is the only moment
    * it can be copied. Saying so is the difference between a user copying it and a user
    * reconnecting later to find out why their receiver rejects everything.
    */
@@ -265,7 +265,7 @@ function ConnectorCard({
       {secret && (
         <div className="border-t border-warn-line bg-warn px-4 py-2.5">
           <p className="text-[11.5px] font-medium text-warn-text">
-            Signing secret — copy it now, it cannot be shown again
+            Signing secret: copy it now; it cannot be shown again
           </p>
           <div className="mt-1 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded bg-surface px-2 py-1 font-mono text-[11.5px] text-ink">

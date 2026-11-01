@@ -16,7 +16,7 @@ interface Props {
   onSummarize: () => void;
   /// Reload the summary without producing another one.
   ///
-  /// Deliberately separate from `onSummarize`, which *runs* a default summarisation — passing that
+  /// Deliberately separate from `onSummarize`, which *runs* a default summarisation: passing that
   /// as a completion callback would fire a second, default-prompt summary straight after a
   /// templated one, and the default would win as the newest row.
   onReload: () => void;
@@ -26,7 +26,7 @@ interface Props {
  * The summary as a document.
  *
  * The narrative only. Decisions and action items live in the intelligence panel, which is on
- * screen beside this — listing them here too put the same three decisions in front of the user
+ * screen beside this: listing them here too put the same three decisions in front of the user
  * three times at once, since the model's own prose already enumerates them.
  *
  * Presentational. The summary is loaded once for the window and handed down, so this view and
@@ -115,7 +115,7 @@ export function SummaryView({
           onDone={onReload}
         />
 
-        {/* Below the summary, because the engine drafts from the summary — offering it above would
+        {/* Below the summary, because the engine drafts from the summary: offering it above would
             invite drafting from a transcript, which costs more tokens and reads worse. */}
         <FollowUpDrafts meetingId={meetingId} hasSource={summary !== null} />
       </div>

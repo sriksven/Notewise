@@ -21,7 +21,7 @@ import { RelatedItems } from "./RelatedItems";
 import { MeetingBrief } from "./MeetingBrief";
 
 interface Props {
-  /** Null when no meeting is selected — the panel says so rather than showing an empty shell. */
+  /** Null when no meeting is selected: the panel says so rather than showing an empty shell. */
   meetingId: string | null;
   /**
    * The latest summary, read only to label the button.
@@ -34,8 +34,8 @@ interface Props {
   /**
    * Why there is nothing to show, from the engine.
    *
-   * The suggester is gated — it needs a couple of hundred characters of recent transcript
-   * and holds a ninety-second cooldown — and an empty panel that does not say so is
+   * The suggester is gated, it needs a couple of hundred characters of recent transcript
+   * and holds a ninety-second cooldown, and an empty panel that does not say so is
    * indistinguishable from a broken one.
    */
   questionsReason?: string | null;
@@ -45,7 +45,7 @@ interface Props {
   summarizing: boolean;
   /** Bumped after a summary run, so newly extracted decisions and action items appear. */
   summaryOutputToken: number;
-  /** Jump to another meeting — the previous instance of a recurring series. */
+  /** Jump to another meeting, the previous instance of a recurring series. */
   onOpenMeeting: (id: string) => void;
   /** Anywhere else: a participant's page, reached from the roster above. */
   onNavigate: (route: Route) => void;
@@ -55,7 +55,7 @@ interface Props {
 }
 
 /**
- * Labels chosen to read as a reason, not a taxonomy — the user sees "no owner", not
+ * Labels chosen to read as a reason, not a taxonomy: the user sees "no owner", not
  * "unassigned_action". The enum exists so this panel can group and filter; the words here
  * exist so someone glancing mid-meeting understands instantly.
  */
@@ -73,7 +73,7 @@ const LABEL: Record<AmbiguityKind, string> = {
  * The highest-cost kinds get colour; the rest stay grey.
  *
  * If everything is highlighted nothing is, and a panel that looks urgent constantly gets
- * closed — which is the failure mode this whole feature has to avoid.
+ * closed, which is the failure mode this whole feature has to avoid.
  */
 const TONE: Partial<Record<AmbiguityKind, string>> = {
   contradiction: "bg-danger text-danger-text border-danger-line",
@@ -95,7 +95,7 @@ export function questionKey(question: ClarifyingQuestion): string {
  * The questions still worth showing: newest first, none stale, at most {@link MAX_SHOWN}.
  *
  * The window appends every question it receives and keeps them until the recording ends, so
- * without this an hour-long meeting grew one long list, oldest at the top — the question about
+ * without this an hour-long meeting grew one long list, oldest at the top: the question about
  * what was just said sat below the fold, under ones about things said half an hour ago. The engine
  * defines a cap and a staleness for exactly this and nothing on the live path applied them.
  *
@@ -171,7 +171,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  * The point of the whole app in one column: questions worth asking while there is still time to
  * ask them, and the decisions and commitments that came out. These used to live on a separate
  * screen reached from the navigation rail, which meant nobody saw a decision until they went
- * looking for it — and never during the meeting, when it could still be corrected.
+ * looking for it, and never during the meeting, when it could still be corrected.
  *
  * Nothing here interrupts. No toast, no sound, no focus steal. A panel a user can ignore is one
  * they will leave open; anything that demands attention gets closed in the first meeting and
@@ -218,8 +218,10 @@ export function IntelPanel({
           Select a meeting, or start recording, and what it means shows up here.
         </p>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {/* First, because who was there is context for every other section — a decision means
+        // The tail clears the record dock and the Ask beside it, which float across this panel
+        // once the window is narrow, so the last section can always be scrolled out from under them.
+        <div className="min-h-0 flex-1 overflow-y-auto pb-24">
+          {/* First, because who was there is context for every other section: a decision means
               something different depending on who was in the room to make it. */}
           <Section icon={<Users size={13} aria-hidden />} title="Who was there">
             <Participants meetingId={meetingId} onNavigate={onNavigate} />
@@ -290,9 +292,9 @@ export function IntelPanel({
             <Decisions meetingId={meetingId} refreshToken={summaryOutputToken} />
           </Section>
 
-          {/* Not driven by `summary`. Action items outlive the summary that proposed them —
+          {/* Not driven by `summary`. Action items outlive the summary that proposed them:
               a user can add one by hand before summarizing, and regenerating a summary no
-              longer takes the old ones with it — so this reads the meeting, not the summary. */}
+              longer takes the old ones with it, so this reads the meeting, not the summary. */}
           {/* Above the meeting's own output on purpose: what was already owed is context for
               what is being decided now, and a brief read after the fact is just a report. */}
           <Section icon={<Repeat size={13} aria-hidden />} title="Carried over">
@@ -318,7 +320,7 @@ export function IntelPanel({
               disabled={summarizing || !hasTranscript || isRecording}
               title={
                 isRecording
-                  ? "Stop recording first — a summary of half a meeting goes stale immediately"
+                  ? "Stop recording first: a summary of half a meeting goes stale immediately"
                   : hasTranscript
                     ? "Runs on the configured backend"
                     : "Needs a transcript first"

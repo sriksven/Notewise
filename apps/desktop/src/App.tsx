@@ -68,7 +68,7 @@ function meetingsStillOpen(meetings: Meeting[]): string | null {
  *
  * A sidebar and one destination at a time. On a meeting, that destination is itself four
  * columns: which meeting (library), the meeting (workspace), and what it means (intelligence).
- * The last of those is the point — decisions, commitments and the questions still worth asking
+ * The last of those is the point: decisions, commitments and the questions still worth asking
  * sit beside the transcript as it arrives, rather than behind a screen nobody visits until the
  * meeting is over.
  */
@@ -110,8 +110,8 @@ export default function App() {
    * The meeting the engine is actually capturing audio into.
    *
    * Only ever set from `health.recording_meeting_id`. Deliberately not inferred from a meeting
-   * with no `ended_at`: an engine that cannot record still has open meetings — one created
-   * through the API, or one a crash left dangling — and calling those "recording" put a red
+   * with no `ended_at`: an engine that cannot record still has open meetings, one created
+   * through the API, or one a crash left dangling, and calling those "recording" put a red
    * indicator on screen claiming a microphone was live on a build with no capture compiled in.
    */
   const [recordingId, setRecordingId] = useState<string | null>(null);
@@ -119,7 +119,7 @@ export default function App() {
    * A meeting that has not been ended, on an engine that cannot record.
    *
    * Distinct from the above and never shown as capture. It exists so such a meeting can still
-   * be closed — it is a meeting in progress, not a recording in progress.
+   * be closed; it is a meeting in progress, not a recording in progress.
    */
   const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -142,10 +142,10 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const isRecording = recordingId !== null;
-  /** The meeting the record button acts on — capturing, or merely still open. */
+  /** The meeting the record button acts on: capturing, or merely still open. */
   const activeMeetingId = recordingId ?? openMeetingId;
   /**
-   * The open meeting when the newest-fifty list does not hold it — fetched by id.
+   * The open meeting when the newest-fifty list does not hold it, fetched by id.
    *
    * Without it, a meeting opened from a person, a search hit or a citation that was older than the
    * list showed "No meeting selected" over its own transcript, with no title, rename or delete.
@@ -170,8 +170,8 @@ export default function App() {
       // reloaded while a meeting is still running.
       //
       // `recording_meeting_id` is the only thing that means "a microphone is open". A meeting
-      // with no `ended_at` means something weaker — created through the API, or left dangling
-      // by a crash — and is tracked separately so it can be closed without the UI announcing a
+      // with no `ended_at` means something weaker, created through the API, or left dangling
+      // by a crash, and is tracked separately so it can be closed without the UI announcing a
       // recording that is not happening.
       const live = nextHealth.recording_meeting_id;
       const open = live ?? meetingsStillOpen(nextMeetings);
@@ -187,7 +187,7 @@ export default function App() {
       }
 
       // Deliberately no redirect to the live meeting. That used to fire whenever the app was
-      // on home, which meant home could not be visited during a recording — and it read the
+      // on home, which meant home could not be visited during a recording, and it read the
       // route from a stale closure to decide. The sidebar carries a permanent "go live"
       // control instead, which is a way back rather than a hijack.
 
@@ -213,8 +213,8 @@ export default function App() {
   // Resolve a meeting the list does not hold, and leave an address that names one that is gone.
   //
   // `replace`, not `navigate`, which is what the router keeps it for: pressing Back after deleting
-  // a meeting landed on its page — "No meeting selected" over the trashed meeting's transcript,
-  // with live controls that edited it — and a link to a meeting that never existed showed the same
+  // a meeting landed on its page, "No meeting selected" over the trashed meeting's transcript,
+  // with live controls that edited it, and a link to a meeting that never existed showed the same
   // controls under a "not found" banner.
   const listedId = listed?.id ?? null;
   useEffect(() => {
@@ -249,7 +249,7 @@ export default function App() {
   }, [selectedId, listedId, replace, report]);
 
   // Drain the notification queue for as long as the app is open. The engine has queued desktop
-  // notifications since the comms layer landed and nothing has ever shown one — it cannot, having
+  // notifications since the comms layer landed and nothing has ever shown one: it cannot, having
   // no way to raise an OS notification. See `lib/notifications`.
   useEffect(() => startNotificationDelivery(), []);
 
@@ -264,7 +264,7 @@ export default function App() {
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
 
-  // A deferred section's address — an old bookmark, a link kept in a note — lands on Home rather
+  // A deferred section's address, an old bookmark, a link kept in a note, lands on Home rather
   // than on an empty page. See `lib/scope`.
   useEffect(() => {
     if (!offered(route.name)) replace({ name: "home" });
@@ -272,7 +272,7 @@ export default function App() {
 
   // Load the open transcript, polling while that meeting records.
   //
-  // The record page has no meeting in the address bar but does want the live one — that is the
+  // The record page has no meeting in the address bar but does want the live one: that is the
   // whole point of the screen, watching words arrive. So the id being read is the selected
   // meeting, falling back to whatever is recording while that page is showing.
   const transcriptId = selectedId ?? (route.name === "record" ? activeMeetingId : null);
@@ -287,7 +287,7 @@ export default function App() {
     let cancelled = false;
     const load = async () => {
       try {
-        // Together, so the names in the transcript and the list behind them cannot disagree —
+        // Together, so the names in the transcript and the list behind them cannot disagree:
         // a rename popover offering to merge into a speaker who is no longer there would be
         // the visible form of that drift.
         const [next, roster] = await Promise.all([
@@ -306,7 +306,7 @@ export default function App() {
     };
 
     void load();
-    // Polled only while this meeting records — but cancelled either way. Returning nothing for a
+    // Polled only while this meeting records, but cancelled either way. Returning nothing for a
     // meeting that is not recording left its request free to land after the next meeting's, and
     // put one meeting's transcript under another's title.
     const id = transcriptId === recordingId ? setInterval(load, 1000) : null;
@@ -317,7 +317,7 @@ export default function App() {
   }, [transcriptId, recordingId, report]);
 
   /**
-   * Put a name to a voice — or fold two of them together.
+   * Put a name to a voice, or fold two of them together.
    *
    * Rethrows rather than reporting, because the popover keeps the typed name on screen and can
    * say what went wrong in place. Sending a failure to the global error banner would clear the
@@ -333,7 +333,7 @@ export default function App() {
 
       setNotice(
         result.merged
-          ? `Merged into ${to} — ${result.segments_changed} line(s) reattributed.`
+          ? `Merged into ${to}: ${result.segments_changed} line(s) reattributed.`
           : `Renamed to ${to} across ${result.segments_changed} line(s).`,
       );
     },
@@ -342,8 +342,8 @@ export default function App() {
 
   // Ask for clarifying questions while recording.
   //
-  // Polled rather than pushed, and the engine gates on its own cooldown — given back the session
-  // it returned last time — so an over-eager interval here cannot become an over-eager panel.
+  // Polled rather than pushed, and the engine gates on its own cooldown (given back the session
+  // it returned last time), so an over-eager interval here cannot become an over-eager panel.
   // Failures are swallowed: a suggestion that did not arrive is not worth an error banner during
   // someone's meeting.
   useEffect(() => {
@@ -369,7 +369,7 @@ export default function App() {
           return [...current, ...result.questions.filter((q) => !seen.has(q.question))];
         });
       } catch (e) {
-        // Not an error banner over someone's meeting — but the panel should say something
+        // Not an error banner over someone's meeting, but the panel should say something
         // rather than sit blank as though nothing were wrong.
         if (!cancelled) {
           setQuestionsReason(
@@ -395,7 +395,7 @@ export default function App() {
    * and lets the CLI see the same state.
    *
    * When the engine reports it cannot record, this falls back to creating a meeting with no
-   * audio — still useful for pasted or imported transcripts — and says so, rather than
+   * audio, still useful for pasted or imported transcripts, and says so, rather than
    * pretending the microphone is live.
    */
   const toggleRecording = async () => {
@@ -407,7 +407,7 @@ export default function App() {
         if (recordingId && health?.can_record) {
           const stopped = await api.stopRecording();
           setNotice(
-            `Recording stopped — ${stopped.segments} segment(s)` +
+            `Recording stopped: ${stopped.segments} segment(s)` +
               (stopped.speakers > 0 ? `, ${stopped.speakers} speaker(s).` : "."),
           );
         } else {
@@ -446,7 +446,7 @@ export default function App() {
           );
         } else {
           const meeting = await api.createMeeting(title);
-          // Open, not recording — this engine has no capture to start.
+          // Open, not recording: this engine has no capture to start.
           setOpenMeetingId(meeting.id);
           select(meeting.id);
           setStartedAt(new Date(meeting.started_at).getTime());
@@ -469,7 +469,7 @@ export default function App() {
   /// Correct a mis-transcribed line, and reflect it without refetching the whole transcript.
   ///
   /// The engine drops the segment's stale embedding in the same transaction, so the next indexing
-  /// pass rebuilds it — nothing here has to know that.
+  /// pass rebuilds it; nothing here has to know that.
   const correctSegment = async (segmentId: string, text: string) => {
     await api.setSegmentText(segmentId, text);
     setSegments((current) =>
@@ -495,7 +495,7 @@ export default function App() {
       await summaryState.reload();
       setSummaryOutputToken((n) => n + 1);
       setNotice(
-        `Summarized with ${result.model} — ${result.decisions} decision(s), ` +
+        `Summarized with ${result.model}: ${result.decisions} decision(s), ` +
           `${result.action_items} action item(s).`,
       );
     } catch (e) {
@@ -516,7 +516,7 @@ export default function App() {
    *
    * A hidden `<input type="file">` driven by the menu item, because a browser picker is the only
    * one available without a native dialog and the IPC that comes with it. It hands over bytes and
-   * never a path, so the file is uploaded — over loopback, which is a local copy.
+   * never a path, so the file is uploaded (over loopback, which is a local copy).
    *
    * This replaced a `window.prompt` asking for an absolute path typed from memory.
    */
@@ -533,14 +533,14 @@ export default function App() {
     setBusy(true);
     setError(null);
     setNotice(
-      `Transcribing ${file.name} — this runs at about 25x realtime, so a one-hour recording ` +
+      `Transcribing ${file.name}: this runs at about 25x realtime, so a one-hour recording ` +
         `takes a couple of minutes.`,
     );
     try {
       const result = await api.importUpload(file, language ?? undefined);
       select(result.meeting_id);
       setNotice(
-        `Imported ${Math.round(result.audio_ms / 1000)}s of audio — ` +
+        `Imported ${Math.round(result.audio_ms / 1000)}s of audio: ` +
           `${result.segments} segment(s), ${result.speakers} speaker(s).`,
       );
       await refresh();
@@ -582,7 +582,7 @@ export default function App() {
    *
    * Three outcomes, all worth saying out loud. `written` names the file, because a mirror whose
    * destination is invisible is indistinguishable from one that did nothing. `diverged` means the
-   * file was edited outside Notewise and has deliberately not been overwritten — that needs a
+   * file was edited outside Notewise and has deliberately not been overwritten: that needs a
    * decision, which lives under Connectors. `unavailable` means no vault is connected, and the
    * engine's own message says so better than a generic failure would.
    */
@@ -642,7 +642,7 @@ export default function App() {
      * `toggleRecording` closes over health, the active meeting and the chosen device, and is
      * rebuilt every render. Capturing it in a `useCallback` would freeze whichever version
      * existed when the dependencies last changed, and the shortcut would then act on state
-     * that had since moved — the same stale-closure fault that made the app redirect away
+     * that had since moved, the same stale-closure fault that made the app redirect away
      * from home based on a route it had read minutes earlier.
      */
     onToggleRecording: useCallback(() => {
@@ -654,8 +654,8 @@ export default function App() {
   const inWorkspace = route.name === "meeting";
 
   // Where the floating Ask is offered: everywhere except screens that already ask, or that keep
-  // their own text box along the bottom edge where the button would sit on it — Notes (a note has
-  // its own Ask), the Ask page itself, the Agent, and a meeting's Ask and Notes tabs. The same rule
+  // their own text box along the bottom edge where the button would sit on it: Notes (it floats
+  // its own, which asks the open note), the Ask page itself, the Agent, and a meeting's Ask and Notes tabs. The same rule
   // the record dock follows, for the same reason.
   const askHere =
     route.name !== "notes" &&
@@ -667,6 +667,21 @@ export default function App() {
   useEffect(() => {
     if (!askHere) setAskOpen(false);
   }, [askHere]);
+
+  /** The floating Ask's button. Where it sits depends on whether the record dock is showing. */
+  const askLauncher = (
+    <button
+      type="button"
+      onClick={() => setAskOpen(true)}
+      aria-label="Ask about everything you have"
+      title="Ask: answered from your own meetings and notes"
+      className="flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-2 text-[12.5px]
+                 font-medium text-accent-on shadow-dock transition hover:bg-accent-hover"
+    >
+      <Search size={13} aria-hidden />
+      Ask
+    </button>
+  );
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -795,7 +810,7 @@ export default function App() {
             )}
 
             {/* A meeting the extension or the calendar noticed. Above everything, because it is
-                time-limited in a way nothing else on screen is — and it renders nothing at all when
+                time-limited in a way nothing else on screen is, and it renders nothing at all when
                 there is no offer, which is almost always. */}
             <JoinPrompt
               canRecord={health?.can_record ?? false}
@@ -883,20 +898,10 @@ export default function App() {
             {route.name === "about" && <AboutView health={health} />}
 
             {/* Bottom right of the screen being read, not of the window: with a side panel open it
-                stays beside the content instead of sitting on the panel. */}
-            {askHere && !askOpen && (
-              <button
-                type="button"
-                onClick={() => setAskOpen(true)}
-                aria-label="Ask about everything you have"
-                title="Ask — answered from your own meetings and notes"
-                className="absolute bottom-6 right-6 z-10 flex items-center gap-1.5 rounded-full bg-accent
-                           px-3.5 py-2 text-[12.5px] font-medium text-accent-on shadow-dock transition
-                           hover:bg-accent-hover"
-              >
-                <Search size={13} aria-hidden />
-                Ask
-              </button>
+                stays beside the content instead of sitting on the panel. A meeting has the record
+                dock along the bottom, so there it rides in the dock's row instead. */}
+            {askHere && !askOpen && !inWorkspace && (
+              <div className="absolute bottom-6 right-6 z-10">{askLauncher}</div>
             )}
           </main>
 
@@ -940,6 +945,7 @@ export default function App() {
               onExport={exportMeeting}
               onMirror={() => void mirrorMeeting()}
               canExport={selectedId !== null}
+              beside={askHere && !askOpen ? askLauncher : undefined}
             />
           )}
         </div>

@@ -1,7 +1,7 @@
 //! MCP server exposing the Notewise workspace to agents.
 //!
 //! Speaks JSON-RPC 2.0 over stdio, the transport MCP clients (Claude Code, Cursor, and
-//! others) launch a server with. Every tool is **read-only** — see [`tools`] for why.
+//! others) launch a server with. Every tool is **read-only**; see [`tools`] for why.
 //!
 //! # Example
 //!
@@ -69,7 +69,7 @@ impl McpServer {
     /// Handle one line of JSON-RPC input.
     ///
     /// Returns `None` for notifications, which take no reply. A parse failure produces a
-    /// well-formed error response rather than propagating — a malformed line from a client
+    /// well-formed error response rather than propagating; a malformed line from a client
     /// must not take the server down mid-session.
     pub fn handle_line(&self, line: &str) -> Option<String> {
         let value: Value = match serde_json::from_str(line) {

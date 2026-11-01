@@ -18,8 +18,8 @@ pub fn duration(ms: Option<i64>) -> String {
 /// Render an action item with its owner, when one is known.
 pub fn action_item(text: &str, owner: Option<&str>) -> String {
     match owner {
-        Some(owner) => format!("{text} — {owner}"),
-        None => format!("{text} — unassigned"),
+        Some(owner) => format!("{text} - {owner}"),
+        None => format!("{text} - unassigned"),
     }
 }
 
@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn unowned_action_items_are_marked_rather_than_left_blank() {
-        assert_eq!(action_item("Write docs", None), "Write docs — unassigned");
-        assert_eq!(action_item("Write docs", Some("alex")), "Write docs — alex");
+        assert_eq!(action_item("Write docs", None), "Write docs - unassigned");
+        assert_eq!(action_item("Write docs", Some("alex")), "Write docs - alex");
     }
 }

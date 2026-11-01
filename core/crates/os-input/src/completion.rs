@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// What a keystroke monitor has seen.
 ///
 /// Timing and a count, and deliberately nothing else. There is no field here that could hold a key,
-/// which is the whole argument for a feature that asks for Input Monitoring at all — see
+/// which is the whole argument for a feature that asks for Input Monitoring at all: see
 /// `native::keystrokes`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypingActivity {
@@ -93,7 +93,7 @@ impl Decision {
 /// Whether to ask for a continuation.
 ///
 /// Ordered so the cheapest and most common refusals come first, and so a caller reading the answer
-/// gets the *reason* rather than a boolean — "why is nothing being suggested" is the question this
+/// gets the *reason* rather than a boolean: "why is nothing being suggested" is the question this
 /// feature generates most.
 pub fn decide(
     policy: &CompletionPolicy,
@@ -140,7 +140,7 @@ pub fn decide(
 ///
 /// A continuation of "…lower than" is "expected", and inserting that verbatim gives "thanexpected".
 /// Whether a space belongs in front depends on what the text ends with and what the continuation
-/// starts with, and the only place that can be decided correctly is here — a caller holding a
+/// starts with, and the only place that can be decided correctly is here: a caller holding a
 /// string with an ambiguous leading space has already lost the information.
 pub fn continuation_of(text: &str, reply: &str) -> Option<String> {
     let body = strip_wrapping(reply);
@@ -210,7 +210,7 @@ fn echoed_prefix(text: &str, reply: &str) -> usize {
     let text = text.trim_end();
     let floor = text.len().saturating_sub(MAX_OVERLAP);
 
-    // `char_indices` ascends, and a later index is a shorter suffix — so the first match found is
+    // `char_indices` ascends, and a later index is a shorter suffix, so the first match found is
     // the longest one.
     for (index, _) in text.char_indices() {
         if index < floor {

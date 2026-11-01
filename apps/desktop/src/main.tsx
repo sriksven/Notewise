@@ -8,7 +8,7 @@ import "./index.css";
 
 // The assistant overlay is a second window pointed at the same frontend, so the choice is made
 // here rather than inside `App`. Two reasons: a floating panel with a sidebar in it is not a
-// floating panel, and the setup wizard must not appear in it — somebody who pressed the assistant
+// floating panel, and the setup wizard must not appear in it: somebody who pressed the assistant
 // hotkey asked a question, not to configure a model.
 const overlay = parseRoute(window.location.hash).name === "overlay";
 

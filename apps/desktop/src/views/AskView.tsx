@@ -23,7 +23,7 @@ interface Props {
  * say so in words.
  *
  * The same conversation also opens as a panel from any screen (`AskPanel`) and as a note's own Ask
- * (`NoteChat`). All three are one implementation — `lib/ask` and `AskThread` — so they behave the
+ * (`NoteChat`). All three are one implementation, `lib/ask` and `AskThread`, so they behave the
  * same and differ only in reach.
  *
  * # Citations are the whole point

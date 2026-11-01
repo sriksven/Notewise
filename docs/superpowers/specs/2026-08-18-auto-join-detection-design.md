@@ -1,4 +1,4 @@
-# Auto-join detection — design
+# Auto-join detection - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -9,7 +9,7 @@
 ## Why this exists
 
 Every other feature in this product is downstream of someone remembering to press record. That
-is the single largest source of lost value in the whole system, and it is not a feature gap —
+is the single largest source of lost value in the whole system, and it is not a feature gap;
 it is a human one, which is why it has to be solved by the software noticing instead.
 
 The cost of missing is total. A meeting that was not recorded has no transcript, no summary, no
@@ -22,7 +22,7 @@ Almost everything needed is already built, which is why this spec is small.
 
 **The browser extension already knows.** Its content scripts run on `meet.google.com`,
 `*.zoom.us/wc/*`, `teams.microsoft.com`, and `teams.live.com`, and it already posts to the local
-`api-server` — it currently sends speaker identity. A "meeting page became active" message is a
+`api-server`; it currently sends speaker identity. A "meeting page became active" message is a
 new message type on a channel that exists, is tested, and needs no new permission from anyone.
 
 **The calendar will know** once Spec 1 lands: an event with a `join_url` whose `starts_at` is
@@ -54,7 +54,7 @@ delivered one. This is its first consumer.
 
 ## Decisions
 
-### D5.1 — Detection is a trait with several sources, fused by one state machine
+### D5.1 - Detection is a trait with several sources, fused by one state machine
 
 ```rust
 pub struct JoinSignal {
@@ -77,15 +77,15 @@ producers.
 
 This mirrors what `clarify.rs` already does for live suggestions, and for the same reason stated
 there: "almost all of the difficulty is in *when* to speak rather than *what* to say." That
-module's structure — a pure session object holding cooldown, staleness, and dedup, separate from
-the thing that produces candidates — is the pattern this follows, because it was the right answer
+module's structure (a pure session object holding cooldown, staleness, and dedup, separate from
+the thing that produces candidates) is the pattern this follows, because it was the right answer
 to the same problem.
 
-### D5.2 — No native detection in the first cut
+### D5.2 - No native detection in the first cut
 
 A native detector would catch the desktop Zoom and Teams clients, which the extension cannot see.
-The permissionless way to do it is audio-session inspection — on macOS, whether an input device is
-running somewhere; on Windows, enumerating audio sessions — neither of which needs a TCC grant or
+The permissionless way to do it is audio-session inspection: on macOS, whether an input device is
+running somewhere; on Windows, enumerating audio sessions, neither of which needs a TCC grant or
 Accessibility.
 
 It is still excluded here, for three reasons. It requires `unsafe` FFI and therefore a new
@@ -98,44 +98,44 @@ anything on the user's calendar regardless of client. That is most meetings, for
 no native code. `JoinDetector` is where the native source slots in once the fusion logic has been
 proven against real use.
 
-**Rejected — leading with the native detector.** It is the most general signal and the most
+**Rejected: leading with the native detector.** It is the most general signal and the most
 expensive one, and building it first would mean the debounce rules are first exercised by the
 noisiest source with no way to test them.
 
-### D5.3 — Notify and offer; never record unprompted
+### D5.3 - Notify and offer; never record unprompted
 
 Detection starts nothing. It creates a `Notification` on `NotificationChannel::Desktop`; the
 desktop shell delivers it; clicking it starts recording.
 
 Recording unprompted would mean this product silently captures audio of other people because it
 guessed a meeting began. A false positive would be a recording nobody knew about, which is a
-different category of failure from a missed meeting — one is lost value, the other is a breach of
+different category of failure from a missed meeting; one is lost value, the other is a breach of
 the thing the product is selling. The asymmetry decides it.
 
 The prompt also carries the calendar title and attendees when Spec 1 has them, so the recording
 starts already labelled rather than as "Meeting 2026-08-18".
 
-### D5.4 — One notification per meeting occurrence, enforced by a dedup key
+### D5.4 - One notification per meeting occurrence, enforced by a dedup key
 
 A `dedup_key` is derived from the strongest available identity: the calendar event's external id,
 else the normalized meeting URL, else `platform + a coarse time bucket`. A notification is
 suppressed if one with the same key was created within the session window.
 
 Repeats are the failure that kills this feature fastest. A user who gets three notifications for
-one standup turns it off, and it never gets turned back on — the same reasoning `clarify.rs`
+one standup turns it off, and it never gets turned back on; the same reasoning `clarify.rs`
 gives for deduplicating on normalized text.
 
 Rejoining after a genuine drop is the cost: within the window it is silent. That is the right
 side to err on.
 
-### D5.5 — A weak signal alone waits; two weak signals or one strong signal fire
+### D5.5 - A weak signal alone waits; two weak signals or one strong signal fire
 
 | Signals | Action |
 |---|---|
 | Calendar event now, nothing else | Wait out a short grace period, then notify (Weak) |
 | Extension reports an active meeting page | Notify (Strong) |
 | Calendar event **and** extension | Notify immediately, with full calendar context |
-| Extension page open, no audio, no calendar | Notify — a meeting page is deliberate |
+| Extension page open, no audio, no calendar | Notify - a meeting page is deliberate |
 | Calendar event that was declined | Never notify |
 
 The grace period on a calendar-only signal exists because calendars are full of meetings nobody
@@ -143,15 +143,15 @@ attends. Waiting a couple of minutes and then asking converts "your calendar say
 "something appears to be happening."
 
 Declined events are excluded using the `response_status` Spec 1 stores on
-`calendar_attendees` — notifying about a meeting the user explicitly declined is the most
+`calendar_attendees`: notifying about a meeting the user explicitly declined is the most
 annoying possible false positive.
 
-### D5.6 — Delivery is the desktop shell's job; the engine only enqueues
+### D5.6 - Delivery is the desktop shell's job; the engine only enqueues
 
 `api-server` writes the `Notification` row. The Tauri shell polls `pending_on(Desktop)`, delivers
 via the OS notification API, and calls `mark_delivered`.
 
-The engine must not depend on a GUI toolkit — `apps/desktop/src-tauri` is excluded from the
+The engine must not depend on a GUI toolkit; `apps/desktop/src-tauri` is excluded from the
 workspace on purpose so engine CI never pulls a webview. Enqueue-and-drain keeps that boundary
 intact and matches how `connector_outbox` already separates deciding from delivering.
 
@@ -250,7 +250,7 @@ extension's DOM selectors, which its README already documents as untestable.
 
 ## What this delivers
 
-1. `JoinTracker` — signal fusion with dedup, grace, and cooldown, fully unit-tested.
+1. `JoinTracker`: signal fusion with dedup, grace, and cooldown, fully unit-tested.
 2. A join-signal route and the extension change that feeds it, on an existing channel.
 3. Calendar-driven detection using Spec 1's `event_at`, with declined events excluded.
 4. The first actual delivery of `NotificationChannel::Desktop`.

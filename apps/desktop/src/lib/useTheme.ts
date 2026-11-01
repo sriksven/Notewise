@@ -7,7 +7,7 @@ import { applyTheme, DEFAULT_THEME, type Mode, type Theme } from "./theme";
  * The theme, applied immediately and remembered by the engine.
  *
  * Not `localStorage`. The desktop shell binds port 0, so the window's origin changes on every
- * launch and anything kept per-origin is gone by the next one — a theme that resets each time
+ * launch and anything kept per-origin is gone by the next one: a theme that resets each time
  * the app opens is not a theme. The engine keeps it beside the other preferences.
  *
  * Applied optimistically: the paint happens on click, and the write follows. A theme that waited

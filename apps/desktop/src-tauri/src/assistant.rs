@@ -4,7 +4,7 @@
 //!
 //! A global hotkey needs two things the engine does not have: the main thread, and a run loop to
 //! dispatch on. Carbon delivers a hot-key event to the application event target, which is serviced
-//! by whatever is running the main thread — and in this app that is Tauri. An engine started on a
+//! by whatever is running the main thread, and in this app that is Tauri. An engine started on a
 //! worker thread could register a hotkey successfully and never hear it pressed.
 //!
 //! So the shell owns the key and the engine owns the work, which is the same division as recording:
@@ -14,8 +14,8 @@
 //!
 //! [`notewise_os_input::native::Registration`] is deliberately not `Send`, because unregistering has
 //! to happen on the thread that registered. It lives for the process, so it is leaked on purpose
-//! rather than moved somewhere it cannot go. The alternative — keeping it in a main-thread-only
-//! store — would be ceremony around a value nothing will ever drop early.
+//! rather than moved somewhere it cannot go. The alternative (keeping it in a main-thread-only
+//! store) would be ceremony around a value nothing will ever drop early.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -59,7 +59,7 @@ pub fn install(app: &AppHandle, engine: SocketAddr, hotkeys: &[(String, String)]
         }
     }
 
-    // The receiver is `Send`, so the work happens off the main thread — a dictation that takes
+    // The receiver is `Send`, so the work happens off the main thread: a dictation that takes
     // several seconds to transcribe must not freeze the window. Showing the panel is the exception:
     // window work has to be back on the main thread, which `run_on_main_thread` does.
     let app = app.clone();
@@ -93,14 +93,14 @@ pub fn install(app: &AppHandle, engine: SocketAddr, hotkeys: &[(String, String)]
 /// Nothing else could. The panel has no title bar (`decorations(false)`) and floats above every
 /// other window, and the page inside it cannot close it: it is an external URL with no Tauri IPC, and
 /// on macOS the webview ignores `window.close()`. Pressing the key again only brought it forward, so
-/// once opened it stayed over everything until the user found Close Window in a menu or quit — and
+/// once opened it stayed over everything until the user found Close Window in a menu or quit, and
 /// a comment here said Escape closed it, which nothing implemented.
 ///
 /// Closed rather than hidden: a hidden panel would come back showing the selection it read the last
 /// time, and the page reads its context only when it loads.
 ///
 /// Must run on the main thread. Window creation on macOS is main-thread-only, and Tauri will panic
-/// rather than misbehave — which is the right trade but not one to discover at runtime.
+/// rather than misbehave, which is the right trade but not one to discover at runtime.
 fn toggle_overlay(app: &AppHandle, engine: SocketAddr) {
     const LABEL: &str = "assistant";
 
@@ -153,7 +153,7 @@ fn toggle_overlay(app: &AppHandle, engine: SocketAddr) {
 ///
 /// The flag is this thread's own idea of the state rather than a question asked of the engine. That
 /// is a deliberate trade: a status round trip on every press would double the latency of the thing
-/// a user notices most, and the two can only disagree if something else drove dictation — in which
+/// a user notices most, and the two can only disagree if something else drove dictation, in which
 /// case the recovery is one more press.
 fn toggle(engine: SocketAddr, listening: &AtomicBool) {
     let was_listening = listening.load(Ordering::Relaxed);
@@ -185,7 +185,7 @@ fn toggle(engine: SocketAddr, listening: &AtomicBool) {
 /// One HTTP request to the local engine.
 ///
 /// Hand-rolled rather than pulling an HTTP client into the shell. It is one loopback request with no
-/// body, no redirects, and no TLS, and only the status line is read — a client library here would be
+/// body, no redirects, and no TLS, and only the status line is read: a client library here would be
 /// a megabyte of dependency for a string.
 fn request(engine: SocketAddr, method: &str, path: &str) -> std::io::Result<u16> {
     let mut stream = TcpStream::connect_timeout(&engine, Duration::from_secs(2))?;
