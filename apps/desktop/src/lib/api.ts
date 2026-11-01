@@ -106,8 +106,8 @@ export interface GroundedAnswer {
   /**
    * Whether there was any material behind the answer at all.
    *
-   * False only when nothing was found, which is worth telling the user about, since retrieval
-   * is by word and a rewording may find it.
+   * False when nothing was found, or when the model read what was found and said it does not
+   * cover the question. Either way `text` is a refusal and there are no citations.
    */
   grounded: boolean;
   /**

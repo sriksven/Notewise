@@ -72,7 +72,7 @@ live: models
 
 Settings, then Models, chooses the AI that writes summaries, answers questions and suggests questions during a meeting. Click a backend to switch; it takes effect straight away, with no restart.
 
-- A drive icon means it runs on this machine (Ollama, LM Studio, Unsloth). A cloud icon means transcripts are sent to that provider (Anthropic, Google Gemini, Groq, OpenRouter). The bar above the list names the current model and says which.
+- A drive icon means it runs on this machine (Ollama, LM Studio, Unsloth). A cloud icon means transcripts are sent to that provider (Anthropic, Google Gemini, Groq, OpenRouter). Claude is Anthropic's: choose Anthropic to use Claude. The bar above the list names the current model and says which.
 - While Ollama or LM Studio is active, the models it has installed are listed under it. Click one to use exactly that model.
 - needs key means you must paste an API key first. needs URL (the OpenAI-compatible endpoint) means this window cannot supply the address, so it cannot be chosen here.
 
@@ -80,9 +80,9 @@ The model pill in the top bar offers the same switch from any page.
 
 ## Settings: API keys
 page: settings/models
-keywords: api key, key, keys, token, tokens, secret, keychain, paste, anthropic, gemini, groq, openrouter, console, password, remove
+keywords: api key, key, keys, token, tokens, secret, keychain, paste, anthropic, claude, gemini, groq, openrouter, console, password, remove
 
-Hosted providers (Anthropic, Google Gemini, Groq and OpenRouter) need an API key. In Settings, then Models, each one has a row under it: paste your key and press Save & use. Saving also switches Notewise to that provider.
+Hosted providers (Anthropic, Google Gemini, Groq and OpenRouter) need an API key. Claude is Anthropic's, so a Claude API key is an Anthropic key and goes in the Anthropic row. In Settings, then Models, each one has a row under it: paste your key and press Save & use. Saving also switches Notewise to that provider.
 
 The key goes to your operating system's keychain. It is never kept in the database or written to a log, and it is never shown again, so the row can only say that a key is saved. Remove deletes it. Keys come from the provider: console.anthropic.com, aistudio.google.com, console.groq.com or openrouter.ai/keys.
 

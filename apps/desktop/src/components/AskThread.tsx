@@ -156,8 +156,9 @@ export function AskThread({
                   Reading what you have
                 </p>
               ) : !turn.answer.grounded ? (
-                /* A refusal is the engine's own words, not an answer: nothing was found to give a
-                   model, so no model was asked. It used to arrive twice, a warning saying nothing
+                /* A refusal, not an answer: either nothing was found to give a model and the
+                   engine says so in its own words, or the model read what was found and said it
+                   does not cover the question. It used to arrive twice, a warning saying nothing
                    matched above a reply saying nothing matched, with a model named under both
                    that had not run. One message, marked as a refusal so it never reads like an
                    answer with its sources missing. */
