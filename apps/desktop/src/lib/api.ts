@@ -660,6 +660,18 @@ export interface ToolProposalResult {
 }
 
 /** One OS permission the assistant needs, and what to do about it. */
+/** A System Settings pane the engine can open. See `openSystemSettings`. */
+export type SystemSettingsPane =
+  | "privacy"
+  | "microphone"
+  | "screen_recording"
+  | "accessibility"
+  | "input_monitoring";
+
+/** Where to send someone when the engine could not open System Settings for them. */
+export const SETTINGS_BY_HAND =
+  "Couldn't open System Settings. Open it from the Apple menu, then Privacy & Security.";
+
 export interface AssistantPermission {
   capability: "microphone" | "accessibility" | "screen_recording" | "input_monitoring";
   /** Spelled the way System Settings spells it, so the row is findable. */
@@ -1318,6 +1330,16 @@ export const api = {
     request<EmailDraft>(`/v1/emails/${id}/approve`, { method: "POST" }),
 
   discardEmailDraft: (id: string) => request<void>(`/v1/emails/${id}`, { method: "DELETE" }),
+
+  /**
+   * Open a System Settings pane, by name.
+   *
+   * Through the engine, because the web view this interface runs in ignores an
+   * `x-apple.systempreferences:` link: every "Open settings" button that set `location.href` to
+   * one did nothing at all.
+   */
+  openSystemSettings: (pane: SystemSettingsPane) =>
+    request<void>(`/v1/system-settings/${pane}`, { method: "POST" }),
 
   /**
    * Where to download a draft as a file any mail client can open.

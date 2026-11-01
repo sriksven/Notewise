@@ -11,7 +11,14 @@ import {
   Volume2,
 } from "lucide-react";
 
-import { api, ApiError, type BackendInfo, type ModelInfo, type SetupReadiness } from "../lib/api";
+import {
+  api,
+  ApiError,
+  SETTINGS_BY_HAND,
+  type BackendInfo,
+  type ModelInfo,
+  type SetupReadiness,
+} from "../lib/api";
 import { backendBlocker } from "../lib/backends";
 import { size } from "../lib/format";
 import { useModelDownload } from "../lib/useModelDownload";
@@ -30,9 +37,6 @@ import type { Route } from "../lib/router";
 import { SearchIndexSettings } from "./SearchIndexSettings";
 import { SpeakerSeparationSettings } from "./SpeakerSeparationSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
-
-/** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
-const PRIVACY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security";
 
 type PermissionKind = "microphone" | "system_audio";
 
@@ -163,6 +167,24 @@ export function SettingsView({
     }
   };
 
+  // The engine opens the pane: this page runs in a web view, which ignores the
+  // `x-apple.systempreferences:` link these buttons used to set as `location.href`.
+  const openSettings = (pane: "microphone" | "screen_recording") => {
+    setError(null);
+    api.openSystemSettings(pane).catch(() => setError(SETTINGS_BY_HAND));
+  };
+
+  // Permissions are read again when the window comes back — the person has just been in System
+  // Settings — so a grant shows here without leaving the page. Only the setup answer: the rest of
+  // the page does not change by visiting another app.
+  useEffect(() => {
+    const again = () => {
+      api.setup().then(setReadiness).catch(() => undefined);
+    };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, []);
+
   const permissions = readiness?.steps.permissions;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -287,9 +309,7 @@ export function SettingsView({
                     readiness={permissions.microphone}
                     busy={askingFor === "microphone"}
                     onEnable={() => void requestPermission("microphone")}
-                    onOpenSettings={() => {
-                      window.location.href = PRIVACY_SETTINGS;
-                    }}
+                    onOpenSettings={() => openSettings("microphone")}
                   />
                   <PermissionRow
                     icon={Volume2}
@@ -298,9 +318,7 @@ export function SettingsView({
                     readiness={permissions.system_audio}
                     busy={askingFor === "system_audio"}
                     onEnable={() => void requestPermission("system_audio")}
-                    onOpenSettings={() => {
-                      window.location.href = PRIVACY_SETTINGS;
-                    }}
+                    onOpenSettings={() => openSettings("screen_recording")}
                   />
                 </div>
               </section>
