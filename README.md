@@ -85,8 +85,9 @@ its specific state. Directories that are scaffolds say so at the top.
 
 ## Install
 
-Each tagged version attaches installers to
-[GitHub Releases](https://github.com/sriksven/Notewise/releases).
+Every push to `main` rebuilds the app on GitHub Actions and replaces the **latest build** on
+[GitHub Releases](https://github.com/sriksven/Notewise/releases), which is what the website's
+download buttons offer. A `v*` tag publishes a named version there too.
 
 | Platform | File | First launch |
 |---|---|---|

@@ -279,6 +279,7 @@ function WhatsNew() {
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
         "External tools run only when you confirm that specific call.",
         "Keeping the audio after transcription is off until you turn it on, under Settings.",
+        "The download on the website is always the newest build: every change is built for macOS and Windows and published there.",
         "On macOS, system audio (the other side of a call) needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
       ],
     },
