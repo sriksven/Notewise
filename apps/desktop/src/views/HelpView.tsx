@@ -140,8 +140,10 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         </p>
         <p>
           Models are downloaded in{" "}
-          <Link onClick={() => onNavigate({ name: "settings" })}>Settings</Link> and stored
-          beside the database.
+          <Link onClick={() => onNavigate({ name: "settings", section: "transcription" })}>
+            Settings
+          </Link>{" "}
+          and stored beside the database.
         </p>
       </Topic>
 
@@ -172,9 +174,11 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         <p>
           By default retrieval matches <em>words</em>: asking about "pricing" will not find a
           meeting that only ever said "cost structure". Building the search index in{" "}
-          <Link onClick={() => onNavigate({ name: "settings" })}>Settings</Link> fixes that —
-          it embeds your workspace locally, through Ollama, and never through your chat
-          provider.
+          <Link onClick={() => onNavigate({ name: "settings", section: "search" })}>
+            Settings
+          </Link>{" "}
+          fixes that — it embeds your workspace locally, through Ollama, and never through your
+          chat provider.
         </p>
         <p>
           Even with it on, a small workspace can surface the nearest thing rather than nothing.

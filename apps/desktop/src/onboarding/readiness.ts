@@ -6,6 +6,8 @@
  * without mounting anything.
  */
 
+import type { SettingsSection } from "../lib/router";
+
 export type PermissionState = "not_requested" | "granted" | "denied" | "unavailable";
 
 export interface PermissionReadiness {
@@ -115,7 +117,7 @@ export function bannerProblems(readiness: SetupReadiness): string[] {
   return regressions(readiness).map((step) => {
     switch (step.id) {
       case "model":
-        return "No transcription model is downloaded, so meetings won't be transcribed. Download one in Settings → Models.";
+        return "No transcription model is downloaded, so meetings won't be transcribed. Download one in Settings → Transcription.";
       case "backend": {
         const detail = readiness.steps.backend.detail?.trim();
         return detail
@@ -126,6 +128,24 @@ export function bannerProblems(readiness: SetupReadiness): string[] {
         return "Notewise can't hear meetings until it has the permissions it asks for. Allow them in Settings → Recording.";
     }
   });
+}
+
+/** The page of Settings that fixes each step — the one the banner's copy names. */
+const FIXED_IN: Record<Exclude<StepId, "welcome">, SettingsSection> = {
+  model: "transcription",
+  backend: "models",
+  permissions: "recording",
+};
+
+/**
+ * Where "Fix in Settings" goes: the page that fixes the first thing the banner names.
+ *
+ * Settings is a set of pages now, and a button that says "fix" and then opens Appearance leaves
+ * the person to find Recording on their own.
+ */
+export function bannerSection(readiness: SetupReadiness): SettingsSection | undefined {
+  const [first] = regressions(readiness);
+  return first && FIXED_IN[first.id as keyof typeof FIXED_IN];
 }
 
 /**

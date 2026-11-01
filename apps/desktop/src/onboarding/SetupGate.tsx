@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api } from "../lib/api";
-import { bannerProblems, type SetupReadiness } from "./readiness";
+import { bannerProblems, bannerSection, type SetupReadiness } from "./readiness";
 import { SetupBanner } from "./SetupBanner";
 import { SetupFlow } from "./SetupFlow";
 
@@ -12,6 +12,8 @@ import { SetupFlow } from "./SetupFlow";
  * A window event because the banner lives outside the app's own tree — the gate wraps it — and
  * lifting the whole navigation state into the gate to let one button work would put routing in
  * the component whose only job is deciding between the wizard and the app.
+ *
+ * Its `detail` is the page of Settings to open, when the banner knows which one fixes things.
  */
 export const OPEN_SETTINGS_EVENT = "notewise:open-settings";
 
@@ -80,7 +82,13 @@ export function SetupGate({ children }: SetupGateProps) {
     <div className="flex h-full flex-col">
       <SetupBanner
         problems={problems}
-        onOpenSettings={() => window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT))}
+        onOpenSettings={() =>
+          window.dispatchEvent(
+            new CustomEvent(OPEN_SETTINGS_EVENT, {
+              detail: readiness ? bannerSection(readiness) : undefined,
+            }),
+          )
+        }
         onDismiss={() => setDismissed(true)}
       />
       <div className="min-h-0 flex-1">{children}</div>

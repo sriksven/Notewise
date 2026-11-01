@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   bannerProblems,
+  bannerSection,
   canFinish,
   firstUnsatisfied,
   regressions,
@@ -200,7 +201,50 @@ describe("bannerProblems", () => {
     );
 
     expect(problems).toHaveLength(2);
-    expect(problems[0]).toMatch(/^No transcription model is downloaded.*Settings → Models\.$/);
+    expect(problems[0]).toMatch(/^No transcription model is downloaded.*Settings → Transcription\.$/);
     expect(problems[1]).toMatch(/^Ollama isn't running\./);
+  });
+});
+
+describe("bannerSection", () => {
+  it("opens nothing in particular when nothing is broken", () => {
+    expect(bannerSection(snapshot())).toBeUndefined();
+  });
+
+  // The banner's copy names the page; the button has to open that page, not the first one.
+  it("opens the page the banner names", () => {
+    expect(bannerSection(snapshot({ model: { satisfied: false, required: true } }))).toBe(
+      "transcription",
+    );
+    expect(bannerSection(snapshot({ backend: { satisfied: false, required: true } }))).toBe(
+      "models",
+    );
+    expect(
+      bannerSection(
+        snapshot({
+          permissions: {
+            satisfied: false,
+            required: true,
+            microphone: { status: "denied", required: true, detail: null },
+            system_audio: { status: "unavailable", required: false, detail: "x" },
+          },
+        }),
+      ),
+    ).toBe("recording");
+  });
+
+  it("opens the first broken step's page when several are broken", () => {
+    const section = bannerSection(
+      snapshot({
+        model: { satisfied: false, required: true },
+        permissions: {
+          satisfied: false,
+          required: true,
+          microphone: { status: "denied", required: true, detail: null },
+          system_audio: { status: "unavailable", required: false, detail: "x" },
+        },
+      }),
+    );
+    expect(section).toBe("transcription");
   });
 });
