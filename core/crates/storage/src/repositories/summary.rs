@@ -308,6 +308,61 @@ impl<'a> SummaryRepository<'a> {
             .collect()
     }
 
+    /// Open action items from every meeting outside the trash: soonest due first, then the
+    /// undated ones, newest first.
+    pub fn open_action_items(&self, limit: u32) -> Result<Vec<ActionItem>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.meeting_id, a.summary_id, a.text, a.owner, a.owner_person_id, a.due_at,
+                    a.status, a.created_at, a.updated_at
+             FROM action_items a JOIN meetings m ON m.id = a.meeting_id
+             WHERE m.deleted_at IS NULL AND a.status IN ('todo', 'in_progress')
+             ORDER BY a.due_at IS NULL, a.due_at, a.created_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit], map_action_item)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect()
+    }
+
+    /// How many action items are in each status, from meetings outside the trash.
+    ///
+    /// Statuses with none are left out, in the order `WorkStatus` lists them.
+    pub fn count_action_items_by_status(&self) -> Result<Vec<(WorkStatus, u64)>> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT a.status, COUNT(*)
+             FROM action_items a JOIN meetings m ON m.id = a.meeting_id
+             WHERE m.deleted_at IS NULL
+             GROUP BY a.status",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))?;
+
+        let mut found = Vec::new();
+        for row in rows {
+            let (raw, count) = row?;
+            found.push((
+                decode_enum("action_items.status", &raw, WorkStatus::parse)?,
+                count,
+            ));
+        }
+        Ok([
+            WorkStatus::Todo,
+            WorkStatus::InProgress,
+            WorkStatus::Done,
+            WorkStatus::Cancelled,
+        ]
+        .into_iter()
+        .filter_map(|status| {
+            found
+                .iter()
+                .find(|(s, _)| *s == status)
+                .map(|(_, count)| (status, *count))
+        })
+        .collect())
+    }
+
     /// Open action items past their due date. Drives overdue notifications.
     pub fn overdue(&self, now: DateTime<Utc>) -> Result<Vec<ActionItem>> {
         let conn = self.db.conn();
@@ -1109,5 +1164,61 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The whole workspace's tasks, as My Tasks shows them: nothing from a meeting in the trash.
+    #[test]
+    fn open_action_items_span_meetings_and_skip_the_trash() {
+        let (db, summary) = setup();
+        let repo = SummaryRepository::new(&db);
+        let meetings = MeetingRepository::new(&db);
+
+        let due_later = repo
+            .add_action_item(NewActionItem {
+                due_at: Some(ts(1_800_000_000)),
+                ..NewActionItem::from_summary(&summary, "Send the deck")
+            })
+            .unwrap();
+        let due_sooner = repo
+            .add_action_item(NewActionItem {
+                due_at: Some(ts(1_700_500_000)),
+                ..NewActionItem::from_summary(&summary, "Book the room")
+            })
+            .unwrap();
+        let undated = repo
+            .add_action_item(NewActionItem::from_summary(&summary, "Ask about budget"))
+            .unwrap();
+        let done = repo
+            .add_action_item(NewActionItem::from_summary(&summary, "Draft agenda"))
+            .unwrap();
+        repo.set_action_item_status(done.id, WorkStatus::Done).unwrap();
+
+        let other = meetings
+            .create(NewMeeting {
+                project_id: None,
+                title: "Discarded".into(),
+                source: MeetingSource::Microphone,
+                started_at: ts(1_700_000_000),
+            })
+            .unwrap();
+        repo.add_action_item(NewActionItem::on_meeting(other.id, "Never seen"))
+            .unwrap();
+        meetings.trash(other.id).unwrap();
+
+        let open: Vec<Id> = repo
+            .open_action_items(10)
+            .unwrap()
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(open, vec![due_sooner.id, due_later.id, undated.id]);
+        assert_eq!(repo.open_action_items(1).unwrap().len(), 1);
+
+        let counts = repo.count_action_items_by_status().unwrap();
+        assert_eq!(
+            counts,
+            vec![(WorkStatus::Todo, 3), (WorkStatus::Done, 1)],
+            "the trashed meeting's item is not counted"
+        );
     }
 }
