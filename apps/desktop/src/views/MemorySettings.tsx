@@ -116,7 +116,7 @@ export function MemorySettings() {
   }
 
   return (
-    <section className="mt-8 border-t border-hairline pt-6">
+    <section>
       <h2 className="mb-1 flex items-center gap-2 text-[13px] font-semibold text-ink">
         <Brain className="h-3.5 w-3.5" /> What it remembers about you
       </h2>

@@ -42,7 +42,7 @@ import {
   type Speaker,
 } from "./lib/api";
 import { useSummary } from "./lib/useSummary";
-import { useRoute } from "./lib/router";
+import { useRoute, type SettingsSection } from "./lib/router";
 import { offered } from "./lib/scope";
 import { requestSearchFocus, useShortcuts } from "./lib/shortcuts";
 import { useTheme } from "./lib/useTheme";
@@ -255,7 +255,11 @@ export default function App() {
 
   // The setup banner lives above this tree and cannot navigate on its own.
   useEffect(() => {
-    const open = () => navigate({ name: "settings" });
+    const open = (event: Event) =>
+      navigate({
+        name: "settings",
+        section: (event as CustomEvent<SettingsSection | undefined>).detail,
+      });
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
@@ -868,6 +872,7 @@ export default function App() {
             )}
             {route.name === "settings" && (
               <SettingsView
+                section={route.section ?? "appearance"}
                 theme={theme.theme}
                 onModeChange={theme.setMode}
                 onAccentChange={theme.setAccent}

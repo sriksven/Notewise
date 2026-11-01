@@ -35,7 +35,7 @@ export type Route =
    */
   | { name: "overlay" }
   | { name: "help"; section?: HelpSection }
-  | { name: "settings"; section?: string }
+  | { name: "settings"; section?: SettingsSection }
   | { name: "about" };
 
 export type MeetingTab = "transcript" | "summary" | "notes" | "ask";
@@ -46,6 +46,33 @@ const MEETING_TABS: MeetingTab[] = ["transcript", "summary", "notes", "ask"];
 export type HelpSection = "docs" | "support" | "whats-new" | "shortcuts";
 
 const HELP_SECTIONS: HelpSection[] = ["docs", "support", "whats-new", "shortcuts"];
+
+/**
+ * The pages under Settings. Named so the setup banner and Help can open the one that fixes
+ * something, rather than the first.
+ */
+export type SettingsSection =
+  | "appearance"
+  | "recording"
+  | "transcription"
+  | "models"
+  | "summaries"
+  | "assistant"
+  | "tools"
+  | "search"
+  | "speakers";
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  "appearance",
+  "recording",
+  "transcription",
+  "models",
+  "summaries",
+  "assistant",
+  "tools",
+  "search",
+  "speakers",
+];
 
 /** Parse a hash into a route. Anything unrecognised is home, never a blank screen. */
 export function parseRoute(hash: string): Route {
@@ -95,7 +122,12 @@ export function parseRoute(hash: string): Route {
           : undefined,
       };
     case "settings":
-      return { name: "settings", section: parts[1] };
+      return {
+        name: "settings",
+        section: SETTINGS_SECTIONS.includes(parts[1] as SettingsSection)
+          ? (parts[1] as SettingsSection)
+          : undefined,
+      };
     case "about":
       return { name: "about" };
     default:
