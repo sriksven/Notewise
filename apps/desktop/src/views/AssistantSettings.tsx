@@ -11,7 +11,16 @@ import {
   X,
 } from "lucide-react";
 
-import { api, ApiError, type AssistantCapabilities, type AssistantPermission, type Dictated, type Completion, type TypingActivity, SETTINGS_BY_HAND } from "../lib/api";
+import {
+  api,
+  ApiError,
+  SETTINGS_BY_HAND,
+  type AssistantCapabilities,
+  type AssistantPermission,
+  type Dictated,
+  type Completion,
+  type TypingActivity,
+} from "../lib/api";
 
 /**
  * Dictation, and what the operating system is letting it do.
