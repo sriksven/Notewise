@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // `?raw` gives the file as text. Typed by `vite/client`, which tsconfig already pulls in for
-// `import.meta.glob` — so this needs no `@types/node` and no suppressions.
+// `import.meta.glob`, so this needs no `@types/node` and no suppressions.
 import changelog from "../../../../CHANGELOG.md?raw";
 import helpView from "../views/HelpView.tsx?raw";
 import packageJson from "../../package.json?raw";
@@ -14,7 +14,7 @@ import tauriConf from "../../src-tauri/tauri.conf.json?raw";
  *
  * There are two changelogs on purpose: `CHANGELOG.md` for someone reading the repository, and
  * Help → What's new for someone using the app, which is deliberately shorter. Two copies of a fact
- * is drift waiting to happen, and it had already happened — the in-app notes said "Unreleased — in
+ * is drift waiting to happen, and it had already happened: the in-app notes said "Unreleased, in
  * development" and listed five features on the day 0.1.0 was tagged, having gone unedited through
  * connectors, the assistant, MCP tools, memory, scheduled jobs, retention and templates.
  *
@@ -23,7 +23,7 @@ import tauriConf from "../../src-tauri/tauri.conf.json?raw";
  *
  * # What it does not check
  *
- * Not the wording — that is a judgement, and a test that compared prose would only force the two to
+ * Not the wording: that is a judgement, and a test that compared prose would only force the two to
  * become one, which defeats having a short version. It checks the version number, which is a fact,
  * and that the newest entry is not a placeholder.
  */
@@ -38,7 +38,7 @@ function newestInChangelog(text: string): string {
 /**
  * Just the `releases` array from `HelpView`, as text.
  *
- * Scoped rather than searching the whole file, because the file also contains the help topics — one
+ * Scoped rather than searching the whole file, because the file also contains the help topics, one
  * of which is about system audio. The first version of the last assertion below passed against
  * that, and went on passing after the limitation was deleted from the release notes: an assertion
  * satisfied by text it was not looking at.
@@ -82,7 +82,7 @@ describe("release notes", () => {
     // versions say so.
     for (const [name, text] of [
       ["CHANGELOG.md", changelog],
-      // The release notes only, not the whole file — see `appReleases`.
+      // The release notes only, not the whole file; see `appReleases`.
       ["HelpView.tsx", appReleases(helpView)],
     ] as const) {
       expect(text.toLowerCase(), `${name} says what is missing`).toContain("system audio");

@@ -19,7 +19,7 @@ const NOTE_SUGGESTIONS = ["What are the open questions here?", "Summarise this n
  * Ask a note questions.
  *
  * Two scopes, because they answer different questions. *This note* grounds only on what is in
- * front of you — good for "what did I mean by that", and it cannot drag in a coincidence from
+ * front of you, good for "what did I mean by that", and it cannot drag in a coincidence from
  * an unrelated meeting. *Whole workspace* searches everything and keeps the note as the first
  * citation, which is how you ask a note what the meetings said about it.
  *
@@ -28,7 +28,7 @@ const NOTE_SUGGESTIONS = ["What are the open questions here?", "Summarise this n
  * identical.
  *
  * The conversation itself is the one every Ask uses (`lib/ask`, `AskThread`), so it has the same
- * features — follow-ups, suggestions of what to ask, citations that open, the note when nothing
+ * features: follow-ups, suggestions of what to ask, citations that open, the note when nothing
  * answers. It is drawn in the accent's companion colour, not the accent: this asks one note, the
  * Ask everywhere else asks everything, and the two should never look like the same thing.
  */

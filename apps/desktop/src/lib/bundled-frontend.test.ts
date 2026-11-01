@@ -15,8 +15,8 @@ import mainRs from "../../src-tauri/src/main.rs?raw";
  * That alone would have been a blank window. What made it worse is what happened next: the lookup
  * fell through to a development fallback built from `CARGO_MANIFEST_DIR`, which is baked in when the
  * binary is compiled. That directory exists on the machine that built the app and on no other, so
- * the `.dmg` aborted on launch — `Failed to setup app: no frontend found at
- * /Users/…/apps/desktop/dist` — quoting a path on the builder's disk. It worked perfectly for
+ * the `.dmg` aborted on launch: `Failed to setup app: no frontend found at
+ * /Users/…/apps/desktop/dist`, quoting a path on the builder's disk. It worked perfectly for
  * whoever built it, which is why nothing caught it: not `cargo build`, not clippy, not CI, and not
  * `tauri build` itself, since the bundler was doing exactly what it was told.
  *
@@ -26,8 +26,8 @@ import mainRs from "../../src-tauri/src/main.rs?raw";
  * # What it checks
  *
  * That the two halves agree: whatever `main.rs` asks for by name is a path the bundle config
- * actually produces. It cannot prove the bundle works — for that the app has to be built and run
- * somewhere clean — but it fails on the specific mismatch that shipped.
+ * actually produces. It cannot prove the bundle works (for that the app has to be built and run
+ * somewhere clean), but it fails on the specific mismatch that shipped.
  */
 describe("the bundled frontend", () => {
   const config = JSON.parse(tauriConf);
@@ -59,7 +59,7 @@ describe("the bundled frontend", () => {
     // path. A map states the target, which is the thing that has to match.
     expect(
       Array.isArray(resources),
-      "Use `{ \"../dist\": \"dist\" }` rather than `[\"../dist\"]` — Tauri rewrites `..` to `_up_` " +
+      "Use `{ \"../dist\": \"dist\" }` rather than `[\"../dist\"]`: Tauri rewrites `..` to `_up_` " +
         "in the bundled path, and nothing in the config says so.",
     ).toBe(false);
 

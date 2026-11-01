@@ -19,7 +19,7 @@ export const FOCUS_SEARCH_EVENT = "notewise:focus-search";
  * When focus was last asked for, or 0.
  *
  * ⌘K may have to navigate first, and the field it wants does not exist until React has
- * rendered the new screen — so the event alone lands on nothing. The request is therefore left
+ * rendered the new screen, so the event alone lands on nothing. The request is therefore left
  * standing for a moment and picked up by whichever search box mounts next.
  */
 let requestedAt = 0;
@@ -66,7 +66,7 @@ function isTyping(target: EventTarget | null): boolean {
  * Dispatch one keystroke.
  *
  * Exported separately from the hook so it can be tested against real `KeyboardEvent`s without
- * a React renderer. The hook is a `useEffect` around this and nothing else — a test that
+ * a React renderer. The hook is a `useEffect` around this and nothing else: a test that
  * reimplemented the matching would pass happily while the app did something different.
  */
 export function handleKey(event: KeyboardEvent, shortcuts: Shortcuts): void {
@@ -79,7 +79,7 @@ export function handleKey(event: KeyboardEvent, shortcuts: Shortcuts): void {
 
   const key = event.key.toLowerCase();
 
-  // Search is allowed to interrupt typing — it is how you get *out* of one field and into the
+  // Search is allowed to interrupt typing: it is how you get *out* of one field and into the
   // search box, and every other application on the machine behaves that way.
   if (key === "k" && !event.shiftKey) {
     event.preventDefault();
@@ -95,8 +95,8 @@ export function handleKey(event: KeyboardEvent, shortcuts: Shortcuts): void {
     return;
   }
 
-  // Shifted, because an unshifted ⌘R is reload in every browser-based shell — including the
-  // one Tauri ships — and rebinding it would take away the way out of a wedged window.
+  // Shifted, because an unshifted ⌘R is reload in every browser-based shell (including the
+  // one Tauri ships), and rebinding it would take away the way out of a wedged window.
   if (key === "r" && event.shiftKey) {
     event.preventDefault();
     shortcuts.onToggleRecording();
@@ -130,7 +130,7 @@ export function clearSearchFocusRequest(): void {
  *
  * An event rather than a ref threaded down through the tree: the field lives on whichever
  * screen is showing, and there may be none at all. Mounting also counts as an opportunity to
- * answer, which is what makes ⌘K work from a screen that has no search box — it navigates, and
+ * answer, which is what makes ⌘K work from a screen that has no search box: it navigates, and
  * the box that appears picks the request up.
  */
 export function useFocusOnSearch(ref: React.RefObject<HTMLInputElement | null>): void {

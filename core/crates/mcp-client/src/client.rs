@@ -3,7 +3,7 @@
 //! # The gate is here, and there is one door
 //!
 //! [`McpClient::call`] is the only place in this crate that sends `tools/call`, and its first
-//! statement is the allowlist check — before a process is spawned, before a socket is opened. A test
+//! statement is the allowlist check, before a process is spawned, before a socket is opened. A test
 //! in this file fails if a second dispatch site ever appears, which is the same trick
 //! `mcp-server` uses to stop `MUTATING_TOOLS` drifting from its dispatch table.
 //!
@@ -115,7 +115,7 @@ pub struct RunningServer {
 
 /// Connections to external MCP servers.
 ///
-/// Holds sessions — that is, child processes and sockets — and nothing else. Configuration and
+/// Holds sessions (that is, child processes and sockets) and nothing else. Configuration and
 /// history live in the database, and are handed in per call, so there is no in-memory copy of the
 /// server list to drift out of step with the rows the user edited.
 #[derive(Debug)]
@@ -190,7 +190,7 @@ impl McpClient {
     ///
     /// The order of the checks is the design:
     ///
-    /// 1. the allowlist, before anything is started — a refused tool costs no process;
+    /// 1. the allowlist, before anything is started; a refused tool costs no process;
     /// 2. the tool exists on the server we are about to talk to;
     /// 3. the arguments still satisfy the schema *that server publishes now*, not the one they were
     ///    validated against when the proposal was made. A server upgraded in between is exactly
@@ -298,7 +298,7 @@ impl McpClient {
     ///
     /// The map lock is held across the connect. That serializes first-use of *different* servers
     /// behind each other, which is the price of not spawning the same server twice when two
-    /// requests race — and spawning twice would leave an orphan process nobody has a handle to.
+    /// requests race, and spawning twice would leave an orphan process nobody has a handle to.
     /// The handshake is bounded by [`HANDSHAKE_TIMEOUT`] so the worst case is ten seconds and not
     /// forever.
     async fn ensure(&self, config: &ServerConfig, explicit: bool) -> Result<Arc<Session>> {
@@ -816,7 +816,7 @@ mod tests {
     /// `mcp-server` keeps `MUTATING_TOOLS` as data so its write check cannot fall out of step with
     /// its dispatch table. The same hazard here is a second place that sends `tools/call` without
     /// consulting the allowlist first. So the method name appears as a string exactly once in this
-    /// crate — in `TOOLS_CALL` — and any new dispatch site has to use the constant, whose only
+    /// crate, in `TOOLS_CALL`, and any new dispatch site has to use the constant, whose only
     /// caller is [`McpClient::call`], which begins with the gate.
     ///
     /// The needle is assembled rather than written out, so this test does not match itself.

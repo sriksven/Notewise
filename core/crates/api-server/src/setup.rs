@@ -26,8 +26,8 @@ pub(crate) struct Steps {
 pub(crate) struct StepReadiness {
     pub satisfied: bool,
     pub required: bool,
-    /// Why it is not satisfied, in words written for the user — "Ollama isn't running. Open the
-    /// Ollama app…" — so the banner can say what to do rather than only what will not work.
+    /// Why it is not satisfied, in words written for the user: "Ollama isn't running. Open the
+    /// Ollama app…", so the banner can say what to do rather than only what will not work.
     /// `None` when satisfied, or when there is nothing more specific to say than the step.
     pub detail: Option<String>,
 }
@@ -53,7 +53,7 @@ impl PermissionsReadiness {
     /// Combine per-capability answers into one gate.
     ///
     /// Only `granted` satisfies a required capability. Anything `unavailable` is excluded
-    /// from the gate entirely — there is no action a user could take, so blocking on it would
+    /// from the gate entirely: there is no action a user could take, so blocking on it would
     /// trap them in the wizard. That is the whole of the "required only when available" rule.
     pub fn from_parts(microphone: PermissionReadiness, system_audio: PermissionReadiness) -> Self {
         let satisfied = [&microphone, &system_audio]

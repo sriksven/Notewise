@@ -10,7 +10,7 @@ import { api, ApiError, type VaultDivergence } from "../lib/api";
  *
  * The vault has refused to overwrite an edited file for a while, correctly, and told nobody. A user
  * who annotated a meeting note in Obsidian got a mirror that quietly stopped updating and no way to
- * find out why — which is a worse version of the bug the refusal was fixing.
+ * find out why, which is a worse version of the bug the refusal was fixing.
  *
  * # Why the file's content is shown
  *
@@ -22,7 +22,7 @@ import { api, ApiError, type VaultDivergence } from "../lib/api";
  *
  * Three-way merge on prose without a common ancestor produces plausible text neither side wrote. For
  * a record of what was said in a meeting that is not an acceptable outcome, so the choice is
- * explicit and the third option — keep it as a note — is the one that loses nothing.
+ * explicit and the third option, keep it as a note, is the one that loses nothing.
  */
 export function VaultDivergences() {
   const [divergences, setDivergences] = useState<VaultDivergence[]>([]);
@@ -70,7 +70,7 @@ export function VaultDivergences() {
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
         These vault files have changed since Notewise last wrote them, so it stopped writing to them
-        rather than overwrite what you put there. Nothing has been lost — choose what should happen
+        rather than overwrite what you put there. Nothing has been lost. Choose what should happen
         to each.
       </p>
 
@@ -114,7 +114,7 @@ export function VaultDivergences() {
                 </pre>
               ) : (
                 <p className="text-[12px] leading-relaxed text-warn-text">
-                  The file cannot be read — it may have moved, or something else may be holding it.
+                  The file cannot be read: it may have moved, or something else may be holding it.
                   Notewise treats a file it cannot check as edited, because guessing “unchanged”
                   risks overwriting your work.
                 </p>

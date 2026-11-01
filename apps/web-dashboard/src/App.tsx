@@ -41,7 +41,7 @@ interface Workspace {
  * cannot, because the desktop app is built around one meeting at a time: how much time went
  * into meetings, whether the rate is rising, who is carrying open work, and what is overdue.
  *
- * Nothing here writes. See `lib/api.ts` — the client contains no method that could.
+ * Nothing here writes. See `lib/api.ts`: the client contains no method that could.
  */
 export function App() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);

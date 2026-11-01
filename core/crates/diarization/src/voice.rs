@@ -98,7 +98,7 @@ impl AudioDiarizer for EmbeddingDiarizer {
         let spans = select_spans(&segment_spans, &self.spans);
 
         // Nothing long enough to identify anyone from. One speaker is the honest answer, and
-        // an error would be wrong — a short meeting is not a failure.
+        // an error would be wrong: a short meeting is not a failure.
         if spans.is_empty() {
             return Ok(label_all(transcript, &Self::label(0)));
         }
@@ -236,7 +236,7 @@ mod tests {
 
     /// Diagnostic: what the acoustic pass actually labels, given known turn boundaries.
     ///
-    /// The end-to-end shape of the feature without whisper in the way — a mono recording plus the
+    /// The end-to-end shape of the feature without whisper in the way: a mono recording plus the
     /// timings, which is what an import reduces to once transcription has run.
     ///
     /// ```sh
@@ -248,7 +248,7 @@ mod tests {
     /// ```
     ///
     /// Prints rather than asserts a pass. Whether clustering *is* accurate is a measurement, and
-    /// one that depends entirely on whose voices are in the file — an assertion tuned to one
+    /// one that depends entirely on whose voices are in the file: an assertion tuned to one
     /// recording would report a threshold as a fact.
     #[tokio::test]
     #[cfg(feature = "onnx")]
@@ -332,7 +332,7 @@ mod tests {
             if correct_grouping {
                 "CORRECT"
             } else {
-                "WRONG — a speaker was split or two were merged"
+                "WRONG: a speaker was split or two were merged"
             }
         );
     }

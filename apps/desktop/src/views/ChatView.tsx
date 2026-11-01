@@ -28,7 +28,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Reset when the user switches meetings — carrying a conversation across transcripts
+  // Reset when the user switches meetings: carrying a conversation across transcripts
   // would produce answers grounded in the wrong material.
   useEffect(() => {
     setTurns([]);
@@ -140,7 +140,7 @@ export function ChatView({ meetingId, meetingTitle, hasTranscript }: Props) {
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              // Enter sends, Shift+Enter breaks a line — the convention everywhere else.
+              // Enter sends, Shift+Enter breaks a line, the convention everywhere else.
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void send();

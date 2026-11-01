@@ -1,7 +1,7 @@
 //! Conflict resolution.
 //!
 //! The rule that matters: **a genuine conflict never silently discards a side.** Losing a
-//! user's edit without telling them is the worst outcome sync can produce — worse than a
+//! user's edit without telling them is the worst outcome sync can produce, worse than a
 //! duplicate, which they can see and delete.
 
 use serde::{Deserialize, Serialize};
@@ -46,9 +46,9 @@ impl ConflictPolicy {
 pub enum Resolution {
     /// Both sides already agree.
     Unchanged,
-    /// The remote descends from the local copy — take it.
+    /// The remote descends from the local copy; take it.
     TakeRemote { version: Version },
-    /// The local copy descends from the remote — push it.
+    /// The local copy descends from the remote; push it.
     KeepLocal { version: Version },
     /// A real conflict, resolved by policy.
     Resolved {

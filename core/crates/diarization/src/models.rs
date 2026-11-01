@@ -1,7 +1,7 @@
 //! Which speaker-embedding models exist, and where to get them.
 //!
 //! [`SpeakerEmbedder`](crate::SpeakerEmbedder) has always been able to run a model. Nothing
-//! could tell it *which* model or fetch one, so in practice it never ran — the acoustic half of
+//! could tell it *which* model or fetch one, so in practice it never ran: the acoustic half of
 //! diarization was complete code with no weights to execute.
 //!
 //! # Why these models
@@ -13,7 +13,7 @@
 //!
 //! They all expect 80-bin Kaldi filterbanks at 16 kHz over int16-scaled audio, which is exactly
 //! what [`FbankExtractor`](notewise_audio_capture::FbankExtractor) produces by default. That is
-//! not a coincidence — the extractor was written for them — but it is the compatibility that
+//! not a coincidence (the extractor was written for them) but it is the compatibility that
 //! matters, and it is why a model outside this list cannot simply be dropped in.
 //!
 //! # Sizes are exact
@@ -37,7 +37,7 @@ pub struct SpeakerModel {
 
 // There is deliberately no `dimensions` field. It was here, carrying 192 for CAM++, and the
 // model measured 512 on the first real inference. `SpeakerEmbedder` learns the true length from
-// the output vector precisely so nothing has to declare it — and a guessed number in a registry
+// the output vector precisely so nothing has to declare it, and a guessed number in a registry
 // whose entire purpose is exact metadata is worse than no number at all.
 
 impl SpeakerModel {
@@ -90,7 +90,7 @@ impl SpeakerModelRegistry {
                 bytes: 29_596_978,
                 tradeoff:
                     "The same architecture from a different training run. Worth trying if the \
-                     default splits or merges people on your recordings — they fail differently.",
+                     default splits or merges people on your recordings. They fail differently.",
             },
             SpeakerModel {
                 name: "resnet34-voxceleb",
@@ -129,7 +129,7 @@ mod tests {
             // store treats size as the integrity check.
             assert!(
                 model.bytes % 1_000_000 != 0,
-                "{} has a suspiciously round size — is it a real Content-Length?",
+                "{} has a suspiciously round size. Is it a real Content-Length?",
                 model.name
             );
             assert!(!model.tradeoff.is_empty(), "{}", model.name);
@@ -175,7 +175,7 @@ mod tests {
 
     /// Fetch the default model and prove it runs.
     ///
-    /// Downloads ~29 MB, so it is `#[ignore]`d rather than run in CI — but it is the test that
+    /// Downloads ~29 MB, so it is `#[ignore]`d rather than run in CI, but it is the test that
     /// says whether the registry's URL and byte count are still true, and it is worth running
     /// after any edit to them:
     ///
@@ -186,7 +186,7 @@ mod tests {
     ///
     /// Measured here on 2026-08-16 against `campplus-voxceleb`: the download matched the
     /// registry's 29,292,684 bytes exactly, the model loaded, and it produced deterministic,
-    /// L2-normalised **512**-dimensional vectors — not the 192 that was guessed in this file
+    /// L2-normalised **512**-dimensional vectors, not the 192 that was guessed in this file
     /// before anything ran it.
     ///
     /// It does **not** establish that speakers get separated. The only speech available to
@@ -194,7 +194,7 @@ mod tests {
     /// with the extractor's real settings, the same voice measured 0.439 and 0.349 apart while
     /// two *different* voices came as close as 0.245. A single threshold cannot cut that. TTS
     /// voices from one engine share vocoder characteristics that real speakers do not, and this
-    /// model was trained on VoxCeleb — real recordings of real people. So separation quality
+    /// model was trained on VoxCeleb: real recordings of real people. So separation quality
     /// stays unverified until someone runs `embedding::tests::
     /// the_same_speaker_is_closer_to_itself_on_average` on human speech, and nothing in the
     /// product should claim otherwise until they have.

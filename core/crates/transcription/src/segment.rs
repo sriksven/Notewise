@@ -8,7 +8,7 @@ pub struct Segment {
     pub end_ms: i64,
     /// Engine confidence in `0.0..=1.0`, when the engine reports one.
     pub confidence: Option<f32>,
-    /// Speaker label. Always `None` here — populated later by `diarization`, which is a
+    /// Speaker label. Always `None` here: populated later by `diarization`, which is a
     /// separate crate so speaker quality can be iterated on without touching this path.
     pub speaker: Option<String>,
 }

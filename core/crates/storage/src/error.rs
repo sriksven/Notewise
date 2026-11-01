@@ -4,8 +4,8 @@ use thiserror::Error;
 
 /// Errors produced by the storage layer.
 ///
-/// Surfaces translate these at their boundary — `api-server` maps them to HTTP status
-/// codes, `cli` to exit codes — so this enum carries no transport concerns.
+/// Surfaces translate these at their boundary; `api-server` maps them to HTTP status
+/// codes, `cli` to exit codes, so this enum carries no transport concerns.
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("database error: {0}")]
@@ -15,8 +15,8 @@ pub enum StorageError {
     /// that has to name a row names nothing.
     ///
     /// Split out of [`Self::Sqlite`] because it is the caller's doing rather than a fault. As
-    /// `Sqlite` these reached the API as 500s — a note filed under a project that does not exist, a
-    /// second person with the same email — telling the client to retry a request that fails
+    /// `Sqlite` these reached the API as 500s (a note filed under a project that does not exist, a
+    /// second person with the same email), telling the client to retry a request that fails
     /// identically every time. Every rusqlite error passes through the `From` impl below, so this
     /// holds for each repository without each one having to remember.
     #[error("{message}")]
@@ -36,8 +36,8 @@ pub enum StorageError {
     },
 
     /// A merge could not proceed. Distinct from [`StorageError::Sqlite`] because every one of
-    /// these is a condition the user can act on — a missing file, a schema mismatch, the same
-    /// workspace twice — and the message says which.
+    /// these is a condition the user can act on: a missing file, a schema mismatch, the same
+    /// workspace twice, and the message says which.
     #[error("cannot merge: {0}")]
     Merge(String),
 

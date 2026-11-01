@@ -13,16 +13,16 @@ pub struct Database {
     conn: Connection,
     /// Where this database lives, or `None` for in-memory.
     ///
-    /// Kept so a caller that needs a *second* connection to the same database — the recording
+    /// Kept so a caller that needs a *second* connection to the same database (the recording
     /// pipeline, which must write for the duration of a meeting without holding the API's
-    /// lock — can open one without being told the path separately.
+    /// lock) can open one without being told the path separately.
     path: Option<PathBuf>,
     /// Whether this handle was opened with SQLCipher. See [`Database::is_encrypted`].
     encrypted: bool,
 }
 
 // `rusqlite::Connection` is not `Debug`, so this is written by hand. Deliberately reports
-// only the schema version — a connection handle has nothing else worth printing, and
+// only the schema version; a connection handle has nothing else worth printing, and
 // anything derived from user data must not leak into logs.
 impl std::fmt::Debug for Database {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -53,7 +53,7 @@ impl Database {
     ///
     /// Requires the `sqlcipher` feature. Without it this returns
     /// [`StorageError::EncryptionUnavailable`] rather than silently opening the database
-    /// unencrypted — failing loudly is the only safe behaviour when a caller asked for
+    /// unencrypted: failing loudly is the only safe behaviour when a caller asked for
     /// encryption and cannot have it.
     #[cfg_attr(not(feature = "sqlcipher"), allow(unused_variables))]
     pub fn open_encrypted(path: impl AsRef<Path>, key: &str) -> Result<Self> {
@@ -74,7 +74,7 @@ impl Database {
     /// Whether this database is encrypted at rest.
     ///
     /// Load-bearing beyond reporting: anything that writes a *separate* file alongside the database
-    /// — retained audio, for one — would be writing it in the clear next to an encrypted transcript,
+    /// (retained audio, for one) would be writing it in the clear next to an encrypted transcript,
     /// silently weakening a choice the user made deliberately. Such a caller has to be able to ask.
     pub fn is_encrypted(&self) -> bool {
         self.encrypted

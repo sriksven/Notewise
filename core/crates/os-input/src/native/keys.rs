@@ -2,7 +2,7 @@
 //!
 //! # This needs the Accessibility grant too
 //!
-//! `CGEventPost` is not a read. Without the grant macOS *silently drops* the event — no error, no
+//! `CGEventPost` is not a read. Without the grant macOS *silently drops* the event: no error, no
 //! log, nothing pasted. That is the exact failure mode the three-tier design exists to prevent, so
 //! the platform layer reports `accepts_paste: false` when the grant is absent rather than letting
 //! the tier machine choose a path that cannot work. The check lives in [`super::MacTarget`].
@@ -10,7 +10,7 @@
 //! # Why the paste is followed by a wait
 //!
 //! The keystroke is delivered asynchronously. The target application reads the clipboard when it
-//! gets round to handling the event, which is after this function would otherwise have returned —
+//! gets round to handling the event, which is after this function would otherwise have returned,
 //! and the caller's next move is to put the old clipboard back. Restoring too early means the user
 //! gets their own previous clipboard pasted instead of their dictation.
 
@@ -22,9 +22,9 @@ use crate::keycode::KEY_V;
 type CGEventRef = *const c_void;
 type CGEventSourceRef = *const c_void;
 
-/// `kCGEventSourceStateHIDSystemState` — the same source a physical keyboard uses.
+/// `kCGEventSourceStateHIDSystemState`: the same source a physical keyboard uses.
 const HID_SYSTEM_STATE: i32 = 1;
-/// `kCGHIDEventTap` — post at the lowest point, so every application sees it.
+/// `kCGHIDEventTap`: post at the lowest point, so every application sees it.
 const HID_EVENT_TAP: u32 = 0;
 /// `kCGEventFlagMaskCommand`.
 const FLAG_COMMAND: u64 = 0x0010_0000;
@@ -110,7 +110,7 @@ mod tests {
         assert!(PASTE_SETTLE <= Duration::from_millis(400));
     }
 
-    /// Building and posting the events must not crash even without the grant — without it the
+    /// Building and posting the events must not crash even without the grant: without it the
     /// system drops them, which is a no-op rather than a fault. Runs, because that no-op is exactly
     /// what has to be safe: this code path is reached on every development build.
     #[test]

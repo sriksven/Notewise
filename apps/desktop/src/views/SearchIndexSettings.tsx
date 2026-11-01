@@ -7,7 +7,7 @@ import { api, ApiError, type IndexStatus } from "../lib/api";
 const POLL_MS = 1_500;
 
 /**
- * Semantic search — what it is, whether it is on, and how to turn it on.
+ * Semantic search: what it is, whether it is on, and how to turn it on.
  *
  * Presented as a *search quality* setting rather than an AI one, because that is what it
  * changes. It is also the only place the app can explain why a question about "pricing" does
@@ -101,7 +101,7 @@ export function SearchIndexSettings() {
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium text-ink">
               {running
-                ? `Indexing — ${status?.done ?? 0} of ${status?.total ?? 0}`
+                ? `Indexing: ${status?.done ?? 0} of ${status?.total ?? 0}`
                 : on
                   ? "On"
                   : "Not built yet"}
@@ -110,7 +110,7 @@ export function SearchIndexSettings() {
               {status
                 ? on
                   ? `${status.chunks.toLocaleString()} passages indexed with ${status.model}, on this machine.`
-                  : `Uses ${status.model} through Ollama. Nothing is uploaded — embedding never goes to your chat provider.`
+                  : `Uses ${status.model} through Ollama. Nothing is uploaded. Embedding never goes to your chat provider.`
                 : "Reading…"}
             </p>
           </div>
@@ -168,7 +168,7 @@ export function SearchIndexSettings() {
       </div>
 
       <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-        Once built, this keeps itself up to date — a note you write becomes answerable a few
+        Once built, this keeps itself up to date: a note you write becomes answerable a few
         seconds after you stop typing, with nothing to press. Updating by hand only matters after
         restoring a backup, or if a pass failed.
       </p>

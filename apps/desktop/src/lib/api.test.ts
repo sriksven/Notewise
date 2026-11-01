@@ -21,7 +21,7 @@ afterEach(() => {
 
 describe("request", () => {
   // Two engine routes answer `204 No Content`: removing an API key and disconnecting a connector.
-  // `response.json()` on an empty body throws, so both reported failure after succeeding — the
+  // `response.json()` on an empty body throws, so both reported failure after succeeding: the
   // key was gone and the screen said "Could not remove the key.", and the refresh that would have
   // shown it gone never ran.
   it("treats 204 No Content as success with no body", async () => {

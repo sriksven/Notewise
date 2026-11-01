@@ -8,7 +8,7 @@
 //!
 //! - **It blocked.** Each read waited half a second for audio that was never coming. Recording a
 //!   call reads the microphone and the system tap in turn, so every turn waited on the silent
-//!   tap while the microphone delivered five times as much as was being read — the microphone's
+//!   tap while the microphone delivered five times as much as was being read: the microphone's
 //!   transcript fell further behind the room for as long as the far end was quiet.
 //! - **Its clock stood still.** What it handed back after waiting was an empty frame, and a
 //!   timestamp counted from samples does not move for an empty frame. After five silent minutes
@@ -136,7 +136,7 @@ mod tests {
         assert_eq!(out, audio);
     }
 
-    /// The defect: a silent machine delivers nothing, and the stream must keep time anyway — a
+    /// The defect: a silent machine delivers nothing, and the stream must keep time anyway: a
     /// frame of silence per frame of real time, stamped when it happened.
     #[test]
     fn a_silent_platform_still_yields_a_frame_per_frame_of_real_time() {
@@ -175,7 +175,7 @@ mod tests {
         assert!(stream.frame(ms(250), FRAME).is_some(), "it is at 250 ms");
     }
 
-    /// When the far end speaks again after a silence, their words land after the silence — at
+    /// When the far end speaks again after a silence, their words land after the silence, at
     /// the time they were said, not straight after whatever came before the gap.
     #[test]
     fn audio_after_a_gap_is_placed_after_the_silence() {
@@ -200,7 +200,7 @@ mod tests {
         );
     }
 
-    /// A partial frame that is overdue is the audio that came, then silence — not dropped.
+    /// A partial frame that is overdue is the audio that came, then silence, not dropped.
     #[test]
     fn an_overdue_partial_frame_keeps_what_arrived() {
         let mut stream = PacedStream::new(RATE, ALLOWANCE);

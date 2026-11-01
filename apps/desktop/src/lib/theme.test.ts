@@ -83,7 +83,7 @@ describe("channels", () => {
 
   // The bug: colours given to Tailwind as `var(--accent)` cannot take an opacity modifier, so
   // `bg-accent/[0.06]` (the selected meeting) and `bg-record/10` (the go-live button) compiled to
-  // no rule at all. The config now reads channel variables — and every one it reads has to be
+  // no rule at all. The config now reads channel variables, and every one it reads has to be
   // set by `applyTheme`, or those classes turn transparent again. (The fallbacks in `index.css`
   // cannot be checked from here: vitest hands a stylesheet over as an empty string, `?raw` or not.)
   it("are published for every channel variable the Tailwind config reads", () => {

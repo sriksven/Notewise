@@ -7,7 +7,7 @@ use crate::types::{Cursor, ExternalRef, Health, Outbound, PullBatch};
 
 /// What every connector has, regardless of direction.
 ///
-/// `Send + Sync` so one instance can be shared across the async runtime — the dispatcher
+/// `Send + Sync` so one instance can be shared across the async runtime: the dispatcher
 /// holds a registry and drains several connectors concurrently.
 #[async_trait]
 pub trait Connector: Send + Sync + std::fmt::Debug {
@@ -37,6 +37,6 @@ pub trait SourceConnector: Connector {
 #[async_trait]
 pub trait SinkConnector: Connector {
     /// Deliver one unit of work. Implementations must treat `outbound.existing`
-    /// as "this was already pushed — update it" rather than creating a second artifact.
+    /// as "this was already pushed: update it" rather than creating a second artifact.
     async fn push(&self, outbound: &Outbound) -> Result<ExternalRef>;
 }

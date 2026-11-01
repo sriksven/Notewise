@@ -3,7 +3,7 @@
 //! # Why these are persisted when agent runs are not
 //!
 //! `api-server`'s agent keeps its runs in memory and argues, correctly, that a trace is only
-//! interesting while it is happening and that what matters — the note it wrote — survives anyway.
+//! interesting while it is happening and that what matters (the note it wrote) survives anyway.
 //!
 //! Nothing about that transfers here. The effect of a tool call is *outside* Notewise: a ticket was
 //! filed, a message was posted, a card may have been charged. Losing the record on restart leaves
@@ -58,7 +58,7 @@ impl McpTransport {
 ///
 /// Credentials are absent on purpose. Environment variables for a stdio server and headers for an
 /// HTTP one hold secrets, so they live in the keychain and this row holds only the server's
-/// identity — the same split routing rules make for provider keys.
+/// identity: the same split routing rules make for provider keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServer {
     pub id: Id,
@@ -86,8 +86,8 @@ pub struct NewMcpServer {
 ///
 /// # Why `Unknown` exists when the design doc lists five statuses
 ///
-/// A call that timed out may have taken effect. The doc says so — "`Timeout` says 'unknown', not
-/// 'failed', in the UI" — and also lists `failed` as the status to record. Both cannot hold unless
+/// A call that timed out may have taken effect. The doc says so: "`Timeout` says 'unknown', not
+/// 'failed', in the UI", and also lists `failed` as the status to record. Both cannot hold unless
 /// the interface derives "unknown" by reading the error text, and deciding what to tell a user about
 /// a possibly-duplicated side effect by string-matching an error message is precisely the fragility
 /// these rows exist to prevent.
@@ -186,7 +186,7 @@ pub enum Outcome {
     Failed {
         error: String,
     },
-    /// Timed out. Not a failure — see [`ExecutionStatus::Unknown`].
+    /// Timed out. Not a failure; see [`ExecutionStatus::Unknown`].
     Unknown {
         detail: String,
     },
@@ -335,7 +335,7 @@ impl<'a> McpServerRepository<'a> {
 
     /// Remove a server, its enabled tools, and its execution history.
     ///
-    /// The history goes because `tool_executions.server_id` is `ON DELETE CASCADE` — a record
+    /// The history goes because `tool_executions.server_id` is `ON DELETE CASCADE`: a record
     /// naming a server that no longer exists could not be read back usefully. A user who wants to
     /// keep the history disables the server instead, which is why disabling exists.
     pub fn delete(&self, id: Id) -> Result<()> {
@@ -374,7 +374,7 @@ impl<'a> McpServerRepository<'a> {
 
     /// Which of a server's tools are enabled, whether or not the server itself is.
     ///
-    /// For rendering the settings screen. Not for deciding whether a call may run — use
+    /// For rendering the settings screen. Not for deciding whether a call may run; use
     /// [`Self::allowed_pairs`], which also requires the server to be enabled.
     pub fn enabled_tools(&self, server_id: Id) -> Result<Vec<String>> {
         let conn = self.db.conn();
@@ -389,7 +389,7 @@ impl<'a> McpServerRepository<'a> {
     ///
     /// Keyed by name rather than id because that is what a model proposes and what the client
     /// checks. The join requires `enabled = 1`, so disabling a server withdraws all of its tools
-    /// without touching their rows — the user's per-tool choices survive being turned off.
+    /// without touching their rows; the user's per-tool choices survive being turned off.
     pub fn allowed_pairs(&self) -> Result<Vec<(String, String)>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
@@ -557,7 +557,7 @@ impl<'a> ToolExecutionRepository<'a> {
 
     /// A human approved it.
     ///
-    /// Only from `proposed`, and the transition is a row update guarded by the current status —
+    /// Only from `proposed`, and the transition is a row update guarded by the current status,
     /// so two windows confirming the same proposal cannot both succeed, and a confirmation cannot
     /// be replayed against a call that already ran.
     pub fn confirm(&self, id: Id) -> Result<ToolExecution> {
@@ -573,7 +573,7 @@ impl<'a> ToolExecutionRepository<'a> {
     ///
     /// Confirming and sending used to be two steps with nothing between them: a call stayed
     /// `confirmed` for as long as the external server took to answer, and "send a confirmed call"
-    /// is also what the recovery route does — so a second request in that window (the task list's
+    /// is also what the recovery route does, so a second request in that window (the task list's
     /// "it never went out" button, another window) sent the same call twice. Two filed tickets
     /// from one approval.
     ///
@@ -592,8 +592,8 @@ impl<'a> ToolExecutionRepository<'a> {
             let current = self.get(id)?;
             if current.status == ExecutionStatus::Confirmed {
                 return Err(StorageError::Refused(
-                    "this call is already being sent, or was being sent when the engine stopped \
-                     — a call is never sent twice"
+                    "this call is already being sent, or was being sent when the engine stopped. \
+                     A call is never sent twice"
                         .into(),
                 ));
             }
@@ -653,7 +653,7 @@ impl<'a> ToolExecutionRepository<'a> {
     fn why_not(&self, id: Id, expected: ExecutionStatus) -> StorageError {
         match self.get(id) {
             Ok(current) => StorageError::Refused(format!(
-                "this call is {}, not {} — nothing was sent",
+                "this call is {}, not {}. Nothing was sent",
                 current.status.as_str(),
                 expected.as_str()
             )),
@@ -1030,7 +1030,7 @@ mod tests {
         assert!(err.to_string().contains("confirmed"), "{err}");
     }
 
-    /// One approval, one send. The second taker — the recovery button, another window — is refused
+    /// One approval, one send. The second taker (the recovery button, another window) is refused
     /// while the first is still waiting on the server, and after it finished.
     #[test]
     fn a_confirmed_call_is_claimed_for_sending_once() {

@@ -12,7 +12,7 @@
 //! # Why this is its own crate
 //!
 //! Every other crate in the engine sets `#![forbid(unsafe_code)]`. Asking the Objective-C
-//! runtime for an authorization status needs `unsafe`, and `forbid` cannot be relaxed locally —
+//! runtime for an authorization status needs `unsafe`, and `forbid` cannot be relaxed locally,
 //! by design. Rather than downgrade that guarantee across a crate that does real audio work,
 //! the two unsafe calls live here, in a file short enough to audit in one sitting.
 //!
@@ -30,7 +30,7 @@ pub enum Authorization {
     /// Never asked. The caller may prompt.
     NotDetermined,
     Granted,
-    /// Refused, or forbidden by policy on a managed device. Prompting again will not help —
+    /// Refused, or forbidden by policy on a managed device. Prompting again will not help:
     /// only the Privacy pane in System Settings can change it.
     Denied,
     /// Not answerable here: another platform, or a capability AVFoundation does not track.
@@ -66,7 +66,7 @@ pub fn microphone() -> Authorization {
 /// Ask for the microphone, raising the system dialog if it has never been asked.
 ///
 /// This is the call that puts the app in the Privacy pane's Microphone list. Opening an audio
-/// stream is *not* — on macOS an input stream opens happily without a grant and delivers
+/// stream is *not*: on macOS an input stream opens happily without a grant and delivers
 /// silence, so treating a successful open as permission reports a grant that does not exist and
 /// records nothing.
 ///
@@ -103,8 +103,8 @@ pub fn request_microphone() -> Authorization {
         AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
     }
 
-    // Generous, because the bound is a person noticing a dialog. A timeout here is not a denial
-    // — it means we still do not know, and the next status read will say so.
+    // Generous, because the bound is a person noticing a dialog. A timeout here is not a denial.
+    // It means we still do not know, and the next status read will say so.
     match rx.recv_timeout(Duration::from_secs(120)) {
         Ok(true) => Authorization::Granted,
         Ok(false) => Authorization::Denied,
@@ -142,7 +142,7 @@ mod screen {
     }
 }
 
-/// Whether this process may capture the screen — which on macOS is what gates system audio.
+/// Whether this process may capture the screen, which on macOS is what gates system audio.
 ///
 /// Only two answers, and that is the API's limit rather than a simplification: preflight
 /// reports `false` both for "never asked" and for "asked and refused". Distinguishing them
@@ -165,7 +165,7 @@ pub fn screen_recording_granted() -> bool {
 /// message tells the user to go to.
 ///
 /// Returns the grant as it stands after asking. macOS commonly answers `false` even when the
-/// user says yes, because the grant applies from the next launch — so a caller must treat
+/// user says yes, because the grant applies from the next launch, so a caller must treat
 /// `false` as "not yet", not as a refusal to be recorded forever.
 #[cfg(target_os = "macos")]
 pub fn request_screen_recording() -> bool {
@@ -180,7 +180,7 @@ pub fn request_screen_recording() -> bool {
 /// Whether this process can hold a screen-recording grant of its own.
 ///
 /// Only from inside an application bundle. macOS records the grant against a bundle's identity,
-/// and a loose executable — `cargo run`, `cargo test`, the binary straight out of `target/` — has
+/// and a loose executable (`cargo run`, `cargo test`, the binary straight out of `target/`) has
 /// none: its request is attributed to whatever launched it, usually the terminal, so nothing it is
 /// granted is its own and no switch in System Settings is labelled with its name.
 ///
@@ -192,8 +192,8 @@ pub fn request_screen_recording() -> bool {
 /// A Developer ID team identifier, on the evidence of a bundle whose request came back `false` in
 /// 25ms with no dialog. But that bundle was signed only by the linker, which signs the executable
 /// and not the bundle around it, so the team identifier was not the only thing wrong with it.
-/// Measured again on macOS 26.6 with one bundle signed three ways — linker-only, ad-hoc, and a
-/// self-signed certificate, none of them with a team identifier — tccd attributed every request to
+/// Measured again on macOS 26.6 with one bundle signed three ways: linker-only, ad-hoc, and a
+/// self-signed certificate, none of them with a team identifier, tccd attributed every request to
 /// the bundle id, raised the alert for each, and wrote each into TCC. Notewise.app signed with a
 /// self-signed certificate was then entered under `identifier "dev.notewise.app" and certificate
 /// leaf = H"…"`, and could be switched on in System Settings. An immediate `false` is simply what
@@ -286,7 +286,7 @@ impl Capability {
             Capability::Accessibility
             | Capability::InputMonitoring
             | Capability::ScreenRecording => {
-                format!("{base} Then quit and reopen Notewise — macOS only applies this at launch.")
+                format!("{base} Then quit and reopen Notewise. macOS only applies this at launch.")
             }
             Capability::Microphone => base,
         }
@@ -328,7 +328,7 @@ mod accessibility {
     /// Ask, which on this grant means "open the pane and highlight us".
     ///
     /// There is no dialog that grants Accessibility. macOS shows a panel offering to open System
-    /// Settings, and the user flips a switch there — so this returns the status as it stands
+    /// Settings, and the user flips a switch there, so this returns the status as it stands
     /// afterwards, which is almost always still `false`.
     pub fn prompt() -> bool {
         // SAFETY: a one-entry dictionary is built with the framework's own key and boolean
@@ -373,7 +373,7 @@ mod input_monitoring {
         fn IOHIDRequestAccess(request: u32) -> bool;
     }
 
-    /// `kIOHIDRequestTypeListenEvent` — watching keystrokes, which is what inline completion needs.
+    /// `kIOHIDRequestTypeListenEvent`: watching keystrokes, which is what inline completion needs.
     ///
     /// Not `kIOHIDRequestTypePostEvent` (1), which is *sending* them and is covered by
     /// Accessibility. Asking for the wrong one puts the app in the wrong list, and the user turns on
@@ -412,7 +412,7 @@ mod input_monitoring {
 ///
 /// Two answers, like screen recording and for the same reason: `AXIsProcessTrusted` cannot tell
 /// "never asked" from "asked and refused". What it *can* tell, and what matters, is whether the
-/// grant is in force right now — a grant given a minute ago in System Settings still reads as
+/// grant is in force right now: a grant given a minute ago in System Settings still reads as
 /// absent until the app restarts, and reporting that honestly is better than a feature that half
 /// works.
 #[cfg(target_os = "macos")]
@@ -564,7 +564,7 @@ mod tests {
         }
     }
 
-    /// A process outside an app bundle cannot hold screen recording, so asking is pointless — and
+    /// A process outside an app bundle cannot hold screen recording, so asking is pointless, and
     /// `Denied` would invite exactly that. This is the case every test binary is in.
     #[test]
     #[cfg(target_os = "macos")]
@@ -633,7 +633,7 @@ mod tests {
         let _ = request_input_monitoring();
     }
 
-    /// Calling it must not prompt, panic, or block — this runs on every readiness check, on a
+    /// Calling it must not prompt, panic, or block: this runs on every readiness check, on a
     /// machine whose actual grant we cannot control from a test.
     #[test]
     fn reading_the_status_is_harmless_and_terminates() {

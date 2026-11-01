@@ -65,7 +65,7 @@ export function MeetingDetectionSettings({ onNavigate }: Props) {
         Noticing meetings
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-        When a meeting starts, Notewise offers to record it — it never starts on its own. The offer
+        When a meeting starts, Notewise offers to record it. It never starts on its own. The offer
         appears at the top of this window and, if you allow notifications, outside it too.
       </p>
 
@@ -77,7 +77,7 @@ export function MeetingDetectionSettings({ onNavigate }: Props) {
           detail={
             extensionHeard
               ? `Last reported ${relative(extensionHeard)}. Meetings opened in a browser tab are noticed.`
-              : "Not heard from. Install the extension from apps/browser-extension and open a meeting in a tab — until then, browser meetings are not noticed."
+              : "Not heard from. Install the extension from apps/browser-extension and open a meeting in a tab. Until then, browser meetings are not noticed."
           }
         />
 
@@ -89,7 +89,7 @@ export function MeetingDetectionSettings({ onNavigate }: Props) {
             status.calendar_connected
               ? `Connected. An event with a meeting link waits ${Math.round(status.grace_secs / 60)} minute${
                   Math.round(status.grace_secs / 60) === 1 ? "" : "s"
-                } before it counts — calendars are full of meetings nobody attends.${
+                } before it counts; calendars are full of meetings nobody attends.${
                   calendarHeard ? ` Last matched ${relative(calendarHeard)}.` : ""
                 }`
               : "No calendar connected, so nothing on your schedule is noticed."
@@ -109,7 +109,7 @@ export function MeetingDetectionSettings({ onNavigate }: Props) {
             permission === "granted"
               ? "Allowed. You are told even when Notewise is behind another window."
               : permission === "denied"
-                ? "Refused. Detection still works, but the offer only appears inside this window — you have to be looking at it. Allow notifications for Notewise in System Settings to change that."
+                ? "Refused. Detection still works, but the offer only appears inside this window; you have to be looking at it. Allow notifications for Notewise in System Settings to change that."
                 : permission === "unsupported"
                   ? "This build cannot raise notifications."
                   : "Not asked yet. Without this the offer only appears inside this window."

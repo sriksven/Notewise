@@ -1,7 +1,7 @@
 //! Microphone capture via cpal.
 //!
 //! Behind the `os-capture` feature. This is the one OS capture path that needs no signed
-//! bundle and no screen-recording grant — just the microphone permission, which the OS
+//! bundle and no screen-recording grant, just the microphone permission, which the OS
 //! prompts for on first use. That makes it the difference between a product that records
 //! in-person meetings today and one that records nothing.
 //!
@@ -11,7 +11,7 @@
 //! threads. The stream is therefore built and owned on its own thread, which forwards samples
 //! over a channel. That also keeps the audio callback off the path of anything slow: the
 //! callback only pushes into a queue, and a consumer that stalls cannot block the OS audio
-//! thread — which on most platforms causes dropouts rather than merely lag.
+//! thread, which on most platforms causes dropouts rather than merely lag.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -187,7 +187,7 @@ impl AudioSource for MicrophoneSource {
             }
 
             if self.stop.load(Ordering::Relaxed) {
-                // Return the tail rather than discarding it — that is the last thing said.
+                // Return the tail rather than discarding it: that is the last thing said.
                 return Ok(if self.pending.is_empty() {
                     None
                 } else {
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn devices_can_be_enumerated_without_opening_one() {
-        // Must not fail on a machine with no microphone — a picker needs to render either way.
+        // Must not fail on a machine with no microphone; a picker needs to render either way.
         let devices = input_devices().expect("enumeration should not error");
 
         for device in &devices {

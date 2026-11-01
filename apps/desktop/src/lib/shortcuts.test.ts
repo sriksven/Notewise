@@ -143,7 +143,7 @@ describe("handleKey", () => {
 
 describe("the focus request", () => {
   // `requestSearchFocus` also dispatches on `window`, for a field already on screen. These
-  // tests are about the standing request, so the dispatch target is a stub — there is no DOM
+  // tests are about the standing request, so the dispatch target is a stub: there is no DOM
   // here, and the listener side is exercised in the browser run instead.
   beforeEach(() => {
     clearSearchFocusRequest();
@@ -175,8 +175,8 @@ describe("the focus request", () => {
   // caret out of whatever the user had started typing.
   it("expires rather than waiting forever", () => {
     // The clock is read once, before the request. Reading it again afterwards let a busy test run
-    // spend a millisecond between the two reads, turning "999 ms later" into 1,000 — past the
-    // window — and failing at random under load.
+    // spend a millisecond between the two reads, turning "999 ms later" into 1,000 (past the
+    // window) and failing at random under load.
     const at = Date.now();
     requestSearchFocus();
     expect(focusIsPending(at + 999)).toBe(true);

@@ -1,6 +1,6 @@
 //! POST Notewise events to a URL the user controls.
 //!
-//! One connector that covers the automation long tail — Zapier, Make, n8n, or a script —
+//! One connector that covers the automation long tail (Zapier, Make, n8n, or a script)
 //! without a bespoke integration per destination.
 //!
 //! Deliveries are signed with HMAC-SHA256 over the raw body. A receiver otherwise has no way
@@ -95,7 +95,7 @@ impl SinkConnector for WebhookSink {
         if status.is_success() {
             // Identity is the node, not the payload. `external_items` is keyed on
             // `(connector_id, external_id)` and the dispatcher upserts on it, so a
-            // content-derived id — the signature, say — would mint a fresh row and a fresh
+            // content-derived id (the signature, say) would mint a fresh row and a fresh
             // `SyncedTo` edge on every edit, growing without bound and leaving
             // `existing_ref` to pick arbitrarily among them. A webhook receiver issues no id
             // of its own, so a synthetic one derived from the node is what gives the

@@ -4,14 +4,14 @@
 //!
 //! `PasteboardCreate` and friends are a plain C API in ApplicationServices. Using them keeps this
 //! crate's only foreign dependency the frameworks themselves, matching how `macos-permissions`
-//! reads TCC — no Objective-C runtime, no message sends, nothing to get wrong about object
+//! reads TCC: no Objective-C runtime, no message sends, nothing to get wrong about object
 //! lifetimes beyond CoreFoundation's own rules.
 //!
 //! # Why what is on the clipboard matters more than it looks
 //!
 //! The insertion path replaces the clipboard and puts it back. That is fine for text. It is not fine
 //! for a screenshot somebody copied thirty seconds ago, because a text snapshot cannot restore an
-//! image — restoring would *delete* it. So a snapshot records not only the text it captured but
+//! image: restoring would *delete* it. So a snapshot records not only the text it captured but
 //! whether there was anything it could not, and the caller is told rather than reassured.
 
 use super::cf;
@@ -25,7 +25,7 @@ const NO_ERROR: OSStatus = 0;
 /// `kPasteboardFlavorNoFlags`.
 const NO_FLAGS: u32 = 0;
 
-/// The uniform type for plain UTF-8 text — what a dictated sentence is.
+/// The uniform type for plain UTF-8 text: what a dictated sentence is.
 const UTF8_TEXT: &str = "public.utf8-plain-text";
 
 /// Any non-null identifier works for an item this process is putting on the pasteboard.
@@ -39,7 +39,7 @@ extern "C" {
     fn PasteboardGetItemCount(pasteboard: PasteboardRef, out: *mut usize) -> OSStatus;
     /// `inIndex` is a `CFIndex`, which is 64 bits wide. Declaring it as a `u32` leaves the upper
     /// half of the argument register undefined on arm64, and the garbage index segfaults inside
-    /// the framework — which is exactly what it did.
+    /// the framework, which is exactly what it did.
     fn PasteboardGetItemIdentifier(
         pasteboard: PasteboardRef,
         index: cf::CFIndex,
@@ -96,7 +96,7 @@ impl Clipboard {
     /// Pick up changes other applications have made.
     ///
     /// Required before every read: the pasteboard is a shared resource and this handle caches, so a
-    /// snapshot taken without synchronising can be one copy behind — which would restore the wrong
+    /// snapshot taken without synchronising can be one copy behind, which would restore the wrong
     /// thing.
     fn synchronize(&self) {
         // SAFETY: one argument, and the return value is a flags word this code does not need.
@@ -237,7 +237,7 @@ impl Clipboard {
 
     /// Put a snapshot back.
     ///
-    /// Answers `false` when it could not be — including when the snapshot knew it held something a
+    /// Answers `false` when it could not be, including when the snapshot knew it held something a
     /// text restore cannot reproduce. Claiming otherwise is the silent version of destroying it.
     pub fn restore(&self, snapshot: &ClipboardSnapshot) -> bool {
         if snapshot.had_uncapturable_content {
@@ -259,7 +259,7 @@ impl Clipboard {
 /// Whether a pasteboard type is plain text this code can capture and put back verbatim.
 ///
 /// Pure, and the one piece of judgement in this file: everything else is a syscall. Rich text and
-/// HTML are deliberately *not* capturable — the bytes could be copied, but restoring only the plain
+/// HTML are deliberately *not* capturable: the bytes could be copied, but restoring only the plain
 /// text would silently strip the formatting, and a user who copied a styled paragraph and got back
 /// an unstyled one has lost something.
 pub fn is_capturable_as_text(flavor: &str) -> bool {
@@ -320,7 +320,7 @@ mod tests {
 
     /// A genuine round trip through the real system clipboard: save what is there, write, read it
     /// back, put the original back. This is the one native path that can be fully verified, and it
-    /// is also the one that can lose a user's data — so it is verified.
+    /// is also the one that can lose a user's data, so it is verified.
     #[test]
     fn text_written_to_the_clipboard_can_be_read_back_and_the_original_restored() {
         let _guard = test_lock();
@@ -352,10 +352,12 @@ mod tests {
         let clipboard = Clipboard::open().expect("opens");
         let before = clipboard.snapshot().expect("a snapshot");
 
-        clipboard.write_text("café — 日本語 🎙").expect("writes");
+        clipboard
+            .write_text("café \u{2014} 日本語 🎙")
+            .expect("writes");
         assert_eq!(
             clipboard.snapshot().expect("a snapshot").text.as_deref(),
-            Some("café — 日本語 🎙")
+            Some("café \u{2014} 日本語 🎙")
         );
 
         let _ = clipboard.restore(&before);

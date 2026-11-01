@@ -12,7 +12,7 @@ const DAY = 24 * HOUR;
 /**
  * A timestamp as a person would say it.
  *
- * Relative for the last week, then absolute — "13 days ago" is arithmetic the reader has to do,
+ * Relative for the last week, then absolute: "13 days ago" is arithmetic the reader has to do,
  * while "12 Mar" is a date. The year appears only when it is not this one, because a list of
  * meetings from this month does not need it repeated on every row.
  *

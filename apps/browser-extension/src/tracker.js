@@ -3,16 +3,16 @@
  *
  * Platform-independent on purpose: every adapter in `platforms.js` reduces a very different DOM to
  * the same `Seen[]` shape, and everything after that point is shared. This is where the two
- * genuinely tricky parts live — the clock, and the fact that a poll is not an event.
+ * genuinely tricky parts live: the clock, and the fact that a poll is not an event.
  *
  * # The clock
  *
  * The engine wants milliseconds since the recording started. This page knows `performance.now()`.
- * Those are unrelated origins, and the offset between them cannot be recovered after the fact — so
+ * Those are unrelated origins, and the offset between them cannot be recovered after the fact, so
  * it is established **once**, when tracking starts, and every timestamp is derived from it.
  *
  * `recordingStartedAt` is supplied by the caller, which learned it from the engine. If tracking
- * starts late — the user opens the meeting tab after starting the recording — the caller passes the
+ * starts late (the user opens the meeting tab after starting the recording), the caller passes the
  * elapsed offset and turns land in the right place anyway.
  *
  * # A poll is not an event
@@ -52,7 +52,7 @@ export const MIN_TURN_MS = 600;
  *
  * `startedAt` is the engine's timestamp for the recording's start. The page and the engine run on
  * one machine and share its wall clock, so the difference is the offset this file's header says is
- * unrecoverable afterwards. Zero when the timestamp is missing or unreadable — the old behaviour —
+ * unrecoverable afterwards. Zero when the timestamp is missing or unreadable (the old behaviour)
  * and never negative: a clock adjusted backwards must not place a turn before the recording began.
  *
  * @param {string | null | undefined} startedAt an RFC 3339 timestamp
@@ -95,8 +95,8 @@ export class SpeakerTracker {
   /**
    * Fold one observation in.
    *
-   * `seen === null` means the adapter could not read the page. That closes every open turn — an
-   * unreadable page is not evidence that the last speaker is still talking — and is counted, so the
+   * `seen === null` means the adapter could not read the page. That closes every open turn (an
+   * unreadable page is not evidence that the last speaker is still talking), and is counted, so the
    * caller can tell a broken selector from a quiet meeting.
    *
    * @param {import('./platforms.js').Seen[] | null} seen
@@ -123,7 +123,7 @@ export class SpeakerTracker {
       if (!speakingNow.has(id)) this.#close(id, at);
     }
 
-    // Someone who started: open one. Several at once is normal and kept — people talk over each
+    // Someone who started: open one. Several at once is normal and kept: people talk over each
     // other, and dropping the quieter one here would discard the evidence that lets the engine
     // recognise an ambiguous segment as ambiguous.
     for (const id of speakingNow) {

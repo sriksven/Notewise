@@ -1,4 +1,4 @@
-//! Only this machine may drive the engine — including the browser on it.
+//! Only this machine may drive the engine, including the browser on it.
 //!
 //! [`crate::Server::bind`] keeps the network out: the listener is on loopback. That is not enough
 //! on its own, because every web page the user opens runs *on this machine*. Two ways in, both
@@ -6,14 +6,14 @@
 //!
 //! - **Cross-site requests.** A page cannot read a cross-origin response, but it can send one. A
 //!   form post or a `fetch` with `Content-Type: text/plain` needs no preflight, and every handler
-//!   taking `Option<Json<_>>` accepts a missing body — so any page could end a meeting, start a
+//!   taking `Option<Json<_>>` accepts a missing body, so any page could end a meeting, start a
 //!   microphone recording in a capture build, or ask the OS for a permission.
 //! - **DNS rebinding.** A page whose own hostname is re-pointed at 127.0.0.1 is *same-origin* with
 //!   the engine, so it can read responses too: the meeting list, and `POST /v1/mcp/servers` with a
 //!   `command` followed by `/start` is a program of the page's choosing run as the user.
 //!
-//! So every request must name a loopback host, which a rebinding page cannot do — its `Host` is its
-//! own domain — and a request that changes anything must not come from a foreign origin. Clients
+//! So every request must name a loopback host, which a rebinding page cannot do (its `Host` is its
+//! own domain) and a request that changes anything must not come from a foreign origin. Clients
 //! that legitimately reach the engine all pass: the desktop window is served by the engine itself
 //! (`http://127.0.0.1:<port>`), the dev servers proxy from `localhost`, the browser extension's
 //! worker sends `chrome-extension://<id>`, and the CLI, scripts and `curl` send no `Origin` at all.
@@ -60,7 +60,7 @@ pub(crate) async fn guard(request: Request, next: Next) -> Response {
 }
 
 /// Methods a browser lets a page send cross-origin without asking, plus the ones it would ask
-/// about. Only reads are exempt — a page cannot see their answers without CORS, and there is none.
+/// about. Only reads are exempt: a page cannot see their answers without CORS, and there is none.
 fn changes_state(method: &Method) -> bool {
     !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
@@ -111,7 +111,7 @@ fn is_trusted_origin(origin: &HeaderValue) -> bool {
         return !id.is_empty();
     }
 
-    // `null` — a sandboxed frame, a `file:` page, a redirect — falls through to here and fails:
+    // `null` (a sandboxed frame, a `file:` page, a redirect) falls through to here and fails:
     // none of those is a client of this engine.
     origin
         .strip_prefix("http://")

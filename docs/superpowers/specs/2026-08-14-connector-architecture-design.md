@@ -1,8 +1,8 @@
-# Connector architecture — design
+# Connector architecture - design
 
 **Date:** 2026-08-14
 **Status:** approved, ready for implementation planning
-**Scope of this spec:** Spec 0 + Spec 1 below. Specs 2–4 are described here only so the
+**Scope of this spec:** Spec 0 + Spec 1 below. Specs 2-4 are described here only so the
 seam is designed to hold them; they are separate design cycles.
 
 ---
@@ -40,19 +40,19 @@ This spec defines that seam.
 
 ## Decomposition
 
-The five connector categories are not peers — four are backends, one is the thing they plug
+The five connector categories are not peers; four are backends, one is the thing they plug
 into. Work splits accordingly:
 
 | Spec | Scope | License / phase |
 |---|---|---|
-| **0** | Connector seam: traits, outbox, credentials, graph kinds, schema v5 | MIT `core/` — now |
-| **1** | Markdown vault sink + outbound webhook sink | MIT `core/` — now |
-| 2 | Calendar source (Google, Microsoft) over PKCE | MIT `core/` — Phase 2 |
-| 3 | MCP write scope | MIT `core/` — independent |
-| 4+ | Vendor long tail: PM, comms, CRM, capture sources, hosted STT | mixed — Phase 3 |
+| **0** | Connector seam: traits, outbox, credentials, graph kinds, schema v5 | MIT `core/` - now |
+| **1** | Markdown vault sink + outbound webhook sink | MIT `core/` - now |
+| 2 | Calendar source (Google, Microsoft) over PKCE | MIT `core/` - Phase 2 |
+| 3 | MCP write scope | MIT `core/` - independent |
+| 4+ | Vendor long tail: PM, comms, CRM, capture sources, hosted STT | mixed - Phase 3 |
 
 Specs 0 and 1 ship as one cycle. A trait with no implementations cannot be verified, and the
-two local sinks exercise the full path — enqueue, deliver, record, retry — without an OAuth
+two local sinks exercise the full path (enqueue, deliver, record, retry) without an OAuth
 app standing in the way.
 
 Spec 3 is on this list because it was asked for alongside the others, but it does not depend
@@ -64,19 +64,19 @@ on the connector crate. It is a trust decision about the `mcp-server` surface.
 
 Each of these was chosen against a named alternative, recorded so the reasoning survives.
 
-### D1 — Direction-split traits, not one trait with capability flags
+### D1 - Direction-split traits, not one trait with capability flags
 
 `AiBackend` gets away with a single trait because every model backend genuinely performs all
 four operations. Connectors do not: calendar only pulls, a webhook only pushes, a vault only
 mirrors. A single trait would leave every implementation stubbing half its methods, and
 "does this support push" would become a runtime check.
 
-Splitting by direction makes capability a compile-time fact — expressed by which trait you
+Splitting by direction makes capability a compile-time fact, expressed by which trait you
 implement.
 
 **Rejected:** one `Connector` trait with a `capabilities()` bitmask.
 
-### D2 — Outbound work goes through an outbox table
+### D2 - Outbound work goes through an outbox table
 
 Pushes fail. A retry that is not idempotent files the same Linear issue twice. An outbox
 gives at-least-once delivery, survives process restarts, makes pending work inspectable, and
@@ -84,23 +84,23 @@ makes the delivery path testable without network access.
 
 **Rejected:** direct calls at the event site, with retries in memory.
 
-### D3 — External artifacts are graph nodes
+### D3 - External artifacts are graph nodes
 
 `NodeKind::ExternalItem` plus `EdgeKind::SyncedTo`. A decision that became Linear ENG-412 is
 reachable from `find_related` in one traversal, so agents and the UI get external links
 through the mechanism they already use.
 
-`kinds.rs` documents that adding a variant needs no schema migration — the edge table stores
-kinds as strings — so this is cheap now and expensive to retrofit later.
+`kinds.rs` documents that adding a variant needs no schema migration; the edge table stores
+kinds as strings, so this is cheap now and expensive to retrofit later.
 
 **Rejected:** a `sync_state` table queried separately by each surface.
 
-### D4 — One node kind for all external artifacts
+### D4 - One node kind for all external artifacts
 
 A calendar event is an `ExternalItem` whose connector is `google_calendar`. A separate
 `CalendarEvent` kind would be a second mechanism for the same idea.
 
-### D5 — Credentials live in the OS keychain behind a trait
+### D5 - Credentials live in the OS keychain behind a trait
 
 A long-lived Google refresh token has a materially different risk profile from a meeting
 summary. It is also exactly the kind of thing that ends up inside a support bundle. A
@@ -109,19 +109,19 @@ an in-memory implementation.
 
 **Rejected:** the existing `app_settings` table.
 
-### D6 — Vendor connectors run locally where PKCE allows
+### D6 - Vendor connectors run locally where PKCE allows
 
 Google and Microsoft both support OAuth for installed applications using PKCE, with no client
 secret in the binary. Calendar, Linear, and GitHub can therefore run entirely on-device in
 MIT `core/`, with no Notewise account required.
 
 `cloud/integrations` (BSL) is reserved for vendors that genuinely require a confidential
-client or a publicly reachable webhook receiver — Salesforce, Slack events. That is a rule,
+client or a publicly reachable webhook receiver: Salesforce, Slack events. That is a rule,
 which matters because `CLAUDE.md` warns that moving code between `cloud/` and `core/`
 relicenses it.
 
 **Rejected:** brokering every vendor through the cloud, which would make external connectors
-require an account — including the local-first ones.
+require an account, including the local-first ones.
 
 ---
 
@@ -145,7 +145,7 @@ apps/cli ─────┤              ├─> connectors ─> graph ─> stor
 #[async_trait]
 pub trait Connector: Send + Sync + std::fmt::Debug {
     /// Stable identifier, e.g. "vault", "webhook", "google_calendar".
-    /// Persisted in the outbox and in external_items — changing one is a breaking change.
+    /// Persisted in the outbox and in external_items; changing one is a breaking change.
     fn id(&self) -> &str;
     fn display_name(&self) -> &str;
     /// Whether this connector keeps data on the user's machine.
@@ -174,13 +174,13 @@ pub trait CredentialStore: Send + Sync + std::fmt::Debug {
 connectors keep data on-device as something a user can verify rather than trust.
 
 Supporting types: `Health`, `Cursor`, `PullBatch`, `Inbound`, `Outbound`, `ExternalRef`,
-`Operation` (`Create` | `Update` | `Delete`), and `Secret` — a wrapper whose hand-written
+`Operation` (`Create` | `Update` | `Delete`), and `Secret`, a wrapper whose hand-written
 `Debug` renders `Secret(redacted)`, so a token cannot reach a log through an ordinary `{:?}`.
 
 `Secret` deliberately implements **no** `Display`. An earlier draft of this spec said `Display`
 should redact too; not implementing it at all is the stronger guarantee. A redacting `Display`
 would give `{}` a second, easy-looking spelling that a maintainer might reach for expecting
-either behaviour — and `Display` conventionally shows the real value, so whichever it did
+either behaviour, and `Display` conventionally shows the real value, so whichever it did
 would surprise someone. With no impl, `{}` fails to compile and the only route to the raw
 value is the conspicuously named `.expose()`, which is the friction the type exists to create.
 
@@ -217,7 +217,7 @@ Linear issue."*
 ### Schema v5
 
 Appended to `MIGRATIONS` in `core/crates/storage/src/migrations.rs`. Migrations are
-append-only; v1–v3 are untouched.
+append-only; v1-v3 are untouched.
 
 ```sql
 CREATE TABLE external_items (
@@ -264,7 +264,7 @@ CREATE INDEX idx_outbox_ready ON connector_outbox(status, next_attempt_at);
 `connector_accounts` holds no tokens. Tokens live in the keychain, addressed by
 `connector_id`.
 
-**Ownership vs association.** An `external_items` row is owned by nothing in Notewise — it
+**Ownership vs association.** An `external_items` row is owned by nothing in Notewise; it
 records a thing that lives elsewhere. So it gets a table with no owning foreign key, and is
 associated into the object graph by `SyncedTo` edges. This satisfies rule 4 rather than
 bending it.
@@ -307,12 +307,12 @@ traverses edges, finds nothing, and the sink creates a duplicate.
 Wrapping the three writes in `record_success` in one transaction narrows that window to the
 interval between the remote side effect and the first local write. It cannot eliminate it: no
 local transaction can be atomic with a side effect on someone else's server. Closing it
-completely needs the remote system to accept an idempotency key of its own — which Linear,
+completely needs the remote system to accept an idempotency key of its own, which Linear,
 Stripe, and GitHub all support and a plain webhook receiver does not. Per-connector, not
 architectural.
 
 **There is no event bus.** "Domain event" above means an explicit `Outbox::enqueue` call at
-the site that changed the data — `end_meeting` and `summarize_meeting` in `api-server`, and
+the site that changed the data, `end_meeting` and `summarize_meeting` in `api-server`, and
 the equivalent `cli` commands. An event bus was considered and rejected: it would be a second
 dispatch mechanism alongside the outbox, and the outbox already provides the durability and
 ordering a bus would be introduced to get. Enqueue is cheap and synchronous; delivery is not.
@@ -320,7 +320,7 @@ ordering a bus would be introduced to get. Enqueue is cheap and synchronous; del
 ### Inbound
 
 Spec 0 defines the inbound types and the `SourceConnector` trait so the seam is shaped to
-hold them, but **builds no scheduler** — Specs 0 and 1 contain no source connectors, and a
+hold them, but **builds no scheduler**; Specs 0 and 1 contain no source connectors, and a
 scheduler with nothing to schedule is untestable. The polling scheduler lands with Spec 2,
 the first source connector.
 
@@ -375,7 +375,7 @@ Fully verifiable, no `#[ignore]`:
 
 - Outbox: same idempotency key twice yields one `external_items` row; backoff schedule;
   lease prevents double-claim; exhausted attempts dead-letter.
-- Vault sink against a `tempfile::TempDir` — real files, no network.
+- Vault sink against a `tempfile::TempDir`, real files, no network.
 - Webhook sink against a local `axum` test server, including a 500 path that retries and a
   429 path that honors `Retry-After`.
 - Graph: `SyncedTo` edges surface through `find_related` with the right `via`.
@@ -384,8 +384,8 @@ Fully verifiable, no `#[ignore]`:
 
 `#[ignore]` with a stated reason, per rule 6:
 
-- The real OAuth browser redirect — needs a live vendor app and a user present.
-- Real keychain reads — CI has no unlocked login keychain. `MemoryStore` covers the logic, so
+- The real OAuth browser redirect: needs a live vendor app and a user present.
+- Real keychain reads; CI has no unlocked login keychain. `MemoryStore` covers the logic, so
   the ignored tests cover only the OS boundary itself.
 
 A green CI run must not imply that a real Google account was ever contacted.
@@ -399,9 +399,9 @@ A green CI run must not imply that a real Google account was ever contacted.
 2. Schema v5 and three repositories in `storage`.
 3. `ExternalItem` and `SyncedTo` in `graph`.
 4. `KeychainStore` for macOS and Windows; Secret Service for Linux.
-5. **Vault sink** — mirrors meetings to a user-chosen folder as markdown, reusing
+5. **Vault sink**: mirrors meetings to a user-chosen folder as markdown, reusing
    `storage::export`, which already renders it.
-6. **Webhook sink** — POSTs a JSON payload on `meeting.ended`, `decision.created`,
+6. **Webhook sink**: POSTs a JSON payload on `meeting.ended`, `decision.created`,
    `action_item.created`, signed with an HMAC-SHA256 header over the raw body. The shared
    secret is generated by Notewise when the endpoint is configured, shown to the user once,
    and stored via `CredentialStore` like any other credential. Receivers need a way to tell a

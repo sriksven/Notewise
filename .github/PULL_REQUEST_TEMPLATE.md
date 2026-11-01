@@ -14,7 +14,7 @@
 
 ## Architectural rules
 
-These are load-bearing. Tick each, or explain below why the change needs to break one —
+These are load-bearing. Tick each, or explain below why the change needs to break one.
 sometimes a rule is wrong, but it should be a decision rather than a drift.
 
 - [ ] No model provider is called outside `core/crates/ai-router`

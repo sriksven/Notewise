@@ -20,7 +20,7 @@ const DEFAULT_DAYS = 30;
  *
  * # Off is the default and stays the default
  *
- * A transcript is text about a meeting. A recording is the meeting — every aside, every voice, and
+ * A transcript is text about a meeting. A recording is the meeting: every aside, every voice, and
  * everyone present whether or not they knew a laptop was keeping it. That is a different promise, so
  * nothing here is opt-out.
  *
@@ -70,7 +70,7 @@ export function AudioRetentionSettings() {
   };
 
   /**
-   * Choosing "off" throws recordings away, so it is confirmed — but only when there are any.
+   * Choosing "off" throws recordings away, so it is confirmed, but only when there are any.
    *
    * Confirming a no-op teaches people to click through dialogs, which is how the one that mattered
    * gets clicked through too.
@@ -123,7 +123,7 @@ export function AudioRetentionSettings() {
         Keep the recording
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-        Transcripts are always kept. This is about the audio they were made from — keeping it lets
+        Transcripts are always kept. This is about the audio they were made from: keeping it lets
         you click any line of a transcript to hear it, which is the only way to check a word the
         transcriber got wrong. It is also a recording of everyone who was in the room.
       </p>
@@ -216,7 +216,7 @@ export function AudioRetentionSettings() {
               Keep it until I delete the meeting
             </span>
             <span className="mt-0.5 block text-[12px] leading-relaxed text-ink-muted">
-              Nothing expires. Deleting a meeting deletes its audio with it — that is the only thing
+              Nothing expires. Deleting a meeting deletes its audio with it; that is the only thing
               that removes one.
             </span>
           </span>
@@ -238,7 +238,7 @@ export function AudioRetentionSettings() {
           </span>
 
           {/* Only under a day-based policy. `until_deleted` has nothing to expire, and `off` has
-              already swept — a button that always reports "nothing to do" is noise. */}
+              already swept: a button that always reports "nothing to do" is noise. */}
           {isDays && (status?.retained ?? 0) > 0 && (
             <button
               type="button"

@@ -3,8 +3,8 @@
 //! # Why a listener and not a pasted code
 //!
 //! Microsoft's authorization code arrives as a query parameter on a redirect. The alternatives to
-//! catching it are asking the user to copy a code out of a browser address bar — which is where
-//! `urn:ietf:wg:oauth:2.0:oob` used to go before every vendor deprecated it — or registering a
+//! catching it are asking the user to copy a code out of a browser address bar, which is where
+//! `urn:ietf:wg:oauth:2.0:oob` used to go before every vendor deprecated it, or registering a
 //! custom URL scheme, which needs an installed, registered bundle and does not work for a `cargo
 //! run`. A loopback listener is what the spec for native apps actually recommends, and it is the one
 //! option that works for a development build.
@@ -54,8 +54,8 @@ pub struct PendingAuth {
     state: String,
     redirect_uri: String,
     authorize_url: String,
-    /// How long to wait. A field rather than only a constant so a caller that knows better — and a
-    /// test that must not wait five minutes — can say so.
+    /// How long to wait. A field rather than only a constant so a caller that knows better (and a
+    /// test that must not wait five minutes) can say so.
     timeout: Duration,
 }
 
@@ -63,7 +63,7 @@ impl PendingAuth {
     /// Open a listener and build the URL to send the user to.
     ///
     /// The listener is opened *before* the URL is returned, so the redirect cannot arrive at a port
-    /// nothing is on — which is what would happen if the browser were opened first and the bind
+    /// nothing is on, which is what would happen if the browser were opened first and the bind
     /// raced it.
     pub async fn start(client_id: &str) -> Result<Self> {
         let listener = TcpListener::bind(LOOPBACK)
@@ -108,8 +108,8 @@ impl PendingAuth {
 
     /// Wait for the redirect and return the authorization code.
     ///
-    /// Requests that are not the one being waited for — a favicon fetch, a probe, a stale tab from a
-    /// previous attempt — are answered and ignored rather than ending the wait. Treating the first
+    /// Requests that are not the one being waited for (a favicon fetch, a probe, a stale tab from a
+    /// previous attempt) are answered and ignored rather than ending the wait. Treating the first
     /// connection as the answer would make a browser's speculative prefetch cancel a sign-in.
     pub async fn wait_for_code(&self) -> Result<String> {
         let deadline = tokio::time::Instant::now() + self.timeout;
@@ -192,7 +192,7 @@ impl PendingAuth {
 
         if !status.is_success() {
             // An authorization code is single-use and short-lived, so a refusal here is not
-            // something to retry — the user signs in again.
+            // something to retry: the user signs in again.
             return Err(ConnectorError::Permanent(format!(
                 "Microsoft refused the sign-in ({status}). Try connecting again."
             )));
@@ -232,7 +232,7 @@ pub enum CallbackProblem {
 /// The redirect, parsed.
 ///
 /// Pure and public so every branch is testable without a browser, a browser's prefetch, or a
-/// vendor — which matters because the `state` check is the security property here and a test is the
+/// vendor, which matters because the `state` check is the security property here and a test is the
 /// only thing that can prove it is enforced.
 #[derive(Debug)]
 pub struct Callback;
@@ -389,7 +389,7 @@ fn success_page() -> String {
     )
 }
 
-/// Shown to anything that reaches this port before the redirect does — a favicon fetch, usually.
+/// Shown to anything that reaches this port before the redirect does: a favicon fetch, usually.
 fn waiting_page() -> String {
     page(
         "Still waiting",
@@ -557,7 +557,7 @@ mod tests {
         let uri = pending.redirect_uri().to_string();
         let state = pending.state.clone();
 
-        // A browser that first prefetches, then follows the redirect — the sequence that made
+        // A browser that first prefetches, then follows the redirect, the sequence that made
         // "treat the first connection as the answer" wrong.
         tokio::spawn(async move {
             let port: u16 = uri.rsplit(':').next().unwrap().parse().unwrap();

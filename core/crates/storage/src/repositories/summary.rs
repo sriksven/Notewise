@@ -155,7 +155,7 @@ impl<'a> SummaryRepository<'a> {
     ///
     /// Since v6 those carry their own `meeting_id` and only reference this row as
     /// provenance, so they survive with `summary_id` set to NULL. Before v6 this call would
-    /// have destroyed them — which is why summarisation appends rather than replaces, and
+    /// have destroyed them, which is why summarisation appends rather than replaces, and
     /// why that workaround is no longer needed.
     pub fn delete(&self, id: Id) -> Result<()> {
         let changed = self
@@ -261,7 +261,7 @@ impl<'a> SummaryRepository<'a> {
         Ok(item)
     }
 
-    /// Action items a given summary surfaced. See the note on [`Self::decisions`] — for
+    /// Action items a given summary surfaced. See the note on [`Self::decisions`]. For
     /// "this meeting's action items", use [`Self::action_items_for_meeting`].
     pub fn action_items(&self, summary_id: Id) -> Result<Vec<ActionItem>> {
         let conn = self.db.conn();
@@ -327,7 +327,7 @@ impl<'a> SummaryRepository<'a> {
     /// Refuse a work item whose summary belongs to a different meeting.
     ///
     /// `meeting_id` and `summary_id` are both caller-supplied, so they can disagree. Left
-    /// unchecked that writes a decision into the wrong meeting's history — a silent
+    /// unchecked that writes a decision into the wrong meeting's history: a silent
     /// corruption that only surfaces much later, when someone reads the wrong meeting.
     fn reject_mismatched_summary(&self, meeting_id: Id, summary_id: Option<Id>) -> Result<()> {
         let Some(summary_id) = summary_id else {
@@ -442,7 +442,7 @@ pub struct SummaryTemplate {
     pub id: Id,
     pub name: String,
     pub prompt: String,
-    /// Seeded by the migration. Cannot be deleted — see [`SummaryRepository::delete_template`].
+    /// Seeded by the migration. Cannot be deleted; see [`SummaryRepository::delete_template`].
     pub is_builtin: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -543,7 +543,7 @@ impl SummaryRepository<'_> {
     /// references it and the record of what produced a summary is the reason the column exists.
     /// The alternative designs both lose something: `ON DELETE SET NULL` keeps the row and discards
     /// the provenance, and `CASCADE` would delete the user's summaries. Refusing keeps both, and is
-    /// a rule the user can act on — rename it, or leave it.
+    /// a rule the user can act on; rename it, or leave it.
     pub fn delete_template(&self, id: Id) -> Result<()> {
         if self.template(id)?.is_builtin {
             return Err(StorageError::Refused(

@@ -134,7 +134,7 @@ function Item({
  * The three configuration pills, plus the panel toggle.
  *
  * These sit above the content rather than in a settings screen because model, input device, and
- * language are decisions a user revisits per meeting — burying them costs more than the header
+ * language are decisions a user revisits per meeting: burying them costs more than the header
  * space. Each one is backed by a real endpoint; a pill that only looked like a control would be
  * worse than no pill at all.
  */
@@ -150,7 +150,7 @@ export function TopBar({
 }: Props) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  /** Why the list is empty, from the engine — a permission answer, not a hardware one. */
+  /** Why the list is empty, from the engine: a permission answer, not a hardware one. */
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [languages, setLanguages] = useState<LanguageOption[]>([]);
   /** Exact model tags the active local backend holds. */
@@ -158,7 +158,7 @@ export function TopBar({
   /** Which backend is running. `health` carries the model name but not the kind. */
   const [activeKind, setActiveKind] = useState<string | null>(null);
 
-  // Devices and languages are loaded once — neither changes while the app is open. The backend
+  // Devices and languages are loaded once: neither changes while the app is open. The backend
   // list is re-read whenever the active model changes, so switching updates the tick.
   useEffect(() => {
     void api
@@ -185,7 +185,7 @@ export function TopBar({
 
   // Languages are compiled in and never change. Devices are read on mount *and* every time the
   // menu opens, because the list goes stale while the window is up in two ordinary ways: AirPods
-  // connected after launch, and microphone permission granted after launch — macOS enumerates
+  // connected after launch, and microphone permission granted after launch: macOS enumerates
   // nothing until it is, so the first read comes back empty and used to stay that way.
   useEffect(() => {
     loadDevices();
@@ -252,7 +252,7 @@ export function TopBar({
                 // A cloud backend with no key on the engine cannot be selected. Showing it
                 // greyed with the reason beats hiding it and leaving the user wondering why
                 // their provider is missing. Whether a key exists is `has_key`, not
-                // `requires_api_key` — see `backendBlocker`.
+                // `requires_api_key`; see `backendBlocker`.
                 const blocker = backendBlocker(backend);
                 return (
                   <Item
@@ -263,9 +263,9 @@ export function TopBar({
                     title={backend.label}
                     subtitle={
                       blocker === "needs_key"
-                        ? "needs an API key — add one in Settings"
+                        ? "needs an API key: add one in Settings"
                         : blocker === "needs_endpoint"
-                          ? "needs an endpoint URL — set it in Settings"
+                          ? "needs an endpoint URL: set it in Settings"
                           : backend.is_local
                             ? "runs on this machine"
                             : "sends transcripts to the provider"
@@ -338,7 +338,7 @@ export function TopBar({
               {devices.length === 0 && (
                 // macOS enumerates no inputs at all until the microphone permission is granted,
                 // so "none found" is nearly always a permission answer rather than a hardware
-                // one — and sending someone to look for a broken cable is the wrong help.
+                // one, and sending someone to look for a broken cable is the wrong help.
                 <p className="px-3 py-2 text-[12px] leading-snug text-ink-faint">
                   {devicesError ?? "No input devices found."}
                 </p>

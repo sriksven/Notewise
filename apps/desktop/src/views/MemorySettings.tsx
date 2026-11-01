@@ -16,7 +16,7 @@ import {
  *
  * A memory is injected into the system prompt of future calls, so it shapes answers indefinitely and
  * invisibly. The only version of that which is defensible is one where every item is listed,
- * editable, and deletable — which is why this screen shows all of them rather than a summary, and
+ * editable, and deletable, which is why this screen shows all of them rather than a summary, and
  * says which were written by hand and which were inferred.
  *
  * # Why the count is shown
@@ -123,7 +123,7 @@ export function MemorySettings() {
       <p className="mb-3 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
         These are added to the instructions for summaries and answers, so they shape what you get
         back. Everything is listed here and nothing is hidden. Facts about other people are never
-        stored — a note about a colleague would follow them into every future answer.
+        stored: a note about a colleague would follow them into every future answer.
       </p>
 
       {error && (
@@ -159,7 +159,7 @@ export function MemorySettings() {
 
       <p className="mt-1.5 text-[11.5px] text-ink-faint">
         {used} of {cap} used
-        {used >= cap && " — delete one to make room"}
+        {used >= cap && " - delete one to make room"}
       </p>
 
       <ul className="mt-4 space-y-2">
@@ -192,7 +192,7 @@ export function MemorySettings() {
 
       {/* Automatic extraction, off until asked for. A feature that reads every transcript to build a
           durable profile belongs in the same category as voiceprints and acoustic separation, both of
-          which ship off — and the manual list above works whether or not this is ever turned on. */}
+          which ship off, and the manual list above works whether or not this is ever turned on. */}
       {extraction && (
         <div className="mt-5 rounded-lg border border-hairline p-3">
           <label className="flex cursor-pointer items-start gap-2">
@@ -208,7 +208,7 @@ export function MemorySettings() {
                 Learn from my meetings
               </span>
               <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-faint">
-                Reads meetings you have already recorded and notes durable facts about you — your
+                Reads meetings you have already recorded and notes durable facts about you: your
                 role, your projects, how you like things written. Never facts about other people:
                 anything that describes somebody else is discarded, and everything kept appears in
                 the list above where you can change or delete it.
@@ -248,15 +248,15 @@ export function MemorySettings() {
  *
  * Shown rather than summarised because the two questions this feature generates are "why does it not
  * remember that" and "why does it think that", and a count answers neither. A refusal is more
- * interesting than an acceptance here — it is the only visible evidence that the third-party rule and
+ * interesting than an acceptance here: it is the only visible evidence that the third-party rule and
  * the secret rule are doing anything.
  */
 function RunReport({ report }: { report: ExtractionReport }) {
   const label: Record<ExtractionDecisionVerdict, string> = {
     kept: "remembered",
     duplicate: "already known",
-    third_party: "about someone else — discarded",
-    secret: "looked like a secret — discarded",
+    third_party: "about someone else, discarded",
+    secret: "looked like a secret, discarded",
     unusable: "not usable",
   };
 
@@ -279,7 +279,7 @@ function RunReport({ report }: { report: ExtractionReport }) {
               <span className={decision.verdict === "kept" ? "text-ink" : "text-ink-faint"}>
                 {decision.text}
               </span>
-              <span className="text-ink-faint"> — {label[decision.verdict]}</span>
+              <span className="text-ink-faint"> - {label[decision.verdict]}</span>
             </li>
           ))}
         </ul>

@@ -6,8 +6,8 @@
 //! # Features
 //!
 //! Whisper inference is **implemented and working**, behind the `whisper` feature. It is off
-//! by default because it pulls in a cmake build of whisper.cpp and needs a 150 MB–1.5 GB
-//! model download — neither belongs in a default `cargo build`.
+//! by default because it pulls in a cmake build of whisper.cpp and needs a 150 MB-1.5 GB
+//! model download: neither belongs in a default `cargo build`.
 //!
 //! | Feature | Effect |
 //! |---|---|

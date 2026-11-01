@@ -2,15 +2,15 @@
 //!
 //! The half of Spec 8 that was missing: `ai-router`'s reflector has been tested since it landed and
 //! nothing ever called it, which meant memories could be typed in by hand and never influenced a
-//! single answer. Both ends are here — the observer that proposes facts, and the injection that
+//! single answer. Both ends are here: the observer that proposes facts, and the injection that
 //! makes a stored one matter.
 //!
 //! # Why this is not a scheduled job
 //!
 //! P6 says extraction should be a Spec 7 job. Spec 7 exists, and its jobs are *agent prompts*: a
 //! job is a sentence the user wrote, run on a cron, that searches and writes a note. Extraction is
-//! not a prompt anybody wrote, and making it one would mean either a second kind of job — a whole
-//! new dispatch in a surface that deliberately has one — or a magic prompt string the scheduler
+//! not a prompt anybody wrote, and making it one would mean either a second kind of job (a whole
+//! new dispatch in a surface that deliberately has one) or a magic prompt string the scheduler
 //! recognises, which is worse.
 //!
 //! So it is a background tick of its own, like the calendar watcher, with the gates P6 asks for. The
@@ -27,7 +27,7 @@
 //!
 //! Every memory in the prompt is prompt budget taken from the transcript. Globals are capped at five
 //! by the schema, so all of them go in. Project memories are capped at twenty, and at most five are
-//! injected — so ranking only happens when there are more than five, which on most workspaces is
+//! injected, so ranking only happens when there are more than five, which on most workspaces is
 //! never. When it does happen it is one embedding call for the question plus stored vectors for the
 //! memories, and when there is no embedder it falls back to most-recent-first rather than failing.
 
@@ -317,7 +317,7 @@ pub async fn is_enabled(state: &Shared) -> bool {
 
 /// One extraction pass.
 ///
-/// `force` skips the gates — the enabled setting, the volume threshold, and idleness — because a user
+/// `force` skips the gates (the enabled setting, the volume threshold, and idleness) because a user
 /// who pressed a button has answered all three questions.
 pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport> {
     let mut report = ExtractionReport::default();
@@ -352,7 +352,7 @@ pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport>
 
         // Grouped by project, because a project-scoped fact needs to know which project. A batch
         // spanning three projects cannot answer that, and guessing would file a fact under the
-        // wrong one — which is worse than not having it.
+        // wrong one, which is worse than not having it.
         let mut groups: std::collections::BTreeMap<Option<Id>, Vec<(Id, String)>> =
             std::collections::BTreeMap::new();
 
@@ -391,7 +391,7 @@ pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport>
         report.kept += kept;
     }
 
-    // Marked whether or not anything came of it — see `mark_processed`'s own docs.
+    // Marked whether or not anything came of it; see `mark_processed`'s own docs.
     {
         let db = state.db().await;
         let repo = MemoryRepository::new(&db);
@@ -408,11 +408,11 @@ pub async fn extract(state: &Shared, force: bool) -> ApiResult<ExtractionReport>
 /// The observer used to read the whole transcript and be *told* to keep only facts about the
 /// person. Against `llama3.1:8b` it could not: on a call where the account manager said "I'm
 /// Marco, I run their account", four runs in four stored "I run Acme Logistics' account" as a
-/// fact about the user — first person, so the reflector kept it. A model that never sees another
+/// fact about the user: first person, so the reflector kept it. A model that never sees another
 /// speaker's self-description cannot attribute it to the wrong one.
 ///
 /// The person is the microphone's speaker, labelled by the recorder. A meeting with no line from
-/// them — an import, or a call where they never spoke — yields nothing, because there is then no
+/// them (an import, or a call where they never spoke) yields nothing, because there is then no
 /// way to know which voice was theirs, and guessing is the failure this module exists to avoid.
 fn own_words(segments: &[notewise_storage::TranscriptSegment]) -> String {
     let me = notewise_recorder::Channel::Microphone.speaker_label();
@@ -512,7 +512,7 @@ async fn apply(
                 MemoryScope::Project.cap().saturating_sub(used)
             }
             // Nowhere to put a project-scoped fact. Reported as no room rather than silently
-            // promoted to global — scoping a fact wider than the observer asked for is a decision
+            // promoted to global: scoping a fact wider than the observer asked for is a decision
             // this code does not get to make.
             None => 0,
         };
@@ -704,7 +704,7 @@ mod tests {
             input: &notewise_ai_router::TranscriptInput,
         ) -> notewise_ai_router::Result<notewise_ai_router::SummaryOutput> {
             // The system prompt a real backend would build, so a test sees both the instruction and
-            // the memories — and would see the instruction go missing.
+            // the memories, and would see the instruction go missing.
             self.seen
                 .lock()
                 .unwrap()
@@ -895,7 +895,7 @@ mod tests {
         // "why does it not remember that".
         //
         // Asserted as "refused" rather than as `third_party`, because the reflector cannot tell a
-        // colleague's name from a weekday without a pronoun to go on — "Dana is difficult" comes
+        // colleague's name from a weekday without a pronoun to go on: "Dana is difficult" comes
         // back as "not a fact about the user", which is the honest verdict for what it can actually
         // see. What is guaranteed, and what matters, is that it is not stored.
         let refused = report
@@ -910,7 +910,7 @@ mod tests {
         assert!(!kept.iter().any(|m| m.contains("Dana")));
     }
 
-    /// With a pronoun there is real evidence, and the verdict says so — which is what lets the
+    /// With a pronoun there is real evidence, and the verdict says so; which is what lets the
     /// interface explain the refusal rather than shrug at it.
     #[tokio::test]
     async fn a_claim_about_someone_else_is_named_as_one_when_a_pronoun_gives_it_away() {
@@ -1365,7 +1365,7 @@ mod tests {
             }
         }
 
-        // No embedder in a test, so this exercises the recency fallback — which is the path that
+        // No embedder in a test, so this exercises the recency fallback, which is the path that
         // has to work when the daemon is down.
         let injected = for_prompt(&state, Some(project_id), "billing").await;
         let lines = injected.lines().filter(|l| l.starts_with("- ")).count();

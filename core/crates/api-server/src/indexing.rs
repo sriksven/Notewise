@@ -10,8 +10,8 @@
 //! and every finished recording. It would also fail badly: a stopped Ollama would turn saving
 //! a note into an error, for an index the user never asked about.
 //!
-//! So indexing is a pass. It reads what has changed since last time — by comparing the
-//! entity's `updated_at` against the newest chunk stored for it — and does only that work.
+//! So indexing is a pass. It reads what has changed since last time (by comparing the
+//! entity's `updated_at` against the newest chunk stored for it) and does only that work.
 //! A first run on a large workspace is minutes; every run after is seconds.
 //!
 //! # Why nothing here fails the app
@@ -34,7 +34,7 @@ use notewise_storage::{
 
 /// Target chunk size, in characters.
 ///
-/// Around 900 is a paragraph or a minute of speech — small enough that a match points at
+/// Around 900 is a paragraph or a minute of speech, small enough that a match points at
 /// something specific, large enough to carry its own context. Chunks much smaller than this
 /// retrieve well and read badly: a model given twelve disconnected sentences produces an
 /// answer that sounds assembled, because it was.
@@ -43,13 +43,13 @@ const CHUNK_CHARS: usize = 900;
 /// How much of the previous chunk to repeat at the start of the next.
 ///
 /// Without overlap, a sentence that straddles a boundary is in neither chunk in full and
-/// matches poorly in both — and the sentence most likely to straddle one is the long
+/// matches poorly in both, and the sentence most likely to straddle one is the long
 /// qualifying sentence where the actual decision lives.
 const CHUNK_OVERLAP_CHARS: usize = 150;
 
 /// How many chunks go to the daemon at once.
 ///
-/// Batching is most of the speed — the model stays loaded across the batch. Bounded so a
+/// Batching is most of the speed: the model stays loaded across the batch. Bounded so a
 /// single request stays inside its timeout on a slow machine.
 const BATCH: usize = 32;
 
@@ -177,7 +177,7 @@ pub struct Pending {
 /// Boundaries matter more than exact sizes: a chunk that ends mid-sentence embeds the fragment
 /// rather than the thought. So the cut is pulled back to the last paragraph break, then the
 /// last sentence end, and only falls back to a hard character cut when neither exists within
-/// reach — which happens with unbroken transcripts and pasted CSVs.
+/// reach, which happens with unbroken transcripts and pasted CSVs.
 pub fn chunk_text(text: &str) -> Vec<Chunk> {
     let text = text.trim();
     if text.is_empty() {
@@ -242,7 +242,7 @@ fn find_boundary(chars: &[char], floor: usize, ceiling: usize) -> Option<usize> 
 
 /// The text embedded for an entity: its title, then its content.
 ///
-/// One definition, because retrieval checks a stored chunk against it — a chunk that no longer
+/// One definition, because retrieval checks a stored chunk against it: a chunk that no longer
 /// occurs in what this produces today was cut from an older version of the entity.
 pub(crate) fn indexed_body(kind: &str, title: &str, text: &str) -> String {
     match kind {
@@ -257,11 +257,11 @@ pub(crate) fn indexed_body(kind: &str, title: &str, text: &str) -> String {
 ///
 /// For a meeting that clock is the later of `updated_at` and its end. It used to be the end
 /// alone, on the stated grounds that a meeting has no `updated_at` and does not change once it
-/// is over — neither is true. Its title is renamed after the fact (and the title is in every
+/// is over: neither is true. Its title is renamed after the fact (and the title is in every
 /// chunk), and its `updated_at` moves when it is. A meeting still running keeps the time it
 /// started, so it is embedded once mid-recording and again when it ends.
 ///
-/// Edits *inside* a transcript — a corrected line, a renamed speaker — do not move
+/// Edits *inside* a transcript (a corrected line, a renamed speaker) do not move
 /// `updated_at` today, so they are not seen here. Retrieval refuses a chunk that no longer
 /// matches its meeting, which keeps answers right in the meantime; see `retrieval::assemble`.
 pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<Vec<Pending>> {
@@ -280,7 +280,7 @@ pub fn collect_pending(db: &Database, model: &str) -> notewise_storage::Result<V
     let mut pending = Vec::new();
 
     // `list_recent` already excludes trashed meetings, so a deleted one stops being embedded.
-    // Its existing vectors are dropped when it is trashed — see the delete handler.
+    // Its existing vectors are dropped when it is trashed; see the delete handler.
     let meetings = MeetingRepository::new(db);
     for meeting in meetings.list_recent(u32::MAX)? {
         let updated = meeting
@@ -370,7 +370,7 @@ const QUIET: std::time::Duration = std::time::Duration::from_secs(6);
 /// repeatedly and keep a local model busy for the length of a writing session, so calls coalesce:
 /// the last one within [`QUIET`] wins and the rest are dropped.
 ///
-/// Fire-and-forget on purpose. A write must not wait for, or fail because of, an index refresh —
+/// Fire-and-forget on purpose. A write must not wait for, or fail because of, an index refresh:
 /// the note is saved either way, and a stale index is a worse outcome than a failed save only if
 /// the save was the thing that failed.
 pub fn touch(state: Arc<crate::state::AppState>) {
@@ -541,7 +541,7 @@ pub(crate) fn router() -> axum::Router<Arc<crate::state::AppState>> {
 
 /// What the semantic index holds, and whether it can be built.
 ///
-/// Answers on a workspace that has never been indexed and on one with no Ollama at all — the
+/// Answers on a workspace that has never been indexed and on one with no Ollama at all: the
 /// UI needs to be able to say *why* semantic search is off, and "no response" says nothing.
 async fn index_status(
     axum::extract::State(state): axum::extract::State<Arc<crate::state::AppState>>,

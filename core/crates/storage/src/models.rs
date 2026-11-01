@@ -1,6 +1,6 @@
 //! Stored entities.
 //!
-//! Fields here model **ownership** — a transcript segment belongs to exactly one meeting,
+//! Fields here model **ownership**: a transcript segment belongs to exactly one meeting,
 //! expressed as a foreign key. **Association** between entities (a note referencing a
 //! meeting, an action item linked to a ticket) is modelled as typed edges in the `graph`
 //! crate, not as columns here. See docs/architecture/overview.md.
@@ -97,7 +97,7 @@ pub struct Person {
     /// Whether a voiceprint has been enrolled for this person.
     ///
     /// The vector itself is deliberately not on this struct. It is biometric data, it is
-    /// large, and nothing outside speaker matching has any business holding it — so it is
+    /// large, and nothing outside speaker matching has any business holding it, so it is
     /// fetched explicitly rather than riding along on every read of a person.
     pub has_voice_print: bool,
     pub created_at: DateTime<Utc>,
@@ -145,7 +145,7 @@ pub struct TranscriptSegment {
 /// One distinct voice in a meeting's transcript, with enough weight to judge it by.
 ///
 /// The counts are not decoration. Asked to name "Speaker 3", a user has no idea who that is
-/// until they see it spoke four times for eleven seconds — at which point it is obviously the
+/// until they see it spoke four times for eleven seconds, at which point it is obviously the
 /// person who joined late, or obviously a clustering error worth merging away.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpeakerSummary {
@@ -178,7 +178,7 @@ pub struct Decision {
     pub id: Id,
     /// The meeting where this was decided. Ownership lives here, not on the summary.
     pub meeting_id: Id,
-    /// Which summary first surfaced this, if any — provenance, not ownership. Becomes
+    /// Which summary first surfaced this, if any: provenance, not ownership. Becomes
     /// `None` when that summary is regenerated; the decision itself survives.
     pub summary_id: Option<Id>,
     pub text: String,
@@ -226,7 +226,7 @@ pub struct ActionItem {
     /// The meeting this came out of. Ownership lives here, not on the summary, so that
     /// regenerating a summary cannot take a user's owner, due date and status with it.
     pub meeting_id: Id,
-    /// Which summary first surfaced this, if any — provenance, not ownership.
+    /// Which summary first surfaced this, if any: provenance, not ownership.
     pub summary_id: Option<Id>,
     pub text: String,
     /// Free-text owner as spoken or typed. Kept alongside `owner_person_id` rather than
@@ -318,7 +318,7 @@ impl DraftStatus {
 /// A generated follow-up email.
 ///
 /// Status starts at `Draft` and requires an explicit user transition to `Approved` before
-/// anything may send it. Nothing in this codebase moves a draft straight to `Sent` — see
+/// anything may send it. Nothing in this codebase moves a draft straight to `Sent`; see
 /// SECURITY.md.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmailDraft {

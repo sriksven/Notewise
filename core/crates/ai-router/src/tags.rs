@@ -2,14 +2,14 @@
 //!
 //! # The bug this exists to prevent
 //!
-//! Ollama expands an untagged name to `:latest`. `llama3.1` is therefore not "any llama3.1" —
+//! Ollama expands an untagged name to `:latest`. `llama3.1` is therefore not "any llama3.1";
 //! it means exactly `llama3.1:latest`, and on a machine holding only `llama3.1:8b` it is a
 //! 404. Notewise shipped `llama3.1` and `nomic-embed-text` as its defaults, so the first
 //! summary on a fresh install failed for anyone whose `ollama pull` had named a size, which is
 //! what the documentation tells people to do.
 //!
-//! The daemon can be asked. It was already being asked — to populate the model picker, and to
-//! name the installed models in the error message — just never at the moment the default was
+//! The daemon can be asked. It was already being asked; to populate the model picker, and to
+//! name the installed models in the error message; just never at the moment the default was
 //! chosen. So the default asserted something the code had the means to check.
 //!
 //! # Why this is pure
@@ -24,7 +24,7 @@
 //! quietly getting llama is worse than a clear 404: the output is attributed to the model that
 //! produced it, and the user's choice would be silently overridden. Family substitution is
 //! offered separately, through [`first_acceptable`], for the one case where nobody chose
-//! anything — our own default.
+//! anything: our own default.
 
 /// Whether `tag` names `family`, with or without a version suffix.
 ///
@@ -40,7 +40,7 @@ pub(crate) fn names_family(family: &str, tag: &str) -> bool {
 
 /// The tag to actually send for `preferred`, given what is installed.
 ///
-/// `None` means the daemon holds nothing from that family — the caller decides whether that is
+/// `None` means the daemon holds nothing from that family; the caller decides whether that is
 /// an error or an invitation to fall back, because the answer differs depending on whether a
 /// human chose the name.
 pub(crate) fn resolve_tag(preferred: &str, installed: &[String]) -> Option<String> {
@@ -58,7 +58,7 @@ pub(crate) fn resolve_tag(preferred: &str, installed: &[String]) -> Option<Strin
     }
 
     // Any other tag of the same family. Sorted, because which model answers must not depend on
-    // the order the daemon happened to list them in — Ollama returns them by modification
+    // the order the daemon happened to list them in; Ollama returns them by modification
     // time, which changes every time a model is used.
     let mut family: Vec<&str> = installed
         .iter()

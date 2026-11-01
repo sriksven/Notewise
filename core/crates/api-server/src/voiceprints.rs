@@ -16,7 +16,7 @@
 //!
 //! # What is stored
 //!
-//! A vector of floats and the name of the model that produced it — never audio. The vector cannot
+//! A vector of floats and the name of the model that produced it, never audio. The vector cannot
 //! be played back or reconstructed into speech. It is still an identifier, which is the point of
 //! the switch.
 
@@ -27,7 +27,7 @@ pub const ENABLED_KEY: &str = "voiceprints_enabled";
 
 /// Whether voice prints may be stored.
 ///
-/// Absent means off. A missing setting must never be read as consent — an upgrade that
+/// Absent means off. A missing setting must never be read as consent: an upgrade that
 /// introduced this key should not silently begin enrolling people.
 pub fn enabled(settings: &notewise_storage::SettingsRepository<'_>) -> bool {
     settings

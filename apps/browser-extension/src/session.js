@@ -6,12 +6,12 @@
  * **Speaker tracking** sends participant display names and time spans saying who was speaking, and
  * only while the engine is already recording. A meeting page with no recording in progress has
  * nothing read from it: no DOM is sampled, no roster is touched, no buffer fills. That is a privacy
- * property rather than an optimisation — the extension should be inert unless the user has already
+ * property rather than an optimisation: the extension should be inert unless the user has already
  * chosen to record.
  *
  * **Join detection** cannot work that way, and this is the honest statement of the trade. Its whole
  * purpose is to speak *before* anything is recording, because the largest source of lost value in
- * this product is somebody not pressing record. So it does run on a page with no recording — and it
+ * this product is somebody not pressing record. So it does run on a page with no recording, and it
  * reads no DOM whatsoever. The meeting is recognised from the URL's shape, and what crosses the
  * wire is the platform name and an opaque key, at most ten times, then never again.
  *
@@ -31,7 +31,7 @@ import { JoinAnnouncer, RETRY_MS } from "./join.js";
 
 /*
  * The engine, reached through the service worker rather than fetched from here. This module runs
- * on the meeting page, where a request to loopback is the page's request and Chrome refuses it —
+ * on the meeting page, where a request to loopback is the page's request and Chrome refuses it:
  * see `relay.js`. `chrome.runtime` is read on every call, not once: after the extension is reloaded
  * it is gone from pages that still run the old script, and that must read as "nobody listening".
  */
@@ -54,7 +54,7 @@ const FLUSH_MS = 5_000;
 /**
  * Samples of an unreadable page before giving up on this platform adapter.
  *
- * A page can be legitimately unreadable for a while — the roster panel is closed, the meeting is
+ * A page can be legitimately unreadable for a while: the roster panel is closed, the meeting is
  * still joining. But an adapter whose selectors have been broken by a vendor redesign will never
  * recover, and quietly sampling nothing for an hour hides that. At this point tracking stops and
  * says so, leaving the transcript to acoustic clustering with anonymous labels.
@@ -106,7 +106,7 @@ function start(meetingId, origin, startedAt) {
 
     if (tracker.blindSamples > BLIND_SAMPLE_LIMIT) {
       stop(
-        `could not read the ${platform.name} participant list — its markup has probably changed. ` +
+        `could not read the ${platform.name} participant list. Its markup has probably changed. ` +
           `Speakers will fall back to anonymous labels rather than be guessed.`,
       );
     }
@@ -165,7 +165,7 @@ async function announce() {
  * Start watching this page, if it is a meeting page we understand.
  *
  * Called by `content.js`. Returns the platform adapter in use, or null when the page is not one of
- * ours — in which case nothing is scheduled and the extension stays completely inert.
+ * ours, in which case nothing is scheduled and the extension stays completely inert.
  */
 export function run() {
   platform = platformFor(new URL(location.href));

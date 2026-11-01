@@ -21,7 +21,7 @@ interface Props {
  * The confirmation is the only thing standing between a model's suggestion and a ticket filed in
  * someone else's system. It is worth nothing if what the user approves is a summary of the call
  * rather than the call. So every field is shown, exactly as it will be sent, and the raw JSON is
- * there too — a nested object rendered as "[object]" is how a confirmation stops meaning anything.
+ * there too: a nested object rendered as "[object]" is how a confirmation stops meaning anything.
  *
  * # Why a timeout does not say "failed"
  *
@@ -105,7 +105,7 @@ export function ToolCallReview({
             <CircleHelp size={13} className="mt-0.5 shrink-0" aria-hidden />
             <span>
               This did not answer in time, so whether it ran is unknown. Check {serverName} before
-              proposing it again — running it twice may not be undoable.
+              proposing it again: running it twice may not be undoable.
             </span>
           </p>
         )}

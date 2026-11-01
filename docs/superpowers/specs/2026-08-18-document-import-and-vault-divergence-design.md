@@ -1,4 +1,4 @@
-# Document import and vault divergence — design
+# Document import and vault divergence - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -14,7 +14,7 @@ naive translation to Notewise is "make the vault bidirectional," and that transl
 genuinely different needs get conflated:
 
 **Bringing outside material in.** A user's meetings are not their only context. A design doc, a spec,
-a set of notes written elsewhere — indexing those makes every grounded answer better, and Notewise has
+a set of notes written elsewhere; indexing those makes every grounded answer better, and Notewise has
 no way to import any of it.
 
 **Resolving a vault file the user edited.** `vault.rs` already detects this: it stores a SHA-256
@@ -35,7 +35,7 @@ These need different mechanisms and different decisions, so this spec keeps them
 ## Non-goals
 
 - **Bidirectional sync of meeting exports.** See V1. This is the thing that sounds obvious and is not.
-- **Remote document sources** — Confluence, GitHub, Google Drive. Folder-watching first; those are
+- **Remote document sources**: Confluence, GitHub, Google Drive. Folder-watching first; those are
   connectors and belong in the vendor long tail.
 - **Editing imported documents inside Notewise.** They are read-only mirrors of files someone else
   owns.
@@ -45,7 +45,7 @@ These need different mechanisms and different decisions, so this spec keeps them
 
 ## Decisions
 
-### V1 — Meeting-export markdown is not imported back
+### V1 - Meeting-export markdown is not imported back
 
 The vault renders a meeting to markdown via `meeting_to_markdown`. Reversing that is rejected.
 
@@ -53,7 +53,7 @@ The mapping is lossy and ambiguous in both directions. A meeting is a transcript
 speakers, a summary with a model attribution, decisions, and action items with owners and statuses.
 The markdown is a *rendering* of that. Parsing an edited rendering back means deciding whether a
 changed sentence edits the summary, corrects a transcript segment, or is a human annotation belonging
-to none of them — and getting it wrong silently rewrites the record of what was actually said, which
+to none of them, and getting it wrong silently rewrites the record of what was actually said, which
 is the one thing this product claims to be reliable about.
 
 The vault's own module docs describe it as "a destination, not a second renderer." Making it a source
@@ -62,13 +62,13 @@ is already linked to the meeting and already indexed.
 
 **What happens instead:** divergence is surfaced (V3) and the user chooses. No parsing.
 
-### V2 — Document import is a `SourceConnector`, reusing Spec 1's `Importer`
+### V2 - Document import is a `SourceConnector`, reusing Spec 1's `Importer`
 
 A watched folder is a connector with id `"documents"` implementing `SourceConnector`. Files become
 `external_items` plus a `documents` detail table, and `Importer` drains it exactly as it drains
 calendars.
 
-The alternative — a bespoke file-watching path — would duplicate cursor handling, idempotent upsert,
+The alternative, a bespoke file-watching path, would duplicate cursor handling, idempotent upsert,
 and failure isolation that `Importer` already has. The connector seam is the right shape for "read
 things from outside," and a folder is outside.
 
@@ -77,7 +77,7 @@ calendar uses for the same reason: no change feed exists.
 
 **Depends on Spec 1** for `Importer`. This spec cannot land first.
 
-### V3 — Divergence is surfaced as a decision, not resolved automatically
+### V3 - Divergence is surfaced as a decision, not resolved automatically
 
 When the vault sink refuses a write because the fingerprint changed, it records that and the user is
 told: this file was edited outside Notewise, and the mirror has paused for it.
@@ -90,7 +90,7 @@ Silence is the current behaviour and the worst option. A user who edited a meeti
 later notices it never updates again has been failed quietly, which is exactly the complaint `b6e9c3f`
 was fixing at a lower level.
 
-### V4 — No automatic merging, ever
+### V4 - No automatic merging, ever
 
 If a document changes in the watched folder, the new content replaces the old mirror and it is
 re-indexed. If a vault file diverges, the user chooses. Nothing merges.
@@ -99,17 +99,17 @@ Three-way merge on prose without a common ancestor produces plausible text that 
 For meeting records that is unacceptable; for imported documents it is unnecessary, because the file on
 disk is authoritative by definition.
 
-### V5 — Re-embedding is delegated to the existing indexing pass
+### V5 - Re-embedding is delegated to the existing indexing pass
 
 Import writes content and lets `indexing.rs` notice. It compares an entity's `updated_at` against the
 newest chunk stored for it, so an imported document whose `updated_at` moved is already stale by that
 crate's own rule.
 
 Nothing here calls the embedder. `indexing.rs` already documents why embedding is a background pass
-rather than a write hook — a stopped Ollama must not turn importing a file into an error — and routing
+rather than a write hook (a stopped Ollama must not turn importing a file into an error) and routing
 import through it inherits that property for free.
 
-### V6 — Watching is a poll, not a filesystem notification API
+### V6 - Watching is a poll, not a filesystem notification API
 
 The importer scans the folder on a schedule. No `FSEvents`, no `inotify`, no `ReadDirectoryChangesW`.
 
@@ -118,8 +118,8 @@ requirement is loose: a document edited now needs to be searchable in minutes, n
 AnythingLLM polls at ten-minute intervals on desktop for the same reason. Polling also composes with
 `Importer`, which is invoked rather than event-driven.
 
-Directory traversal is bounded — a maximum depth, a maximum file count, an extension allowlist, and a
-per-file size cap — because pointing this at a home directory should degrade gracefully instead of
+Directory traversal is bounded: a maximum depth, a maximum file count, an extension allowlist, and a
+per-file size cap, because pointing this at a home directory should degrade gracefully instead of
 embedding a machine.
 
 ---
@@ -179,7 +179,7 @@ answers survive the file being moved or the drive being unmounted. `updated_at` 
 `indexing.rs` re-embed it.
 
 A file that disappears is marked missing rather than deleted, matching how AnythingLLM handles it and
-how the vault already handles a file it cannot find — existing embeddings stay, so an answer citing a
+how the vault already handles a file it cannot find; existing embeddings stay, so an answer citing a
 document does not become uncitable because someone reorganised a folder.
 
 ## Data flow

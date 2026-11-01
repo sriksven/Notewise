@@ -3,7 +3,7 @@
 //! # Two gaps this closes
 //!
 //! **Nothing recorded a divergence.** `vault.rs` has refused to overwrite an edited file since
-//! `b6e9c3f`, correctly, and told nobody — so a user who annotated a meeting note in Obsidian got a
+//! `b6e9c3f`, correctly, and told nobody, so a user who annotated a meeting note in Obsidian got a
 //! mirror that quietly stopped updating and no way to find out why. The dispatcher records it now;
 //! this is where it is answered.
 //!
@@ -15,7 +15,7 @@
 //!
 //! [`crate::sync`] drains the outbox on a timer, so a delivery deferred by a transient failure is
 //! retried without anybody asking. Mirroring still drains in the same request, because the user
-//! pressed a button and the answer they want is what happened — including "that file has your edits
+//! pressed a button and the answer they want is what happened, including "that file has your edits
 //! in it, here are three things you can do". Waiting up to half a minute to be told that is a worse
 //! screen than one that says it immediately.
 //!
@@ -70,7 +70,7 @@ struct MirrorResult {
 /// Write this meeting to the vault.
 ///
 /// Refuses rather than overwrites when the file has been edited, and says which divergence to
-/// answer — the point being that a refusal is now actionable instead of silent.
+/// answer: the point being that a refusal is now actionable instead of silent.
 async fn mirror_meeting(
     State(state): State<Shared>,
     Path(id): Path<String>,
@@ -106,16 +106,16 @@ async fn mirror_meeting(
 ///
 /// It was the render's fingerprint, which is wrong here and wrong in an instructive way: mirroring
 /// the same meeting twice reused the completed row and delivered nothing, so a file the user had
-/// edited in between was never *attempted* — and a divergence is only discoverable by attempting.
+/// edited in between was never *attempted*, and a divergence is only discoverable by attempting.
 /// The mirror looked like it worked and told nobody anything.
 ///
 /// The key's job is to stop a *retry* duplicating a delivery, not to stop a person asking twice. For
-/// a file mirror asking twice is harmless — the same bytes to the same path — and it is the only way
+/// a file mirror asking twice is harmless (the same bytes to the same path) and it is the only way
 /// to notice the file changed underneath.
 ///
 /// # Why this runs on its own thread with its own connection
 ///
-/// `Dispatcher::drain` is async and borrows the database, and `Database` is `Send` but not `Sync` —
+/// `Dispatcher::drain` is async and borrows the database, and `Database` is `Send` but not `Sync`;
 /// so a future holding the shared guard across the drain's awaits is not `Send` and cannot be an
 /// axum handler. The same problem the recording pipeline has, solved the same way: a dedicated
 /// connection on a thread of its own, rather than holding the app's one across a filesystem write
@@ -152,7 +152,7 @@ async fn push(
 
         // The divergence for *this* meeting, found through the graph rather than by matching the
         // path. The vault names a file from the title plus twelve hex characters of the id, so a
-        // path never contains the whole id — a filter on it silently matched nothing, which is how
+        // path never contains the whole id: a filter on it silently matched nothing, which is how
         // this reported "the vault could not be written to" for a perfectly ordinary conflict.
         let diverged = vault_item_for(db, meeting_id)
             .and_then(|item_id| {
@@ -259,7 +259,7 @@ struct DivergenceBody {
     meeting_title: Option<String>,
     /// What the user wrote, so the choice is made looking at it rather than in the abstract.
     ///
-    /// `None` when the file cannot be read — which is also a reason a divergence exists, since an
+    /// `None` when the file cannot be read, which is also a reason a divergence exists, since an
     /// unreadable file is treated as edited.
     current_content: Option<String>,
 }
@@ -350,7 +350,7 @@ struct Resolved {
 /// - **keep** leaves it alone and stops mirroring that meeting. Nothing is written, now or later.
 /// - **overwrite** replaces it with the current render.
 /// - **copy_to_note** saves what the user wrote as a note linked to the meeting, *then* overwrites.
-///   The one that loses nothing, and the least obvious of the three — which is why the response says
+///   The one that loses nothing, and the least obvious of the three, which is why the response says
 ///   where the copy went.
 async fn resolve(
     State(state): State<Shared>,
@@ -732,7 +732,7 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&path).expect("reads"), "mine now");
 
-        // Answered, so it is off the list — and a later attempt does not put it back, which is what
+        // Answered, so it is off the list, and a later attempt does not put it back, which is what
         // "stop mirroring this" means.
         assert!(call(&app, get("/v1/vault/divergences"))
             .await

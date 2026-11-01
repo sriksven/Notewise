@@ -10,8 +10,8 @@
 //!
 //! # What is verified and what is not
 //!
-//! Verified in CI, because it needs no grant: the CoreFoundation round trips, the whole pasteboard —
-//! including a real save-and-restore of the user's actual clipboard — building and posting keyboard
+//! Verified in CI, because it needs no grant: the CoreFoundation round trips, the whole pasteboard,
+//! including a real save-and-restore of the user's actual clipboard, building and posting keyboard
 //! events, creating the accessibility root, and every error-code mapping.
 //!
 //! Not verified, and `#[ignore]`d with the reason: reading or writing another application's focused
@@ -36,7 +36,7 @@ use crate::completion::TypingActivity;
 /// Whether the focused element will let its selection be replaced.
 ///
 /// The check 9c needs: "replace" must only be offered where it can work, and offering it on a web
-/// page that will not take it is worse than not offering it — the user loses their selection and
+/// page that will not take it is worse than not offering it: the user loses their selection and
 /// gets nothing.
 pub fn selection_is_replaceable() -> Result<bool> {
     if !trusted() {
@@ -52,7 +52,7 @@ pub fn selection_is_replaceable() -> Result<bool> {
     }
 }
 
-/// Start watching for keystrokes. Timing only — see `keystrokes`.
+/// Start watching for keystrokes. Timing only: see `keystrokes`.
 pub fn start_typing_monitor() -> Result<()> {
     keystrokes::start().map_err(|refusal| match refusal {
         keystrokes::TapRefusal::PermissionMissing => OsInputError::PermissionRequired {
@@ -113,7 +113,7 @@ impl TextTarget for MacTarget {
     /// `accessibility_writable` asks whether `AXSelectedText` is settable, not `AXValue`. That
     /// distinction is the difference between inserting and overwriting: setting the value replaces
     /// everything in the field, which for someone dictating into a half-written sentence would
-    /// delete the half they typed. Setting the selected text replaces the selection — and an empty
+    /// delete the half they typed. Setting the selected text replaces the selection, and an empty
     /// selection is the caret, so it inserts.
     ///
     /// `accepts_paste` is only true when something has focus. A synthesised `⌘V` with nothing
@@ -264,7 +264,7 @@ pub fn screen_context() -> Result<ScreenContext> {
 
 /// Read text off the screen as pixels.
 ///
-/// The recognition half of this is real and tested — see [`vision`]. The capture half needs the
+/// The recognition half of this is real and tested: see [`vision`]. The capture half needs the
 /// Screen Recording grant, and the three ways it can be refused have three different fixes, so they
 /// are reported separately rather than collapsed into "unavailable".
 pub fn recognise_text_on_screen() -> Result<String> {
@@ -274,7 +274,7 @@ pub fn recognise_text_on_screen() -> Result<String> {
         ScreenCaptureRefusal::BuildCannotHoldGrant => OsInputError::Unsupported {
             what: "Reading text from the screen".to_string(),
             reason: "this is running as a loose binary rather than as an application, and macOS \
-                     grants screen recording to applications — run it from Notewise.app"
+                     grants screen recording to applications: run it from Notewise.app"
                 .to_string(),
         },
         ScreenCaptureRefusal::GrantMissing => OsInputError::PermissionRequired {
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn without_the_grant_every_entry_point_says_which_pane_to_open() {
         // A test binary is not in the Accessibility list. On a developer machine that has granted
-        // the terminal, these succeed instead — which is why the assertion is on the error's shape
+        // the terminal, these succeed instead, which is why the assertion is on the error's shape
         // rather than on there being one.
         for result in [
             insert_at_cursor("text").map(|_| ()),
@@ -317,7 +317,7 @@ mod tests {
         }
     }
 
-    /// Outside an app bundle the refusal is about how it is running, not about a switch — because
+    /// Outside an app bundle the refusal is about how it is running, not about a switch, because
     /// no switch helps. Every test binary is in this case, so this runs.
     #[test]
     fn a_loose_binary_is_told_why_and_not_sent_to_settings() {
@@ -356,7 +356,7 @@ mod tests {
         assert!(error.to_string().contains("System Settings"));
     }
 
-    /// Inspecting capabilities must be safe with no grant and nothing focused — it runs on every
+    /// Inspecting capabilities must be safe with no grant and nothing focused: it runs on every
     /// insertion attempt, including the ones that are about to be refused.
     #[test]
     fn inspecting_the_target_is_safe_without_a_grant() {
@@ -366,7 +366,7 @@ mod tests {
         let _ = capabilities.accessibility_writable;
     }
 
-    /// The real clipboard, through the real target — the one tier that needs no permission, so the
+    /// The real clipboard, through the real target: the one tier that needs no permission, so the
     /// one place where the platform layer can be proven rather than asserted.
     #[test]
     fn the_target_can_snapshot_and_restore_the_real_clipboard() {

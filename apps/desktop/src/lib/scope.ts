@@ -4,8 +4,8 @@ import type { Route } from "./router";
  * Sections that are built and kept, but not offered in this release.
  *
  * Tickets, People and Automation (scheduled jobs) are held back so the first release is about
- * meetings, notes and Ask; they come back in a later one. Nothing is deleted — the views, routes,
- * client calls and engine endpoints all stay, and their tests keep running — so offering a section
+ * meetings, notes and Ask; they come back in a later one. Nothing is deleted: the views, routes,
+ * client calls and engine endpoints all stay, and their tests keep running, so offering a section
  * again is removing its name from this set.
  *
  * Every way into a deferred section checks here: its sidebar entry, its page, and the links into it

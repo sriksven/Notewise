@@ -7,7 +7,7 @@
 //! gets what Google cannot: one click. The asymmetry is not a design preference, it is the shape of
 //! the two vendors' policies.
 //!
-//! The client id is embedded in the binary, which is correct for a public PKCE client — there is no
+//! The client id is embedded in the binary, which is correct for a public PKCE client: there is no
 //! secret to leak. A bring-your-own client id remains configurable for tenants whose policy requires
 //! their own app registration.
 //!
@@ -66,7 +66,7 @@ pub fn base64url(bytes: &[u8]) -> String {
         let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
 
         // One output character per six input bits, dropping the characters that would only encode
-        // padding — which is what "without padding" means and why the length depends on the
+        // padding, which is what "without padding" means and why the length depends on the
         // remainder.
         let take = match chunk.len() {
             1 => 2,
@@ -91,7 +91,7 @@ impl Pkce {
     /// Generate a fresh pair.
     ///
     /// Two v4 UUIDs in hex: 64 characters of unreserved alphabet, inside PKCE's 43-128 range, with
-    /// no RNG dependency taken for one call site — the same reasoning the webhook signing secret
+    /// no RNG dependency taken for one call site: the same reasoning the webhook signing secret
     /// uses.
     pub fn generate() -> Self {
         let verifier = format!(
@@ -202,7 +202,7 @@ impl MicrosoftGraph {
             .map_err(|e| ConnectorError::Transient(format!("could not read the reply: {e}")))?;
 
         if !status.is_success() {
-            // A revoked or expired grant is not a transient problem — retrying it forever would
+            // A revoked or expired grant is not a transient problem: retrying it forever would
             // hide the fact that the user has to sign in again.
             return Err(
                 if text.contains("invalid_grant") || status.as_u16() == 400 {
@@ -391,7 +391,7 @@ impl SinkConnector for MicrosoftGraph {
     /// # Never sent
     ///
     /// `POST /me/messages` creates a draft and nothing else. The send endpoint is `/me/sendMail`,
-    /// and it does not appear in this file — not behind a flag, not for power users. The user opens
+    /// and it does not appear in this file: not behind a flag, not for power users. The user opens
     /// the draft in Outlook and presses send themselves, which is the only place that decision
     /// belongs.
     ///
@@ -608,7 +608,7 @@ pub fn to_inbound(event: &GraphEvent) -> Result<Option<Inbound>> {
 /// Parse Graph's split date-and-zone.
 ///
 /// Graph sends `dateTime` with no offset and the zone in a separate field. With the
-/// `Prefer: outlook.timezone="UTC"` header it is UTC, which is what the request asks for — but the
+/// `Prefer: outlook.timezone="UTC"` header it is UTC, which is what the request asks for, but the
 /// value still parses as naive, so it has to be attached to a zone here rather than assumed to
 /// carry one. Getting this wrong shifts every meeting by the mailbox's offset.
 pub fn parse_graph_time(time: &GraphTime) -> Result<DateTime<Utc>> {
@@ -977,7 +977,7 @@ mod tests {
     }
 
     /// Consented to calendar but not mail. Retrying cannot grant a scope, so it must not be
-    /// transient — a retry loop here would hide the one thing the user has to fix.
+    /// transient: a retry loop here would hide the one thing the user has to fix.
     #[tokio::test]
     async fn a_missing_mail_scope_is_permanent_and_says_what_to_do() {
         let (graph_base, token_url) = graph_stub(|_| serde_json::json!({}), 403).await;
@@ -1021,7 +1021,7 @@ mod tests {
     /// exactly once, in a sentence explaining that it is not used.
     ///
     /// A plain "does not contain" would have to forbid the comment too, which would mean deleting
-    /// the explanation to satisfy the test — so it checks *where* the string appears instead. A
+    /// the explanation to satisfy the test, so it checks *where* the string appears instead. A
     /// request builder reaching for it would not be on a comment line.
     #[test]
     fn the_send_endpoint_appears_only_in_prose() {

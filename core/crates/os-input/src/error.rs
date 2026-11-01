@@ -2,7 +2,7 @@
 //!
 //! Every variant carries the thing a person needs in order to act. A permission error that does not
 //! say which pane to open is a dead end, and that is the class of bug the capture crate learned
-//! about the hard way — see `63f6f6d fix(capture): stop demanding a permission this build cannot be
+//! about the hard way: see `63f6f6d fix(capture): stop demanding a permission this build cannot be
 //! given`.
 
 use crate::HotkeyError;
@@ -115,8 +115,8 @@ mod tests {
         assert!(rendered.contains("macOS"), "{rendered}");
     }
 
-    /// The two kinds of hotkey failure have different fixes — one is a setting in this app, the
-    /// other is a setting in somebody else's — so they must not collapse into one message.
+    /// The two kinds of hotkey failure have different fixes: one is a setting in this app, the
+    /// other is a setting in somebody else's, so they must not collapse into one message.
     #[test]
     fn the_two_hotkey_failures_stay_distinct() {
         let ours: OsInputError = HotkeyError::Conflict {

@@ -8,7 +8,7 @@ use uuid::Uuid;
 /// Identifier for every stored entity.
 ///
 /// Stored as a hyphenated UUID string rather than a blob so that databases stay readable
-/// with standard SQLite tooling — worth more during debugging than the 20 bytes saved.
+/// with standard SQLite tooling, worth more during debugging than the 20 bytes saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Id(Uuid);

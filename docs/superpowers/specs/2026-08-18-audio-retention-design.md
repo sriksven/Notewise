@@ -1,4 +1,4 @@
-# Audio retention — design
+# Audio retention - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -19,7 +19,7 @@ have.
 
 **Re-transcription.** `d63ce93 feat(transcription): the models that fix a bad transcript` added better
 models, and the `eval` crate exists precisely because "a real recording came back with four invented
-`Okay.` segments and one speaker split into two." A user who hits that today has no recourse — the audio
+`Okay.` segments and one speaker split into two." A user who hits that today has no recourse; the audio
 that would produce a better transcript no longer exists. Keeping it turns a permanent bad transcript
 into a re-run. Diarization improvements have the same property: better speaker separation is worthless
 against audio you threw away.
@@ -51,14 +51,14 @@ a scrollbar.
 - **Uploading audio anywhere.** Retention is local. Hosted STT is a separate opt-in with separate
   consent.
 - **Retaining audio for meetings recorded before this ships.** It does not exist.
-- **Per-participant consent capture.** See R3 — out of scope and deliberately not pretended to.
+- **Per-participant consent capture.** See R3, out of scope and deliberately not pretended to.
 - **Audio editing.** Read-only.
 
 ---
 
 ## Decisions
 
-### R1 — Off by default, and the transcript path is unchanged when off
+### R1 - Off by default, and the transcript path is unchanged when off
 
 Retention is a setting, default off. With it off, `recorder` behaves exactly as today: samples stream
 through and are discarded.
@@ -66,7 +66,7 @@ through and are discarded.
 Every privacy-sensitive default in this repo points the same way, and this is the most sensitive of
 them. A user who upgrades must not discover later that the app started keeping recordings.
 
-### R2 — Audio is stored as files with a database pointer, not as blobs
+### R2 - Audio is stored as files with a database pointer, not as blobs
 
 Files live under the app data directory in a per-meeting layout; `meetings` gains a nullable
 `audio_path` and `audio_bytes`.
@@ -75,10 +75,10 @@ An hour of audio is tens of megabytes. Putting that in SQLite bloats the databas
 backup copy it, and slows `VACUUM`. Files also let deletion be a filesystem operation that can be
 verified.
 
-The pointer being nullable is what makes retention optional per meeting rather than global — a user can
+The pointer being nullable is what makes retention optional per meeting rather than global; a user can
 enable retention later without every earlier meeting appearing broken.
 
-### R3 — Encryption uses the database's existing at-rest mechanism, and consent is not claimed
+### R3 - Encryption uses the database's existing at-rest mechanism, and consent is not claimed
 
 Audio files are encrypted with the same scheme and key material the database already uses for
 encryption at rest. A separate mechanism would mean a second key to manage and a second thing to get
@@ -92,18 +92,18 @@ UI should say that plainly rather than implying the software has handled it.
 
 Claiming otherwise would be worse than saying nothing.
 
-### R4 — Retention is time-bounded by default, and the default is short
+### R4 - Retention is time-bounded by default, and the default is short
 
 Policies: **off**, **until the meeting is deleted**, or **N days** with a default of 30.
 
 An unbounded default would silently consume tens of gigabytes a year, and the value of audio decays
-fast — re-transcription and seek are both overwhelmingly used soon after a meeting. A short default
+fast; re-transcription and seek are both overwhelmingly used soon after a meeting. A short default
 gets the benefit and limits the exposure.
 
 Enforcement is a pass, not a timer per file: a sweep deletes audio past its policy and clears the
 pointer. It runs on the same schedule mechanism Spec 7 provides, and on demand.
 
-### R5 — Deleting a meeting deletes its audio, and trash is not deletion
+### R5 - Deleting a meeting deletes its audio, and trash is not deletion
 
 Trashing a meeting does **not** delete its audio, because trash is recoverable and a restore with no
 audio would be a silent partial recovery. Purging does delete it.
@@ -112,19 +112,19 @@ audio would be a silent partial recovery. Purging does delete it.
 the same distinction. Audio follows the model already in the schema.
 
 Deletion is unlinking the file and clearing the pointer, in that order, so a crash between them leaves
-a pointer to a missing file — which reads as "no audio" — rather than a file with no pointer, which is
+a pointer to a missing file, which reads as "no audio", rather than a file with no pointer, which is
 an orphan nothing will ever clean up.
 
-### R6 — Re-transcription creates a new transcript; it does not mutate the old one
+### R6 - Re-transcription creates a new transcript; it does not mutate the old one
 
 Re-running transcription on retained audio produces new segments and, per Spec 3's D3.1 reasoning about
 summaries, does not destroy what was there. The user compares and chooses.
 
-Silently replacing a transcript would discard human corrections — exactly the edits Spec 3's
+Silently replacing a transcript would discard human corrections, exactly the edits Spec 3's
 `set_segment_text` exists to allow. A user who fixed twelve names and then re-transcribed would lose all
 twelve with no warning.
 
-### R7 — Export never includes audio unless explicitly requested
+### R7 - Export never includes audio unless explicitly requested
 
 The vault sink and every other export path continue to write text only. Audio is included only by an
 explicit export action that names it.
@@ -189,7 +189,7 @@ degrade it, never lose the meeting.
 
 ## Testing
 
-In CI, with synthetic audio — `audio-capture` already provides `SyntheticSource` and `FileSource` that
+In CI, with synthetic audio, `audio-capture` already provides `SyntheticSource` and `FileSource` that
 work everywhere:
 
 - Retention off: no file written, pointer stays null, transcript identical.
@@ -226,6 +226,6 @@ work everywhere:
 - **Disk usage** at 30 days of daily meetings is substantial and users will be surprised by it; the
   settings UI needs to show current usage, not just the policy.
 - **Encryption key handling** is inherited rather than designed here, so this spec is only as strong as
-  the existing at-rest mechanism — which should be reviewed before implementation rather than assumed.
+  the existing at-rest mechanism, which should be reviewed before implementation rather than assumed.
 - **Re-transcription doubles storage of segments** for a meeting and there is no pruning policy for
   superseded transcripts, the same open question Spec 3 leaves for summaries.

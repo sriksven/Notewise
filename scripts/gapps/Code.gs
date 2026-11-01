@@ -10,7 +10,7 @@
  * verification review. Reading or drafting mail needs a "restricted" scope, which needs verification
  * *and* a paid annual security assessment. Neither is something a local-first tool should have to
  * carry, and an unverified app in testing mode hands out refresh tokens that expire every seven
- * days — so background calendar sync would break weekly.
+ * days, so background calendar sync would break weekly.
  *
  * Apps Script runs as you. The authorisation happens once, in Google's own consent screen, for a
  * script you own and can read. There is no Cloud project, no verification, no assessment, and no
@@ -19,7 +19,7 @@
  * # What this can and cannot do
  *
  * It reads calendars and creates Gmail drafts. It does not send mail. There is no send call in this
- * file and Notewise has no endpoint that would ask for one — a draft becomes an outgoing message
+ * file and Notewise has no endpoint that would ask for one: a draft becomes an outgoing message
  * only when you open Gmail and press send yourself.
  *
  * # Security
@@ -152,7 +152,7 @@ function describeEvent(cal, ev) {
     isAllDay: ev.isAllDayEvent(),
     location: ev.getLocation() || null,
     // Conference links live in the description for most providers, and in a dedicated field for
-    // none that Apps Script exposes — so the consumer parses it out.
+    // none that Apps Script exposes, so the consumer parses it out.
     description: ev.getDescription() || null,
     organizer: safeCreator(ev),
     guests: guests,

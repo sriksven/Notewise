@@ -35,7 +35,7 @@ export function PermissionRow({
           {status === "unavailable" ? detail : description}
         </p>
         {status === "denied" && (
-          // The engine's explanation when it has one. A refusal is not always a decline —
+          // The engine's explanation when it has one. A refusal is not always a decline:
           // macOS reports the same "no" when it declined to register the app at all, and the
           // generic line sends that user to a list their app is missing from.
           <p className="mt-1 text-[12px] leading-snug text-warn-text">

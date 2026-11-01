@@ -56,8 +56,8 @@ impl<'a> SearchRepository<'a> {
     /// Find rows matching *any* of `terms`, best match first.
     ///
     /// [`Self::search`] exists for a search box, where a typed phrase should match as a
-    /// phrase. This exists for retrieval, where the input is a whole question — "what did we
-    /// decide about the pricing tiers?" — and matching that as a phrase finds nothing at all.
+    /// phrase. This exists for retrieval, where the input is a whole question: "what did we
+    /// decide about the pricing tiers?", and matching that as a phrase finds nothing at all.
     /// FTS5's bm25 ranking still floats documents containing more of the terms to the top, so
     /// an OR query is not the free-for-all it looks like.
     ///
@@ -200,7 +200,7 @@ mod tests {
         assert!(hits[0].snippet.contains("Postgres"), "{hits:?}");
     }
 
-    /// Attribution arrives after the segment does — diarization assigns it when a recording
+    /// Attribution arrives after the segment does; diarization assigns it when a recording
     /// ends, and the extension can name someone later still. Without an UPDATE trigger every
     /// name assigned after the fact stayed invisible.
     #[test]

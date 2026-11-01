@@ -24,4 +24,4 @@ SOFTWARE.
 
 SCOPE: This MIT license applies to the `core/` and `apps/` directories of this
 repository. The `cloud/` directory is licensed separately under the Business Source
-License 1.1 — see LICENSE-CLOUD.md.
+License 1.1. See LICENSE-CLOUD.md.

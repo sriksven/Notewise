@@ -33,7 +33,7 @@ default = []
 # Live device capture. Pulls the platform audio SDK.
 #
 # Forwarded to api-server as well, or `notewise serve` would start an engine that cannot
-# record, list devices, or import — while the same binary's `notewise record` could. One
+# record, list devices, or import, while the same binary's `notewise record` could. One
 # binary reporting two different sets of capabilities is a bug report waiting to happen.
 record = ["notewise-audio-capture/os-capture", "notewise-api-server/record"]
 # Real transcription. Pulls a cmake build of whisper.cpp.

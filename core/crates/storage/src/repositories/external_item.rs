@@ -1,6 +1,6 @@
 //! Records of artifacts that live in another system.
 //!
-//! An external item is owned by nothing in Notewise — it is a record of a thing elsewhere.
+//! An external item is owned by nothing in Notewise; it is a record of a thing elsewhere.
 //! So it carries no owning foreign key; association to a meeting or action item is a
 //! `synced_to` edge in the `graph` crate. Identity is `(connector_id, external_id)`, which
 //! is what makes re-pushing update a ticket rather than file a second one.

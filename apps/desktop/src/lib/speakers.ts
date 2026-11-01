@@ -5,7 +5,7 @@
  * Whether a typed name merges two speakers or renames one decides what the user is told they
  * are about to do, and that decision should be testable without mounting a component.
  *
- * @see MAX_SPEAKER_NAME_CHARS in `core/crates/storage/src/repositories/meeting.rs` — the
+ * @see MAX_SPEAKER_NAME_CHARS in `core/crates/storage/src/repositories/meeting.rs`: the
  * server enforces the same bound, and this only exists so the user learns about it before
  * pressing Enter rather than after.
  */
@@ -27,7 +27,7 @@ export type NameOutcome =
  *
  * Names are compared case-insensitively and trimmed, so typing "dana" when "Dana" already
  * exists merges rather than creating a second Dana that differs only in case. The stored name
- * is what the user typed — matching loosely and storing exactly means they can fix
+ * is what the user typed: matching loosely and storing exactly means they can fix
  * capitalisation without it silently becoming a merge into the old spelling.
  */
 export function outcomeOf(
@@ -69,8 +69,8 @@ export function isSavable(
 /**
  * What to tell the user before they commit.
  *
- * A merge is the one that needs saying out loud: it is not obviously reversible — the two
- * labels become one and the split is gone — so it should never happen without the user having
+ * A merge is the one that needs saying out loud: it is not obviously reversible (the two
+ * labels become one and the split is gone), so it should never happen without the user having
  * read the word "merge" first.
  */
 export function describe(outcome: NameOutcome): string | null {
@@ -86,7 +86,7 @@ export function describe(outcome: NameOutcome): string | null {
   }
 }
 
-/** "4 lines" — the weight that makes an anonymous label identifiable. */
+/** "4 lines": the weight that makes an anonymous label identifiable. */
 export function countOf(speaker: Speaker): string {
   return `${speaker.segments} line${speaker.segments === 1 ? "" : "s"}`;
 }

@@ -6,8 +6,8 @@
 //!
 //! # Why the window points at `http://127.0.0.1:<port>`
 //!
-//! The obvious setup — Tauri serving the frontend from its own bundle and the frontend
-//! calling the engine over HTTP — is cross-origin, and would require permissive CORS on an
+//! The obvious setup (Tauri serving the frontend from its own bundle and the frontend
+//! calling the engine over HTTP) is cross-origin, and would require permissive CORS on an
 //! unauthenticated loopback API. That would let any page the user visits read their meetings,
 //! since same-origin policy is the only thing currently preventing it.
 //!
@@ -145,7 +145,7 @@ fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::E
     // Port 0 avoided colliding with a running `notewise serve`, and made the engine
     // impossible to find: the browser extension that reports who is speaking has to name a
     // port in its manifest, and the app was never on it. `discoverable` keeps the collision
-    // property — it walks the window and only falls back to 0 if every one is taken.
+    // property: it walks the window and only falls back to 0 if every one is taken.
     let server = Server::discoverable();
 
     // The engine runs on its own runtime thread. Tauri owns the main thread for the event
@@ -192,7 +192,7 @@ fn start_engine(app: &tauri::AppHandle) -> Result<Started, Box<dyn std::error::E
 /// Asks `storage`, which owns the answer for every surface.
 ///
 /// This used to be `app.path().app_data_dir()`, which Tauri derives from the bundle
-/// identifier — `~/Library/Application Support/dev.notewise.app` rather than the
+/// identifier: `~/Library/Application Support/dev.notewise.app` rather than the
 /// `.../notewise` the CLI composed for itself. Both are reasonable conventions and having
 /// both was the bug: the same user's meetings, notes and tickets lived in one of two
 /// databases depending on which surface created them, and neither could see the other's.
@@ -207,7 +207,7 @@ fn data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// Bring a workspace left by an earlier build into place before opening it.
 ///
 /// Never fatal, and never destructive. A lone workspace from the old location is moved once,
-/// silently — that is the case where nothing is lost and nobody needs telling. When both
+/// silently: that is the case where nothing is lost and nobody needs telling. When both
 /// stores exist, neither is touched: reconciling two populated databases means remapping every
 /// id and edge, which is a feature rather than something a launch path may do on its own.
 fn adopt_legacy_workspace(path: &std::path::Path) {
@@ -233,7 +233,7 @@ fn adopt_legacy_workspace(path: &std::path::Path) {
 /// Beside the database inside the app-data container by default, so they survive an app update
 /// and are removed with the app's data rather than left as orphaned gigabytes elsewhere.
 /// `NOTEWISE_MODEL_DIR` overrides it, which is what lets the app share a model the CLI already
-/// downloaded — a 148 MB file is not worth fetching twice.
+/// downloaded: a 148 MB file is not worth fetching twice.
 fn model_dir(data_dir: &std::path::Path) -> PathBuf {
     std::env::var("NOTEWISE_MODEL_DIR")
         .map(PathBuf::from)
@@ -250,7 +250,7 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
     }
 
     // `"dist"` matches the *target* side of `bundle.resources` in tauri.conf.json, which is a map
-    // for this reason. Declared as a list — `["../dist"]` — Tauri bundles it to
+    // for this reason. Declared as a list (`["../dist"]`), Tauri bundles it to
     // `Resources/_up_/dist`, turning the `..` into `_up_`, and this lookup finds nothing.
     //
     // Which was survivable-looking and was not: the packaged app fell through to the development
@@ -287,7 +287,7 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
             Ok(dev)
         } else {
             Err(format!(
-                "no frontend found at {} — run `npm run build` in apps/desktop first",
+                "no frontend found at {}: run `npm run build` in apps/desktop first",
                 dev.display()
             )
             .into())
@@ -306,7 +306,7 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
 /// The backend the user last chose in the app, if this launch should go back to it.
 ///
 /// The engine writes the choice down whenever the user switches (`AppState::switch_backend`), and
-/// the CLI reads it back at startup — but this shell built its router from the environment alone,
+/// the CLI reads it back at startup, but this shell built its router from the environment alone,
 /// so the desktop app forgot the choice on every launch. That is the bug `switch_backend`'s own
 /// comment describes: someone who picked `llama3.1:8b` because `llama3.1` is not what their Ollama
 /// holds got "model not found" again the next time they opened the app, having fixed it once.
@@ -316,7 +316,7 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
 ///
 /// # Why not `AppState::switch_backend`
 ///
-/// It is what the app calls when the user switches, and it reads the key from the keychain — which
+/// It is what the app calls when the user switches, and it reads the key from the keychain, which
 /// is the one thing the launch path must not do. The release notes say it plainly: after an update
 /// macOS may ask whether Notewise can use what it saved in the keychain. Asked here, before the
 /// server binds, the prompt holds the engine thread past the ten seconds the window waits for it,
@@ -324,7 +324,7 @@ fn frontend_dir(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::E
 ///
 /// So this is the CLI's rule (`Config::ai_router_with`): the provider and model from the
 /// workspace, a key only from the environment, and the stored routing rules on top. A hosted choice
-/// whose key lives only in the keychain still comes back as the default — as before, and as in the
+/// whose key lives only in the keychain still comes back as the default, as before, and as in the
 /// CLI, but now logged. Restoring that one needs the keychain read moved after the server is up,
 /// which is the engine's to provide.
 fn initial_router(

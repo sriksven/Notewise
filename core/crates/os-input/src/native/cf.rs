@@ -2,8 +2,8 @@
 //!
 //! # Why [`Owned`] exists
 //!
-//! Every CoreFoundation function is either a Create/Copy — which hands over a reference this code
-//! must release — or a Get, which does not. Mixing them up leaks or double-frees, and the
+//! Every CoreFoundation function is either a Create/Copy (which hands over a reference this code
+//! must release) or a Get, which does not. Mixing them up leaks or double-frees, and the
 //! difference is only in the function's name. So the ones that transfer ownership are wrapped the
 //! moment they return, and `Drop` does the releasing. There is no path through this module where
 //! remembering to release is left to a reader.
@@ -63,8 +63,8 @@ impl Owned {
     ///
     /// # Safety
     ///
-    /// `ptr` must be a reference this code owns — that is, from a function whose name contains
-    /// `Create` or `Copy` — and must not be released anywhere else.
+    /// `ptr` must be a reference this code owns (that is, from a function whose name contains
+    /// `Create` or `Copy`) and must not be released anywhere else.
     pub unsafe fn from_create(ptr: CFTypeRef) -> Option<Self> {
         if ptr.is_null() {
             None
@@ -89,7 +89,7 @@ impl Drop for Owned {
 /// A UTF-8 Rust string as a `CFString`.
 pub fn cfstring(value: &str) -> Option<Owned> {
     // SAFETY: the bytes and their length come from one slice, the encoding matches those bytes, and
-    // CFStringCreateWithBytes copies them — so the borrow does not outlive this call.
+    // CFStringCreateWithBytes copies them, so the borrow does not outlive this call.
     unsafe {
         Owned::from_create(CFStringCreateWithBytes(
             std::ptr::null(),
@@ -157,7 +157,7 @@ pub fn data_bytes(value: CFTypeRef) -> Option<Vec<u8>> {
     }
 
     // SAFETY: the type is checked, then the length and pointer come from the same object and are
-    // read within one call — nothing here outlives the borrow.
+    // read within one call: nothing here outlives the borrow.
     unsafe {
         if CFGetTypeID(value) != CFDataGetTypeID() {
             return None;

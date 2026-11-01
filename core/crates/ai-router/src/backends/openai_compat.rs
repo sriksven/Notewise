@@ -6,7 +6,7 @@
 //! in a base URL and a header.
 //!
 //! It also means a provider nobody has heard of yet works via [`Preset::Custom`] without a
-//! code change — which matters more than the named presets, since this is the part of the
+//! code change, which matters more than the named presets, since this is the part of the
 //! ecosystem that changes fastest.
 
 use async_trait::async_trait;
@@ -122,8 +122,8 @@ impl Preset {
 ///
 /// This answer switches redaction off and shows the "stays on this machine" badge, so it is
 /// decided on the parsed host rather than on what the text contains. A substring test for
-/// `://localhost` called `http://localhost.example.com` and `http://localhost@example.com` local —
-/// the second connects to example.com with "localhost" as a user name — and sent unmasked
+/// `://localhost` called `http://localhost.example.com` and `http://localhost@example.com` local;
+/// the second connects to example.com with "localhost" as a user name, and sent unmasked
 /// transcripts to both. A URL that will not parse is not local: unsure has to mean remote.
 fn points_at_this_machine(base_url: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
@@ -331,7 +331,7 @@ impl AiBackend for OpenAiCompatBackend {
     async fn extract_decisions(&self, input: &TranscriptInput) -> Result<Vec<ExtractedDecision>> {
         let raw = self
             .send(self.body(
-                "Extract the decisions reached in this meeting — things settled, not tasks. \
+                "Extract the decisions reached in this meeting: things settled, not tasks. \
                  Reply with JSON only: {\"decisions\": [{\"text\": \"...\", \
                  \"reasoning\": \"...\" or null}]}. Return an empty list if nothing was decided.",
                 vec![json!({ "role": "user", "content": transcript_prompt(input, "") })],

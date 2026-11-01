@@ -17,7 +17,7 @@ const MODES: Array<{ id: Mode; label: string; Icon: typeof Sun; hint: string }> 
 /**
  * Theme controls.
  *
- * Applied on click rather than behind a Save button — a colour you cannot see until you confirm
+ * Applied on click rather than behind a Save button: a colour you cannot see until you confirm
  * it is a colour you have to pick twice. The write to the engine follows the paint.
  */
 export function AppearanceSettings({ theme, onModeChange, onAccentChange }: Props) {
@@ -86,7 +86,7 @@ export function AppearanceSettings({ theme, onModeChange, onAccentChange }: Prop
         })}
       </div>
       <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-        Recording stays red in every theme. If it is red, audio is being captured — that should
+        Recording stays red in every theme. If it is red, audio is being captured: that should
         not depend on a colour you chose.
       </p>
     </section>

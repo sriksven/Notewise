@@ -1,14 +1,14 @@
 //! Per-request backend selection.
 //!
 //! Everything here is pure. Selection has to be cheap enough to run before every model call, so
-//! it looks only at facts already in hand — which trait method was invoked, how big the input is,
-//! what time it is — and never at a network or a model.
+//! it looks only at facts already in hand: which trait method was invoked, how big the input is,
+//! what time it is, and never at a network or a model.
 
 use serde::{Deserialize, Serialize};
 
 /// Which kind of work a request is.
 ///
-/// Derived from the `AiBackend` method being called, which makes it free and exact — the trait
+/// Derived from the `AiBackend` method being called, which makes it free and exact; the trait
 /// already separates a two-word title from a ninety-minute summary, and that separation is most
 /// of what routing exists to exploit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ impl TaskKind {
 /// Roughly how many tokens a string is, without a tokenizer.
 ///
 /// Four bytes per token. An exact count needs a tokenizer per model family, and the predicates
-/// this feeds exist to tell a title from a transcript — a decision no plausible tokenizer
+/// this feeds exist to tell a title from a transcript: a decision no plausible tokenizer
 /// disagreement changes.
 pub fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
@@ -66,7 +66,7 @@ pub struct RequestFacts {
     pub text: String,
     /// Whether the default backend answered a probe recently.
     ///
-    /// `None` means nobody asked — no rule uses [`Predicate::LocalBackendHealthy`], so no probe was
+    /// `None` means nobody asked; no rule uses [`Predicate::LocalBackendHealthy`], so no probe was
     /// spent. A rule that needs the answer and finds `None` does not match, because acting on an
     /// unknown is how a policy sends a transcript to a paid provider on a guess.
     pub local_healthy: Option<bool>,
@@ -122,7 +122,7 @@ pub enum Predicate {
     /// Whether the router's default backend is currently reachable.
     ///
     /// The predicate that lets a policy say "use the cloud when the local daemon is down".
-    /// Answered from a cached probe, refreshed at most once per TTL — see `Router::local_healthy`.
+    /// Answered from a cached probe, refreshed at most once per TTL; see `Router::local_healthy`.
     LocalBackendHealthy(bool),
 }
 
@@ -184,7 +184,7 @@ impl RouteSpec {
 /// expensive model" has to be answerable by reading the list from the top.
 ///
 /// Used by rule-set validation and the explain endpoint, which hold an owned slice. `Router`
-/// deliberately does not call this — see `Router::route_for` for why.
+/// deliberately does not call this; see `Router::route_for` for why.
 pub fn select_index(routes: &[RouteSpec], facts: &RequestFacts) -> Option<usize> {
     routes.iter().position(|r| r.matches(facts))
 }
@@ -192,7 +192,7 @@ pub fn select_index(routes: &[RouteSpec], facts: &RequestFacts) -> Option<usize>
 /// Index of the first route that can never fire because an earlier one matches everything.
 ///
 /// Worth detecting at save time. A rule listed below a catch-all looks active in the UI and never
-/// runs, and the symptom — work going to the wrong model — points at the wrong rule.
+/// runs, and the symptom (work going to the wrong model) points at the wrong rule.
 pub fn unreachable_route(routes: &[RouteSpec]) -> Option<usize> {
     let catch_all = routes.iter().position(|r| r.when.is_empty())?;
     if catch_all + 1 < routes.len() {

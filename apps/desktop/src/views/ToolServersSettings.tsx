@@ -27,7 +27,7 @@ import { parseSecrets } from "../lib/secrets";
  *
  * A tool call carries whatever arguments the proposal contains, which may include what was said in
  * a meeting. Whether that is acceptable is a judgement about the server's operator, and this is
- * where that judgement gets made — so it is where it has to be said.
+ * where that judgement gets made, so it is where it has to be said.
  *
  * # Why there is no "always allow"
  *
@@ -104,7 +104,7 @@ export function ToolServersSettings() {
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
         Connect MCP servers so an action item can become a ticket, a message, or whatever else they
-        offer. Every call is shown to you and confirmed before it runs — there is no automatic
+        offer. Every call is shown to you and confirmed before it runs; there is no automatic
         execution and no way to turn the confirmation off.
       </p>
 
@@ -216,8 +216,8 @@ export function ToolServersSettings() {
                         whether this server may be launched to answer a proposal at all, which is a
                         question about the server rather than about any one tool.
 
-                        The engine has enforced this from the start — `McpClient` refuses to spawn a
-                        server pinned `auto_start: false` unless the start was explicit — and nothing
+                        The engine has enforced this from the start: `McpClient` refuses to spawn a
+                        server pinned `auto_start: false` unless the start was explicit, and nothing
                         could set it. */}
                     <label className="mb-2.5 flex cursor-pointer items-start gap-2 border-b border-hairline pb-2.5">
                       <input
@@ -292,7 +292,7 @@ export function ToolServersSettings() {
 
                     {!server.enabled && (
                       <p className="mt-2 text-[11.5px] text-ink-faint">
-                        This server is off, so none of its tools can be proposed yet — your
+                        This server is off, so none of its tools can be proposed yet: your
                         choices here are kept for when you turn it on.
                       </p>
                     )}

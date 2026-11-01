@@ -29,7 +29,7 @@ import {
  *
  * Adding a condition builder for six predicate types is a large surface for a feature most people
  * will use with one rule. This screen installs the starting policy, shows what is in force, lets a
- * rule be removed, and explains any request — the operations that answer "is it on, what is it
+ * rule be removed, and explains any request: the operations that answer "is it on, what is it
  * doing, and how do I stop it". Composing an arbitrary rule stays an API call until there is
  * evidence anyone wants to.
  */
@@ -120,7 +120,7 @@ export function RoutingSettings({ onChanged }: Props = {}) {
       </h2>
       <p className="mb-4 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
         Send heavy work to a better model and keep everything else local. With no rules, every
-        request goes to the backend above — which is exactly what happens today.
+        request goes to the backend above, which is exactly what happens today.
       </p>
 
       {error && (

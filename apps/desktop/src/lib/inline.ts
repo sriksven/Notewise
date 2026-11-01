@@ -1,14 +1,14 @@
 /**
  * Formatting *within* a line.
  *
- * `blocks.ts` handles the shape of a document — what is a heading, what is a list item. This
+ * `blocks.ts` handles the shape of a document: what is a heading, what is a list item. This
  * handles what happens inside one: bold, italic, code, strikethrough and links.
  *
  * # Markdown stays the source of truth
  *
  * The stored text is still `**bold**`, for every reason given in `blocks.ts`: the body is
  * embedded, indexed, read by the agent, and written to a vault as a file someone opens
- * elsewhere. What changes here is that the editor *renders* it — a block that does not have
+ * elsewhere. What changes here is that the editor *renders* it: a block that does not have
  * the caret shows formatted text, and clicking into it reveals the markers again.
  *
  * That is the trade a textarea-per-block makes possible. A `contenteditable` would show
@@ -45,8 +45,8 @@ const LINK = /^\[([^\]]*)\]\(([^)\s]+)\)/;
  * this has to round-trip exactly with what the editor writes, and a full implementation would
  * interpret constructs the editor cannot produce and cannot show.
  *
- * Code wins over everything inside it — `` `**not bold**` `` is four literal characters and a
- * word — which is why it is scanned as an opaque run rather than recursed into.
+ * Code wins over everything inside it (`` `**not bold**` `` is four literal characters and a
+ * word), which is why it is scanned as an opaque run rather than recursed into.
  */
 export function parseInline(text: string): Span[] {
   const spans: Span[] = [];
@@ -126,14 +126,14 @@ const MARKERS: Record<Mark, string> = {
 /**
  * Apply or remove a mark over a selection.
  *
- * Returns the new text and where the selection should sit afterwards — the caller puts it
+ * Returns the new text and where the selection should sit afterwards: the caller puts it
  * back, because a textarea that loses the user's selection on every ⌘B is unusable.
  *
  * Toggles rather than only wrapping. Pressing ⌘B on text that is already bold should unbold
  * it, and an editor where the same key only ever adds markers accumulates `****bold****`.
  *
  * With an empty selection it inserts the pair and puts the caret between them, so ⌘B then
- * typing produces bold text — which is what the shortcut means when nothing is selected.
+ * typing produces bold text, which is what the shortcut means when nothing is selected.
  */
 export function toggleMark(selection: Selection, mark: Mark): Selection {
   const marker = MARKERS[mark];

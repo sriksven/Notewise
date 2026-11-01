@@ -7,7 +7,7 @@ Check which license covers the directory you are touching: `core/` and `apps/` a
 land in.
 
 Many directories are scaffolds awaiting their phase. Each scaffold's `README.md` states its
-status at the top — read it before assuming something is implemented, and check
+status at the top. Read it before assuming something is implemented, and check
 `docs/roadmap.md` before building ahead of the current phase.
 
 ## Setup
@@ -41,15 +41,15 @@ These are enforced in review because they are load-bearing:
 5. **No `unwrap()` in library code.** Use the crate's `thiserror` enum.
 
 If a change requires breaking one of these, say so explicitly in the PR description and
-explain why — sometimes the rule is wrong, but it should be a decision rather than a drift.
+explain why. Sometimes the rule is wrong, but it should be a decision rather than a drift.
 
 ## Tests
 
 New behavior needs a test. `storage` and `graph` use in-memory SQLite, so tests are fast and
 need no fixtures. `ai-router` tests use `MockBackend`.
 
-If something genuinely cannot be tested in CI — it needs a GPU, a signed bundle, a TCC
-permission grant, or a paid API key — mark it `#[ignore]` **with a reason string**. A green
+If something genuinely cannot be tested in CI (it needs a GPU, a signed bundle, a TCC
+permission grant, or a paid API key), mark it `#[ignore]` **with a reason string**. A green
 CI run must never imply that unverified things work.
 
 ## Commits
@@ -57,14 +57,14 @@ CI run must never imply that unverified things work.
 Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`. This drives
 changelog generation.
 
-Trunk-based development — short-lived branches off `main`, merged by PR. Keep PRs focused;
+Trunk-based development: short-lived branches off `main`, merged by PR. Keep PRs focused;
 a reviewer should be able to hold the whole change in their head.
 
 ## Reporting bugs
 
 Include your OS and version, the Notewise version, and what you expected versus what
 happened. For audio capture issues, note whether you are capturing mic, system audio, or
-both — they use entirely different code paths per platform.
+both: they use entirely different code paths per platform.
 
 **Never paste real meeting content into an issue.** Redact it or synthesize a minimal
 reproduction.

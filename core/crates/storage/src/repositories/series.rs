@@ -78,7 +78,7 @@ impl<'a> MeetingSeriesRepository<'a> {
 
     /// Find a series by title, creating it if absent.
     ///
-    /// Title is the only signal available without a calendar connected — a recurring meeting
+    /// Title is the only signal available without a calendar connected; a recurring meeting
     /// recorded by hand looks like "Standup" every week and nothing else distinguishes it.
     /// Matching is case-insensitive and ignores surrounding whitespace. Once calendar import
     /// lands, a recurrence id is a better key and should take precedence over this.

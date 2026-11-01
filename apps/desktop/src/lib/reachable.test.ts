@@ -5,21 +5,21 @@ import { describe, expect, it } from "vitest";
  *
  * # The bug this exists for
  *
- * Three times now a feature has shipped end to end — migration, repository, HTTP route, typed client
- * method, tests at every layer — and been reachable by nobody, because no component ever called it.
+ * Three times now a feature has shipped end to end (migration, repository, HTTP route, typed client
+ * method, tests at every layer) and been reachable by nobody, because no component ever called it.
  * Audio retention was the clearest: the engine kept audio, swept it hourly, and served it over a
  * range-request endpoint, the transcript rendered a player for it, and the only way to switch it on
  * was `curl`. Before that, three of five connectors were absent from the catalogue the setup screen
  * read, so a screen that existed rendered nothing.
  *
  * None of those are type errors and none are lint errors. `api.ts` exports an object literal, so an
- * unused key is not an unused symbol — TypeScript has nothing to say about it. This test is the only
+ * unused key is not an unused symbol: TypeScript has nothing to say about it. This test is the only
  * thing that can see the gap.
  *
  * # How it decides
  *
  * A method is reachable if some file outside `api.ts` mentions `api.thatMethod`. That is how every
- * caller in this app reaches the engine — there is no destructuring of the client anywhere, which
+ * caller in this app reaches the engine: there is no destructuring of the client anywhere, which
  * the last assertion here pins down, because destructuring would make this test blind.
  *
  * Whitespace between `api`, `.` and the name is allowed on purpose: the formatter breaks long chains
@@ -33,7 +33,7 @@ const SELF = "/src/lib/reachable.test.ts";
 /**
  * Every `.ts`/`.tsx` file under `src`, as text, keyed by path.
  *
- * Vite's glob rather than `node:fs`, so this needs no `@types/node` — the only reason to add Node
+ * Vite's glob rather than `node:fs`, so this needs no `@types/node`: the only reason to add Node
  * types to a browser app would be this one test, and the bundler can already do it.
  */
 const sources = import.meta.glob("/src/**/*.{ts,tsx}", {
@@ -64,7 +64,7 @@ function apiMethods(text: string): string[] {
  *
  * Empty, and that is the point. It started at twenty-two: audio retention could not be switched on,
  * summary templates were read-only, dictation could not be cancelled, agent runs vanished when you
- * left the screen, and the graph — the premise of the whole product — was rendered by nothing. Each
+ * left the screen, and the graph, the premise of the whole product, was rendered by nothing. Each
  * one compiled, passed clippy, had tests at every layer, and was reachable only by `curl`.
  *
  * Not an exemption list. A method belongs here only while it is a gap somebody has decided not to
@@ -72,8 +72,8 @@ function apiMethods(text: string): string[] {
  * `offers every capability somewhere`, and an entry that has become reachable fails `keeps the list
  * of gaps honest`. So it can be added to deliberately and shrinks on its own.
  *
- * The other resolution is deletion. Three methods left this client rather than gaining a screen —
- * import-by-path, workspace merge, and appending externally transcribed segments — because a web app
+ * The other resolution is deletion. Three methods left this client rather than gaining a screen:
+ * import-by-path, workspace merge, and appending externally transcribed segments, because a web app
  * over loopback has no filesystem and no bridge to the shell, so it could never have supplied a
  * path. Those capabilities live on the CLI. See the note above `api`.
  */
@@ -113,8 +113,8 @@ describe("the interface can reach the engine", () => {
     expect(
       surprises,
       "These engine capabilities have a typed client method and no caller, so nobody using the " +
-        "app can reach them. Give one a screen, delete it, or — if it is a gap being left on " +
-        "purpose — add it to KNOWN_UNREACHABLE with the reason.",
+        "app can reach them. Give one a screen, delete it, or, if it is a gap being left on " +
+        "purpose, add it to KNOWN_UNREACHABLE with the reason.",
     ).toEqual([]);
   });
 
@@ -125,7 +125,7 @@ describe("the interface can reach the engine", () => {
     expect(
       stale,
       "These are listed as unreachable but something calls them now. Delete them from " +
-        "KNOWN_UNREACHABLE — the list is meant to shrink.",
+        "KNOWN_UNREACHABLE: the list is meant to shrink.",
     ).toEqual([]);
 
     const gone = KNOWN_UNREACHABLE.filter((name) => !methods.includes(name));

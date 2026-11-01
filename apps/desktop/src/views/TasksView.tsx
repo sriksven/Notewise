@@ -43,7 +43,7 @@ function overdue(task: Task, now = Date.now()): boolean {
  * list is the record of what that meeting decided; this is the list of what is still owed.
  *
  * Assembled client-side from the per-meeting endpoints rather than a dedicated one. That is a
- * real cost — up to forty requests on a large workspace — and worth naming: the alternative was
+ * real cost, up to forty requests on a large workspace, and worth naming: the alternative was
  * a cross-meeting query in `storage` plus an endpoint, and this page is the thing that proves
  * whether anyone wants the view before that gets built.
  */

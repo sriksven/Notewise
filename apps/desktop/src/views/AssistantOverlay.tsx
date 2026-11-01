@@ -13,7 +13,7 @@ import {
 /**
  * The assistant panel: ask about what is on screen, or act on what is highlighted.
  *
- * Specs 9b and 9c in one surface, because they are one gesture from the user's side — the hotkey
+ * Specs 9b and 9c in one surface, because they are one gesture from the user's side: the hotkey
  * opens this, and what it offers depends on whether anything is selected. Two windows for "ask" and
  * "rewrite" would be two hotkeys to remember for the same intent.
  *
@@ -21,7 +21,7 @@ import {
  *
  * This is the only surface in Notewise that reads a window belonging to another application. A user
  * is entitled to see exactly what left that window, so the context is available verbatim rather than
- * described — and the answer says plainly when it was grounded in nothing.
+ * described, and the answer says plainly when it was grounded in nothing.
  */
 export function AssistantOverlay() {
   const [question, setQuestion] = useState("");
@@ -123,7 +123,7 @@ export function AssistantOverlay() {
       </div>
 
       {/* Quick actions appear only when there is something to act on, and "replace" only where it
-          can work — offering it otherwise costs the user their selection for nothing. */}
+          can work: offering it otherwise costs the user their selection for nothing. */}
       {hasSelection && actions.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-b border-hairline px-3 py-2">
           {actions.map((action) => (
@@ -203,7 +203,7 @@ export function AssistantOverlay() {
             )}
             {!acted.note && acted.insertion === null && (
               <p className="mt-1.5 text-[11.5px] text-ink-faint">
-                Your original text is untouched — copy this if you want it.
+                Your original text is untouched. Copy this if you want it.
               </p>
             )}
           </div>

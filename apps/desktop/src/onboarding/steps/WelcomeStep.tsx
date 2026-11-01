@@ -6,7 +6,7 @@ interface WelcomeStepProps {
 
 const CLAIMS = [
   { icon: Lock, text: "Recordings and transcripts stay on this machine" },
-  { icon: Network, text: "Meetings become notes, tickets, and drafts — linked" },
+  { icon: Network, text: "Meetings become notes, tickets, and drafts, all linked" },
   { icon: Cpu, text: "Works offline. No account, no cloud required" },
 ];
 
@@ -17,7 +17,7 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
         Welcome to Notewise
       </h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Record, transcribe, and understand your meetings — on your own hardware.
+        Record, transcribe, and understand your meetings, on your own hardware.
       </p>
 
       <ul className="mt-8 w-full max-w-md divide-y divide-hairline overflow-hidden rounded-xl border border-hairline bg-surface text-left">

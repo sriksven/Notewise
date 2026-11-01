@@ -96,7 +96,7 @@ export function JobsView() {
       const list = await api.jobRuns(id);
       setRuns((current) => ({ ...current, [id]: list }));
     } catch {
-      // An unreadable history should not take the schedule list down with it — but it must not
+      // An unreadable history should not take the schedule list down with it, but it must not
       // read as "it has not run yet" either, which is a claim about the job.
       setRuns((current) => ({ ...current, [id]: current[id] ?? [] }));
     }
@@ -118,7 +118,7 @@ export function JobsView() {
       await fn();
       await load();
       // Re-read the open history rather than blanking it. Blanking it showed "It has not run yet."
-      // under a job that had — straight after pressing Run now, the moment it matters most.
+      // under a job that had, straight after pressing Run now, the moment it matters most.
       if (open) await readRuns(open);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "that did not work");
@@ -130,7 +130,7 @@ export function JobsView() {
       <div className="mx-auto max-w-2xl">
         <h1 className="text-[17px] font-semibold tracking-tight text-ink">Scheduled jobs</h1>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">
-          A job gives the agent a task on a schedule. It can search, read, and write a note — the same
+          A job gives the agent a task on a schedule. It can search, read, and write a note: the same
           things it can do when you ask it directly. It cannot act in anything outside this app while
           nobody is watching.
         </p>
@@ -272,7 +272,7 @@ export function JobsView() {
                       <span className="font-mono">
                         {new Date(run.started_at).toLocaleString()}
                       </span>{" "}
-                      — {run.status}
+                      - {run.status}
                       {/* The reason is the point of recording a skip at all. */}
                       {run.error && <span className="text-ink-faint"> · {run.error}</span>}
                       {run.trace && (

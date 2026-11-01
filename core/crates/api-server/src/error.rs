@@ -1,7 +1,7 @@
 //! Error translation at the transport boundary.
 //!
 //! Core crates return their own error enums with no HTTP concerns. This module is where those
-//! become status codes — keeping the mapping in one place rather than scattered through
+//! become status codes, keeping the mapping in one place rather than scattered through
 //! handlers, and keeping transport knowledge out of `storage`, `graph`, and `ai-router`.
 
 use axum::http::StatusCode;
@@ -28,7 +28,7 @@ pub enum ApiError {
     #[error("{0}")]
     NotFound(String),
 
-    /// The request was well-formed but conflicts with current state — starting a recording
+    /// The request was well-formed but conflicts with current state: starting a recording
     /// while one is running, or stopping when none is.
     #[error("{0}")]
     Conflict(String),
@@ -67,31 +67,31 @@ impl ApiError {
                 (StatusCode::SERVICE_UNAVAILABLE, "schema_too_new")
             }
             // The caller sent fields that contradict each other. Their fault, not ours, and
-            // retrying the same body will fail the same way — so 400, not 500.
+            // retrying the same body will fail the same way, so 400, not 500.
             ApiError::Storage(StorageError::Invalid { .. }) => {
                 (StatusCode::BAD_REQUEST, "bad_request")
             }
             // A rule the product chose, not a fault. `StorageError::Refused` is documented as
             // "valid SQL and deliberately not allowed", and its message explains the rule rather
-            // than naming a table — it is written to be read by the person who hit it.
+            // than naming a table: it is written to be read by the person who hit it.
             //
             // This fell through to 500 for a long time, which was wrong three ways: the client was
             // told to retry something that will never work, an explanation meant for a user arrived
             // labelled `storage_error`, and `into_response` logged every deliberate refusal at
             // error level. Found by deleting a built-in summary template over HTTP and getting a
-            // 500 back — the test covering that asserted only `assert_ne!(status, OK)`, which a 500
+            // 500 back: the test covering that asserted only `assert_ne!(status, OK)`, which a 500
             // satisfies.
             //
             // 409 rather than 400: the request is well-formed, and it is the current state that
-            // forbids it — a seeded template, a name already taken, a cap already reached.
+            // forbids it: a seeded template, a name already taken, a cap already reached.
             ApiError::Storage(StorageError::Refused(_)) => (StatusCode::CONFLICT, "refused"),
             // Also the caller's, and by the variant's own documentation: "every one of these is a
-            // condition the user can act on — a missing file, a schema mismatch, the same workspace
-            // twice — and the message says which." A 500 told them to retry a path that does not
+            // condition the user can act on: a missing file, a schema mismatch, the same workspace
+            // twice, and the message says which." A 500 told them to retry a path that does not
             // exist. Same reasoning as `Invalid` above: retrying this body fails identically.
             ApiError::Storage(StorageError::Merge(_)) => (StatusCode::BAD_REQUEST, "cannot_merge"),
-            // A schema rule the request broke. These were 500s — `POST /v1/notes` with a
-            // `project_id` that names nothing, a second person with the same email — so a client
+            // A schema rule the request broke. These were 500s: `POST /v1/notes` with a
+            // `project_id` that names nothing, a second person with the same email, so a client
             // was told to retry something that fails identically every time.
             //
             // A duplicate is a conflict with what is stored. A reference to nothing is a request
@@ -141,8 +141,8 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = self.parts();
 
-        // The message is written for the user and leaves out the mechanics — the URL, the OS
-        // error — so the log records the `Debug` form beside it, which keeps them.
+        // The message is written for the user and leaves out the mechanics (the URL, the OS
+        // error) so the log records the `Debug` form beside it, which keeps them.
         if status.is_server_error() {
             tracing::error!(error = %self, cause = ?self, %code, "request failed");
         }
@@ -169,7 +169,7 @@ mod tests {
     /// Merging names a file the caller chose, so a file that cannot be merged is their error.
     ///
     /// `merging_a_missing_workspace_is_a_client_error` in `routing.rs` asserted only that the status
-    /// was not 200 and so passed on the 500 this used to return — the test named the right property
+    /// was not 200 and so passed on the 500 this used to return: the test named the right property
     /// and checked a weaker one.
     #[test]
     fn an_unmergeable_source_is_the_callers_error() {

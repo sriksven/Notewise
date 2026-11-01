@@ -4,7 +4,7 @@
 
 **Goal:** Gate the desktop app's first launch behind a four-step wizard (Welcome → Model → Backend → Permissions) that will not let a user reach the main window without a transcription model on disk, a resolved AI backend, and every obtainable audio permission granted.
 
-**Architecture:** All setup state lives in the engine, because the Tauri shell binds `127.0.0.1:0` and the window's origin therefore changes every launch, wiping browser storage. Exactly one value is persisted — `onboarding_completed_at` in a new `app_settings` table — and every other decision (which step is current, whether Finish enables, whether a requirement applies to this build) is derived per launch from a live readiness snapshot served by `GET /v1/setup`.
+**Architecture:** All setup state lives in the engine, because the Tauri shell binds `127.0.0.1:0` and the window's origin therefore changes every launch, wiping browser storage. Exactly one value is persisted, `onboarding_completed_at` in a new `app_settings` table, and every other decision (which step is current, whether Finish enables, whether a requirement applies to this build) is derived per launch from a live readiness snapshot served by `GET /v1/setup`.
 
 **Tech Stack:** Rust (axum, rusqlite, tokio, thiserror, async-trait), React 18 + TypeScript + Tailwind + lucide-react, Vitest.
 
@@ -14,15 +14,15 @@
 
 ## File Structure
 
-### Rust — created
+### Rust - created
 
 | File | Responsibility |
 |---|---|
-| `core/crates/storage/src/repositories/setting.rs` | `SettingsRepository` — get/set/delete on `app_settings`. The only SQL for it. |
+| `core/crates/storage/src/repositories/setting.rs` | `SettingsRepository` - get/set/delete on `app_settings`. The only SQL for it. |
 | `core/crates/audio-capture/src/permissions.rs` | `PermissionStatus`, `status()`, `request()`. Probes that touch the device. |
 | `core/crates/api-server/src/setup.rs` | Readiness snapshot type + the policy deciding what is required on this build. No HTTP. |
 
-### Rust — modified
+### Rust - modified
 
 | File | Change |
 |---|---|
@@ -36,7 +36,7 @@
 | `core/crates/api-server/src/lib.rs` | Declare `setup` module |
 | `core/crates/api-server/src/routes.rs` | Three routes, three handlers, and the `list_models` model-dir fix |
 
-### Frontend — created
+### Frontend - created
 
 | File | Responsibility |
 |---|---|
@@ -54,7 +54,7 @@
 | `apps/desktop/src/onboarding/steps/PermissionRow.tsx` | One capability row |
 | `apps/desktop/src/onboarding/SetupBanner.tsx` | Post-completion regression notice |
 
-### Frontend — modified
+### Frontend - modified
 
 | File | Change |
 |---|---|
@@ -141,7 +141,7 @@ pub use setting::SettingsRepository;
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-storage setting`
-Expected: FAIL — `cannot find type SettingsRepository in this scope`.
+Expected: FAIL, `cannot find type SettingsRepository in this scope`.
 
 - [ ] **Step 3: Add the migration**
 
@@ -175,7 +175,7 @@ use crate::error::Result;
 /// Application-level key/value configuration.
 ///
 /// Deliberately untyped: values are strings, and the caller owns the meaning. A typed column
-/// per setting would mean a migration every time the app grows a preference, for no benefit —
+/// per setting would mean a migration every time the app grows a preference, for no benefit,
 /// nothing joins against these.
 #[derive(Debug)]
 pub struct SettingsRepository<'a> {
@@ -224,10 +224,10 @@ impl<'a> SettingsRepository<'a> {
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-storage setting`
-Expected: PASS — 4 tests.
+Expected: PASS, 4 tests.
 
 Run: `cargo test -p notewise-storage migrations`
-Expected: PASS — the existing migration tests still hold at the new `SUPPORTED_VERSION`.
+Expected: PASS; the existing migration tests still hold at the new `SUPPORTED_VERSION`.
 
 - [ ] **Step 6: Commit**
 
@@ -280,7 +280,7 @@ mod tests {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p notewise-ai-router probe`
-Expected: FAIL — `no method named 'probe' found`.
+Expected: FAIL, `no method named 'probe' found`.
 
 - [ ] **Step 3: Add the trait method**
 
@@ -354,7 +354,7 @@ In `core/crates/ai-router/src/router.rs`, inside `impl Router`, after the existi
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-ai-router probe`
-Expected: PASS — 2 tests.
+Expected: PASS, 2 tests.
 
 - [ ] **Step 7: Commit**
 
@@ -395,7 +395,7 @@ mod tests {
         }
     }
 
-    /// Nothing has prompted yet, so the honest answer is `NotRequested` — not a guess derived
+    /// Nothing has prompted yet, so the honest answer is `NotRequested`, not a guess derived
     /// from whether devices happen to enumerate.
     #[test]
     #[cfg(feature = "os-capture")]
@@ -451,7 +451,7 @@ pub use permissions::{PermissionStatus, request_permission, permission_status};
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-audio-capture permissions`
-Expected: FAIL — `file not found for module permissions` is resolved but `cannot find function status`.
+Expected: FAIL; `file not found for module permissions` is resolved but `cannot find function status`.
 
 - [ ] **Step 3: Write the module**
 
@@ -469,7 +469,7 @@ use crate::{CaptureKind, OsBackend};
 /// What the OS will let us do, as far as we have actually asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionStatus {
-    /// Obtainable, but nothing has prompted yet. Not a guess — a statement that we have not
+    /// Obtainable, but nothing has prompted yet. Not a guess, a statement that we have not
     /// asked, so the UI can offer the button rather than fake an answer.
     NotRequested,
     Granted,
@@ -507,7 +507,7 @@ fn unavailable_reason(kind: CaptureKind) -> Option<String> {
     }
 
     match kind {
-        // The microphone path is `cpal`, not `OsBackend` — it needs no signed bundle and is
+        // The microphone path is `cpal`, not `OsBackend`; it needs no signed bundle and is
         // the one capability obtainable everywhere `cpal` runs.
         CaptureKind::Microphone => None,
         _ => match OsBackend::for_host(kind) {
@@ -598,10 +598,10 @@ with:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-audio-capture permissions`
-Expected: PASS — 3 tests run, 1 ignored.
+Expected: PASS, 3 tests run, 1 ignored.
 
 Run: `cargo test -p notewise-audio-capture --features os-capture permissions`
-Expected: PASS — 3 tests run, 1 ignored.
+Expected: PASS, 3 tests run, 1 ignored.
 
 - [ ] **Step 6: Commit**
 
@@ -626,7 +626,7 @@ model as missing and never satisfy its gate.
 - [ ] **Step 1: Write the failing test**
 
 Append to the `#[cfg(test)] mod tests` at the end of `core/crates/api-server/src/routes.rs`.
-Match the surrounding tests' helper style — they build state with `.with_model_dir(dir.path())`
+Match the surrounding tests' helper style; they build state with `.with_model_dir(dir.path())`
 around line 2424:
 
 ```rust
@@ -637,7 +637,7 @@ around line 2424:
     ///
     /// `ModelStore::is_available` compares the file's byte length against the catalogue
     /// (`models.rs:176`), so a short placeholder does not register as installed. `set_len`
-    /// produces a sparse file — correct length, no bytes written — which matters because
+    /// produces a sparse file (correct length, no bytes written) which matters because
     /// even the smallest model in the registry is tens of megabytes.
     fn install_smallest_model(dir: &std::path::Path) -> notewise_transcription::ModelInfo {
         let model = notewise_transcription::ModelRegistry::all()
@@ -709,7 +709,7 @@ around line 2424:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-api-server list_models_honours`
-Expected: FAIL — `installed` is `false` and `directory` is the environment-derived guess.
+Expected: FAIL; `installed` is `false` and `directory` is the environment-derived guess.
 
 - [ ] **Step 3: Fix the handler**
 
@@ -854,7 +854,7 @@ mod setup;
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-api-server setup`
-Expected: FAIL — `cannot find type SetupReadiness in this scope`.
+Expected: FAIL, `cannot find type SetupReadiness in this scope`.
 
 - [ ] **Step 3: Write the module**
 
@@ -912,7 +912,7 @@ impl PermissionsReadiness {
     /// Combine per-capability answers into one gate.
     ///
     /// Only `granted` satisfies a required capability. `unavailable` is excluded from the
-    /// gate entirely — there is no action a user could take, so blocking on it would trap
+    /// gate entirely; there is no action a user could take, so blocking on it would trap
     /// them. That is the whole of the "required only when available" rule.
     pub fn from_parts(microphone: PermissionReadiness, system_audio: PermissionReadiness) -> Self {
         let satisfied = [&microphone, &system_audio]
@@ -957,7 +957,7 @@ impl SetupReadiness {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-api-server setup`
-Expected: PASS — 5 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1066,7 +1066,7 @@ Append to the `#[cfg(test)] mod tests` in `core/crates/api-server/src/routes.rs`
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p notewise-api-server setup_reports`
-Expected: FAIL — 404, because the route does not exist.
+Expected: FAIL, 404, because the route does not exist.
 
 - [ ] **Step 3: Register the route**
 
@@ -1193,7 +1193,7 @@ of `routes.rs`, keeping alphabetical order (after `SearchRepository,`).
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-api-server setup`
-Expected: PASS — 7 tests (5 from Task 5, 2 here).
+Expected: PASS, 7 tests (5 from Task 5, 2 here).
 
 - [ ] **Step 6: Commit**
 
@@ -1335,7 +1335,7 @@ Append to the `#[cfg(test)] mod tests` in `core/crates/api-server/src/routes.rs`
     }
 
     /// On a build without capture, asking for system audio must answer "unavailable" rather
-    /// than fail — the wizard needs a reason string to show, not an error banner.
+    /// than fail; the wizard needs a reason string to show, not an error banner.
     #[tokio::test]
     async fn requesting_system_audio_reports_unavailable_rather_than_failing() {
         let app = crate::routes::router(std::sync::Arc::new(AppState::new(
@@ -1371,7 +1371,7 @@ Append to the `#[cfg(test)] mod tests` in `core/crates/api-server/src/routes.rs`
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p notewise-api-server completing_setup`
-Expected: FAIL — 404 on both, the routes do not exist.
+Expected: FAIL, 404 on both; the routes do not exist.
 
 - [ ] **Step 3: Register the routes**
 
@@ -1431,7 +1431,7 @@ async fn request_permission(
 ) -> ApiResult<Json<crate::setup::PermissionReadiness>> {
     let kind = CaptureKindArg::parse(&kind).ok_or_else(|| {
         ApiError::BadRequest(format!(
-            "unknown permission '{kind}' — expected 'microphone' or 'system_audio'"
+            "unknown permission '{kind}': expected 'microphone' or 'system_audio'"
         ))
     })?;
 
@@ -1446,7 +1446,7 @@ async fn request_permission(
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p notewise-api-server`
-Expected: PASS — all existing tests plus the 4 new ones.
+Expected: PASS, all existing tests plus the 4 new ones.
 
 - [ ] **Step 6: Commit**
 
@@ -1475,7 +1475,7 @@ Expected: clean, all tests pass.
 cargo clippy -p notewise-api-server --features record --all-targets -- -D warnings
 ```
 
-Expected: clean. This is the build where `permission_readiness` takes its `#[cfg(feature = "record")]` arm — a typo there would otherwise only surface in a desktop bundle.
+Expected: clean. This is the build where `permission_readiness` takes its `#[cfg(feature = "record")]` arm; a typo there would otherwise only surface in a desktop bundle.
 
 - [ ] **Step 3: Commit any formatting**
 
@@ -1626,7 +1626,7 @@ describe("regression after completion", () => {
 - [ ] **Step 3: Run the test to verify it fails**
 
 Run: `cd apps/desktop && npm test`
-Expected: FAIL — `Failed to resolve import "./readiness"`.
+Expected: FAIL, `Failed to resolve import "./readiness"`.
 
 - [ ] **Step 4: Write the module**
 
@@ -1636,7 +1636,7 @@ Create `apps/desktop/src/onboarding/readiness.ts`:
 /**
  * Setup readiness, and the decisions derived from it.
  *
- * Deliberately pure — no React, no fetch. Which steps exist, which one to show, and whether
+ * Deliberately pure: no React, no fetch. Which steps exist, which one to show, and whether
  * Finish enables are the only real branching in this feature, and they are worth testing
  * without mounting anything.
  */
@@ -1723,7 +1723,7 @@ export function regressions(readiness: SetupReadiness): Step[] {
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd apps/desktop && npm test`
-Expected: PASS — 11 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1820,7 +1820,7 @@ export function useModelDownload(onFinished: () => void | Promise<void>): ModelD
     }
   };
 
-  // Recover a download already running when this mounted — the engine owns it, so navigating
+  // Recover a download already running when this mounted; the engine owns it, so navigating
   // away and back must not lose the progress bar.
   useEffect(() => {
     let cancel: (() => void) | undefined;
@@ -1913,7 +1913,7 @@ git commit -m "refactor(desktop): extract byte formatting and download orchestra
 In `apps/desktop/src/lib/api.ts`, add to the `api` object after `downloads`:
 
 ```ts
-  /** What first-run setup still needs. Never prompts — see `requestPermission`. */
+  /** What first-run setup still needs. Never prompts. See `requestPermission`. */
   setup: () => request<SetupReadiness>("/v1/setup"),
 
   /**
@@ -1931,7 +1931,7 @@ In `apps/desktop/src/lib/api.ts`, add to the `api` object after `downloads`:
 ```
 
 Add the type import as the **first statement in the file**, above the module doc comment's
-closing block and before any interface declaration — ES module imports must be at the top:
+closing block and before any interface declaration; ES module imports must be at the top:
 
 ```ts
 import type { PermissionReadiness, SetupReadiness } from "../onboarding/readiness";
@@ -2037,7 +2037,7 @@ interface WelcomeStepProps {
 
 const CLAIMS = [
   { icon: Lock, text: "Recordings and transcripts stay on this machine" },
-  { icon: Network, text: "Meetings become notes, tickets, and drafts — linked" },
+  { icon: Network, text: "Meetings become notes, tickets, and drafts, linked" },
   { icon: Cpu, text: "Works offline. No account, no cloud required" },
 ];
 
@@ -2048,7 +2048,7 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
         Welcome to Notewise
       </h1>
       <p className="mt-2 text-[15px] text-neutral-500">
-        Record, transcribe, and understand your meetings — on your own hardware.
+        Record, transcribe, and understand your meetings, on your own hardware.
       </p>
 
       <ul className="mt-8 w-full max-w-md divide-y divide-hairline overflow-hidden rounded-xl border border-hairline bg-white text-left">
@@ -2226,7 +2226,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
             </div>
 
             <p className="mt-2 text-[11px] text-neutral-400">
-              The engine owns this download — it resumes where it left off if the connection
+              The engine owns this download; it resumes where it left off if the connection
               drops, and continues if you close this window.
             </p>
           </div>
@@ -2348,12 +2348,12 @@ export function BackendStep({ satisfied, onChanged }: BackendStepProps) {
                 />
                 <span className={satisfied ? "text-emerald-800" : "text-amber-800"}>
                   {satisfied
-                    ? `Reachable — ${active?.model ?? "ready"}`
+                    ? `Reachable: ${active?.model ?? "ready"}`
                     : "Not reachable. Is Ollama running?"}
                 </span>
               </div>
               <p className="mt-2 text-[12px] text-neutral-500">
-                Nothing leaves this machine. Notewise does not install or update Ollama —
+                Nothing leaves this machine. Notewise does not install or update Ollama:
                 start it, then re-check.
               </p>
             </div>
@@ -2536,7 +2536,7 @@ interface PermissionsStepProps {
   onChanged: () => Promise<void>;
 }
 
-/** macOS deep link to Privacy & Security. Harmless elsewhere — the OS ignores it. */
+/** macOS deep link to Privacy & Security. Harmless elsewhere; the OS ignores it. */
 const PRIVACY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security";
 
 export function PermissionsStep({ readiness, onChanged }: PermissionsStepProps) {
@@ -2956,7 +2956,7 @@ Open the printed URL. Confirm, in order:
 3. Backend shows a red dot with Ollama stopped, green after `ollama serve`, and Re-check flips it without a reload.
 4. System audio reads "Not available" with a reason, and does **not** block Finish.
 5. Finish is disabled until microphone is granted, then enables.
-6. Restart the engine — the app opens straight to the main window, no wizard.
+6. Restart the engine; the app opens straight to the main window, no wizard.
 
 - [ ] **Step 4: Confirm the gate cannot be bypassed**
 
@@ -2997,7 +2997,7 @@ git commit -m "chore: verify first-run setup end to end" || echo "nothing to com
 | §6 permission probing | 3 |
 | §7 backend detection | 2 |
 | §8.1 structure, App.tsx unchanged in substance | 16 |
-| §8.2 the four screens | 12–15 |
+| §8.2 the four screens | 12-15 |
 | §8.3 post-completion banner | 16 |
 | §9 `list_models` model-dir fix | 4 |
 | §9 duplicate `size()` and download logic | 10 |
@@ -3012,7 +3012,7 @@ expected result.
 **Type consistency:** `PermissionStatus` (Rust) serialises to the four strings typed as
 `PermissionState` in `readiness.ts`. `SetupReadiness`, `StepReadiness`,
 `PermissionsReadiness`, and `PermissionReadiness` have matching field names and
-`snake_case` on both sides — `system_audio`, `completed_at`, `downloaded_bytes`. The
+`snake_case` on both sides: `system_audio`, `completed_at`, `downloaded_bytes`. The
 audio-capture functions are exported as `permission_status` / `request_permission` in Task 3
 and called by those names in Task 6. `useModelDownload` returns `{ downloading, progress,
 error, start, clearError }` in Task 10 and is destructured to that shape in Tasks 10 and 13.

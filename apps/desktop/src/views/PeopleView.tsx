@@ -16,7 +16,7 @@ interface Props {
  *
  * # Why this is a list and not a directory
  *
- * People arrive as a side effect of meetings — a calendar invitee, a named speaker, a participant
+ * People arrive as a side effect of meetings: a calendar invitee, a named speaker, a participant
  * added by hand. Nothing here creates a contact record for its own sake, and there is no field this
  * screen collects that a meeting did not already supply. So it reads as "who was there", which is
  * what the graph actually knows, rather than a CRM that happens to be empty.
@@ -97,7 +97,7 @@ export function PeopleView({ personId, onNavigate }: Props) {
       {!loading && people.length === 0 ? (
         <div className="px-8 py-6">
           <p className="max-w-xl text-[13px] leading-relaxed text-ink-muted">
-            People appear here once meetings have them — from a calendar invitation, from naming a
+            People appear here once meetings have them: from a calendar invitation, from naming a
             speaker in a transcript, or from adding someone to a meeting by hand.
           </p>
         </div>

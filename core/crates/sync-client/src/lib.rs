@@ -1,12 +1,12 @@
 //! Opt-in cloud sync.
 //!
 //! **Inert unless the user turns sync on.** It is a separate crate specifically so a
-//! local-only build never compiles it in — "your meetings stay on your machine" should be
+//! local-only build never compiles it in; "your meetings stay on your machine" should be
 //! true of the binary, not just of its configuration.
 //!
 //! # What is implemented here
 //!
-//! The versioning and conflict-resolution logic is complete and tested — the part that is
+//! The versioning and conflict-resolution logic is complete and tested: the part that is
 //! genuinely hard and where correctness matters, since a wrong merge silently destroys a
 //! user's edit. There is **no network transport**: that needs a running sync service, which
 //! is a Phase 2 concern (see docs/roadmap.md).
@@ -15,7 +15,7 @@
 //!
 //! Each record carries a [`Version`]: a per-device counter plus the id of the device that
 //! last wrote it. Comparing two versions answers "did one descend from the other, or did they
-//! diverge?" — which is the question a merge actually needs, and one a wall-clock timestamp
+//! diverge?", which is the question a merge actually needs, and one a wall-clock timestamp
 //! cannot answer reliably across devices with skewed clocks.
 
 #![forbid(unsafe_code)]
@@ -46,7 +46,7 @@ pub enum SyncError {
 
     /// A grant could not be read, verified, or made sense of.
     ///
-    /// Never a reason to disable anything local — see [`entitlements`] for why a failure here
+    /// Never a reason to disable anything local; see [`entitlements`] for why a failure here
     /// leaves the free product entirely untouched.
     #[error("entitlement problem: {0}")]
     Entitlement(String),

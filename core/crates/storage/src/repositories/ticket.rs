@@ -100,7 +100,7 @@ impl<'a> TicketRepository<'a> {
     /// Every ticket, whatever its status, in the same order as [`Self::list_open`].
     ///
     /// A board with a Done column needs the finished ones too. `list_open` stays the call for
-    /// "work still owed" — indexing, and the bare `GET /v1/tickets` older clients make — but a
+    /// "work still owed" (indexing, and the bare `GET /v1/tickets` older clients make) but a
     /// board built on it showed a ticket moved to Done for the rest of the session and then lost
     /// it on the next load, so the column it had just been moved to was always empty.
     pub fn list_all(&self) -> Result<Vec<Ticket>> {
@@ -134,7 +134,7 @@ impl<'a> TicketRepository<'a> {
     ///
     /// Every field is `Option`, and `None` means "leave alone" rather than "clear". Clearing
     /// an owner or a due date therefore needs [`Self::clear_owner`] / [`Self::clear_due_at`]
-    /// — the alternative, treating `None` as a clear, makes a partial update silently wipe
+    /// (the alternative, treating `None` as a clear, makes a partial update silently wipe
     /// fields the caller never mentioned.
     pub fn update(&self, id: Id, edit: TicketEdit<'_>) -> Result<Ticket> {
         let changed = self.db.conn().execute(
@@ -189,7 +189,7 @@ impl<'a> TicketRepository<'a> {
 
     /// Record that this ticket now mirrors an issue in an external tracker.
     ///
-    /// Phase 2 ships one-way push only — this records where a ticket was pushed to, it
+    /// Phase 2 ships one-way push only; this records where a ticket was pushed to, it
     /// does not imply the external side syncs back. See docs/roadmap.md.
     pub fn link_external(&self, id: Id, external: ExternalRef) -> Result<Ticket> {
         let changed = self.db.conn().execute(

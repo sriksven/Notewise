@@ -14,7 +14,7 @@ interface Props {
   onImport: () => void;
 }
 
-/** Calendar buckets, coarsest first — the way someone looks for a meeting they half remember. */
+/** Calendar buckets, coarsest first, the way someone looks for a meeting they half remember. */
 function bucketOf(iso: string, now: Date): string {
   const then = new Date(iso);
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -37,7 +37,7 @@ function bucketOf(iso: string, now: Date): string {
  * Grouped rather than a flat list with dates on each row: people locate a meeting by roughly
  * when it was ("the standup last week"), and a date column makes that a scan instead of a jump.
  *
- * Filtering here is on the title only, and deliberately so — it is a way to narrow a list you
+ * Filtering here is on the title only, and deliberately so: it is a way to narrow a list you
  * are already looking at. Searching what was *said* is the top bar's job, because that needs
  * the index and returns a different kind of result.
  */

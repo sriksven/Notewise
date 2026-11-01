@@ -19,8 +19,8 @@ interface Props {
  *
  * # What it does not do
  *
- * It does not open a picker. A browser cannot hand a path to an engine — `showDirectoryPicker` gives
- * a handle scoped to the page, not a path — and the engine is what has to read the files. So the path
+ * It does not open a picker. A browser cannot hand a path to an engine: `showDirectoryPicker` gives
+ * a handle scoped to the page, not a path, and the engine is what has to read the files. So the path
  * is typed or pasted, and the engine refuses one that is not a folder rather than accepting it and
  * reading nothing.
  */
@@ -66,7 +66,7 @@ export function WatchedFolder({ connector, onChanged }: Props) {
       </h2>
       <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
         Text and Markdown files in a folder you choose become searchable alongside your meetings, so
-        an answer can cite a spec you wrote elsewhere. Read only — nothing in this folder is ever
+        an answer can cite a spec you wrote elsewhere. Read only. Nothing in this folder is ever
         changed, moved, or written to.
       </p>
 

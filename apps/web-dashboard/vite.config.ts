@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
-    // 1430, clear of the desktop frontend on 1420 — both are often up at once.
+    // 1430, clear of the desktop frontend on 1420: both are often up at once.
     port: 1430,
     strictPort: true,
     proxy: {

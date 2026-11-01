@@ -1,7 +1,7 @@
 //! `CredentialStore` over the platform keychain.
 //!
 //! macOS Keychain, Windows Credential Manager, and Secret Service on Linux, via the
-//! `keyring` crate. A missing entry is `Ok(None)` rather than an error — "not connected yet"
+//! `keyring` crate. A missing entry is `Ok(None)` rather than an error: "not connected yet"
 //! is the normal state for most connectors, not a failure.
 
 use keyring::Entry;
