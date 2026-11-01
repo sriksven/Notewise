@@ -66,6 +66,9 @@ The first tagged build.
 - A theme with eleven accents, keyboard shortcuts, and an address bar that survives a reload.
 - Plain punctuation everywhere you read: the app, the website and the docs are written without
   em or en dashes.
+- The download is always the newest build. Every change to the app is built for macOS and Windows
+  and published as the latest build on GitHub Releases, and the website's download buttons offer
+  it as soon as it is up, with its date beside them.
 
 ### Known limits of this build
 
