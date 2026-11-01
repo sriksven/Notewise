@@ -32,19 +32,6 @@ export const SUGGESTIONS = [
 ];
 
 /**
- * Why an answer has no material behind it, in words a user can act on.
- *
- * Two different situations reach here, and they call for opposite responses: nothing matched
- * (other words may find it), or material was found and none of it answers the question (it is
- * not there to find).
- */
-export function notGroundedNote(answer: GroundedAnswer): string {
-  return (answer.considered ?? 0) > 0
-    ? "Some of your material looked related, but none of it answers this."
-    : "Nothing in your workspace matched this. Different wording may find it.";
-}
-
-/**
  * Where a citation leads, or `null` when this build has no page for it.
  *
  * A ticket can be cited (it is the user's material) while Tickets is held back; the citation then

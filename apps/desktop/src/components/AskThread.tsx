@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { AlertTriangle, Loader2, Mic, Send, Sparkles, Square } from "lucide-react";
 
-import { citationRoute, notGroundedNote, type AskThread as Thread } from "../lib/ask";
+import { citationRoute, type AskThread as Thread } from "../lib/ask";
 import type { Route } from "../lib/router";
 import { appendSpoken, spaceBefore, useVoiceInput } from "../lib/voice";
 
@@ -155,16 +155,19 @@ export function AskThread({
                   <Loader2 size={12} className="animate-spin" aria-hidden />
                   Reading what you have
                 </p>
+              ) : !turn.answer.grounded ? (
+                /* A refusal is the engine's own words, not an answer: nothing was found to give a
+                   model, so no model was asked. It used to arrive twice, a warning saying nothing
+                   matched above a reply saying nothing matched, with a model named under both
+                   that had not run. One message, marked as a refusal so it never reads like an
+                   answer with its sources missing. */
+                <p className="flex items-start gap-1.5 rounded-xl border border-warn-line bg-warn px-3 py-2
+                              text-[12.5px] leading-relaxed text-warn-text">
+                  <AlertTriangle size={12} className="mt-1 shrink-0" aria-hidden />
+                  {turn.answer.text}
+                </p>
               ) : (
                 <div>
-                  {!turn.answer.grounded && (
-                    <p className="mb-1.5 flex items-start gap-1.5 rounded-lg border border-warn-line
-                                  bg-warn px-3 py-2 text-[11.5px] leading-relaxed text-warn-text">
-                      <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
-                      {notGroundedNote(turn.answer)}
-                    </p>
-                  )}
-
                   <div className="whitespace-pre-wrap rounded-xl border border-hairline bg-surface px-3 py-2
                                   text-[12.5px] leading-relaxed text-ink">
                     {turn.answer.text}

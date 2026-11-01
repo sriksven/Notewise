@@ -6,9 +6,6 @@ import { api } from "../lib/api";
 import { SUGGESTIONS, useAskThread, type AskMessage } from "../lib/ask";
 import type { Route } from "../lib/router";
 
-// Kept importable from here: tests and older callers reach for it by this path.
-export { notGroundedNote } from "../lib/ask";
-
 interface Props {
   onNavigate: (route: Route) => void;
 }

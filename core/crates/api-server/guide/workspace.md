@@ -16,7 +16,7 @@ Your most recent recordings, newest first, each with its title, date and length.
 
 ## Open tasks
 page: tasks
-keywords: open, todo, to-do, outstanding, pending, owe, owed, action items, commitments, due, overdue, assigned, remaining, unfinished, tasks
+keywords: open, todo, to-do, outstanding, pending, owe, owed, action items, commitments, due, overdue, assigned, remaining, unfinished, tasks, supposed, doing, week, plate, priorities
 live: tasks
 
 My Tasks are the action items from your meeting summaries, and this lists the open ones with what each is, who owns it, when it is due and which meeting it came from.
