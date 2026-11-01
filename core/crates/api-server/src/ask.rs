@@ -208,22 +208,8 @@ async fn ask_workspace(
     // asking it to "answer only from the material" is asking it to notice an absence, which
     // is exactly the instruction models are worst at following.
     if passages.is_empty() {
-        // The two empty cases read very differently to a user, and conflating them hides the
-        // one they can act on: "found nothing" means try other words, while "found six and
-        // none of them answered it" means the material genuinely is not there.
-        let text = if considered == 0 {
-            "Nothing in this workspace matches that question. Try wording closer to what \
-             would actually have been said."
-                .to_string()
-        } else {
-            format!(
-                "Looked at {considered} passage{} and none of them answer that question.",
-                if considered == 1 { "" } else { "s" }
-            )
-        };
-
         return Ok(Json(serde_json::json!({
-            "text": text,
+            "text": nothing_answers(considered),
             "model": state.ai().model_id(),
             "citations": [],
             "grounded": false,
@@ -232,6 +218,24 @@ async fn ask_workspace(
     }
 
     answer(&state, body.messages, passages, considered).await
+}
+
+/// The engine's own refusal, for when nothing it found answers the question.
+///
+/// The two cases read very differently to a user, and conflating them hides the one they can act
+/// on: "found nothing" means try other words, while "found six and none of them answered it"
+/// means the material genuinely is not there.
+fn nothing_answers(considered: usize) -> String {
+    if considered == 0 {
+        "Nothing in this workspace matches that question. Try wording closer to what would \
+         actually have been said."
+            .to_string()
+    } else {
+        format!(
+            "Looked at {considered} passage{} and none of them answer that question.",
+            if considered == 1 { "" } else { "s" }
+        )
+    }
 }
 
 /// The workspace's passages followed by the guide's, inside the budget retrieval keeps.
@@ -277,11 +281,51 @@ async fn answer(
     let request = ChatRequest::new(to_router_messages(messages)).with_context(context);
     let response = state.ai().chat(&request).await?;
 
-    let (text, cited) = check_references(&response.text, passages.len());
+    Ok(Json(respond(
+        &response.text,
+        response.model,
+        &passages,
+        considered,
+    )))
+}
+
+/// What the client is told about a model's reply to the passages it was given.
+fn respond(
+    reply: &str,
+    model: String,
+    passages: &[Passage],
+    considered: usize,
+) -> serde_json::Value {
+    let (text, cited) = check_references(reply, passages.len());
+    // How many passages retrieval produced before the relevance filter. Reported so a client can
+    // tell "found nothing" from "found six and discarded them", and so this is diagnosable
+    // without attaching a debugger to a model call.
+    let considered = considered.max(passages.len());
+
+    // The model read the material and found the answer is not in it: a refusal, like the one
+    // `ask_workspace` writes when nothing is found, and reported the same way. Listed under the
+    // passages it was given, it read as though they were where it came from. A reply that cites
+    // a passage leans on it, so it is an answer whatever it opens with.
+    if cited.is_empty() && retrieval::is_refusal(&text) {
+        return serde_json::json!({
+            // "The material does not cover." and nothing after it, which `llama3.1:8b` wrote in 3
+            // of 5 refusals of one question, says less than the engine's own refusal does.
+            "text": if names_what_is_missing(&text) {
+                text
+            } else {
+                nothing_answers(considered)
+            },
+            "model": model,
+            "citations": [],
+            "considered": considered,
+            "grounded": false,
+        });
+    }
+
     // The passages the answer points at, under the numbers it uses. All of them when it points
     // at none: an answer that cites nothing was still written from this material, and hiding
     // the material would present it as having no source.
-    let citations: Vec<serde_json::Value> = retrieval::citations(&passages)
+    let citations: Vec<serde_json::Value> = retrieval::citations(passages)
         .into_iter()
         .filter(|citation| {
             cited.is_empty()
@@ -291,14 +335,11 @@ async fn answer(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
+    serde_json::json!({
         "text": text,
-        "model": response.model,
+        "model": model,
         "citations": citations,
-        // How many passages retrieval produced before the relevance filter. Reported so a
-        // client can tell "found nothing" from "found six and discarded them", and so this is
-        // diagnosable without attaching a debugger to a model call.
-        "considered": considered.max(passages.len()),
+        "considered": considered,
         // Whether there was any material behind this answer at all.
         //
         // Derived from the passages rather than from whether a *search* ran. Those are not the
@@ -306,7 +347,15 @@ async fn answer(
         // the note itself and needs no search) report `false` and get labelled "nothing
         // matched" in the UI, directly under the citation it had just produced.
         "grounded": !passages.is_empty(),
-    })))
+    })
+}
+
+/// Whether a refusal goes on to say what is missing, rather than stopping after its opening.
+fn names_what_is_missing(refusal: &str) -> bool {
+    refusal
+        .trim_start()
+        .get(retrieval::REFUSAL_OPENING.len()..)
+        .is_some_and(|rest| rest.chars().any(char::is_alphanumeric))
 }
 
 /// Hold an answer's `[n]` references to the passages it was actually given.
@@ -717,6 +766,89 @@ mod tests {
             citations[0]["n"], 2,
             "numbered as in the text: {citations:?}"
         );
+    }
+
+    // ------------------------------------------------------------ the reply
+
+    fn passage(kind: &'static str, title: &str, text: &str) -> Passage {
+        Passage {
+            kind,
+            target: Target::Entity(Id::new()),
+            title: title.into(),
+            text: text.into(),
+        }
+    }
+
+    fn cited_titles(body: &serde_json::Value) -> Vec<&str> {
+        body["citations"]
+            .as_array()
+            .expect("citations")
+            .iter()
+            .map(|citation| citation["title"].as_str().expect("title"))
+            .collect()
+    }
+
+    fn settings_pages() -> [Passage; 2] {
+        [
+            passage(
+                "app",
+                "Settings: Models",
+                "Settings, then Models, chooses the AI that writes summaries.",
+            ),
+            passage(
+                "app",
+                "Settings: API keys",
+                "Hosted providers need an API key. Paste your key and press Save & use.",
+            ),
+        ]
+    }
+
+    /// Measured on `llama3.1:8b`, asked "can I add my claude API?" while the guide said only
+    /// "Anthropic": "Plainly, the material does not contain the answer.", listed over the two
+    /// settings pages it had been given as if they were where that came from.
+    #[test]
+    fn a_reply_that_says_the_material_does_not_cover_it_is_a_refusal_with_no_sources() {
+        let refusal = "The material does not cover the cost of an Anthropic API key.";
+        let body = respond(refusal, "llama3.1:8b".into(), &settings_pages(), 2);
+
+        assert_eq!(body["grounded"], false, "{body}");
+        assert!(cited_titles(&body).is_empty(), "{body}");
+        assert_eq!(body["text"], refusal);
+        assert_eq!(body["considered"], 2);
+    }
+
+    /// Measured: "The material does not cover." and nothing more, in 3 of 5 refusals of "what is
+    /// the budget for the OpenSearch migration?" on `llama3.1:8b`.
+    #[test]
+    fn a_refusal_that_names_nothing_is_said_in_the_engines_words() {
+        for bare in [
+            "The material does not cover.",
+            "the material does not cover",
+        ] {
+            let body = respond(bare, "llama3.1:8b".into(), &settings_pages(), 3);
+
+            assert_eq!(body["grounded"], false, "{body}");
+            assert_eq!(
+                body["text"],
+                "Looked at 3 passages and none of them answer that question."
+            );
+        }
+    }
+
+    /// Measured: "The material does not cover the method of changing the accent color, and
+    /// specifically states that \"A choice applies the moment you click it\" ([1])". That leans on
+    /// a passage, so it is an answer, and the passage is its source.
+    #[test]
+    fn a_reply_that_opens_like_a_refusal_but_cites_a_passage_is_an_answer() {
+        let body = respond(
+            "The material does not cover a shortcut for it, but says \"Save & use\" [2].",
+            "llama3.1:8b".into(),
+            &settings_pages(),
+            2,
+        );
+
+        assert_eq!(body["grounded"], true, "{body}");
+        assert_eq!(cited_titles(&body), vec!["Settings: API keys"]);
     }
 
     /// "Who owns that?" searches for "owns" alone, which matches nothing; measured, it was

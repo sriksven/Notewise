@@ -718,11 +718,33 @@ pub fn as_context(passages: &[Passage]) -> String {
 /// cite which passage, and say so when the material does not contain the answer. The last is
 /// the one worth the words: a model that invents a plausible decision nobody made is worse
 /// than useless here, because the whole point is a record of what was actually said.
+///
+/// A refusal begins with [`REFUSAL_OPENING`] and names what is missing. Told to "say so plainly",
+/// `llama3.1:8b` answered "Plainly, the material does not contain the answer." or just
+/// "Plainly." in 2 of 15 refusals of "how much does an Anthropic API key cost?", and as a
+/// chatbot ("Is there anything else I can help you with?") in 2 more. Told this, all 25 refusals
+/// across three such questions began that way and named what was missing, and none of 25 answers
+/// to questions the material does answer did. The fixed beginning is how [`is_refusal`] tells
+/// one from an answer, so it can be shown as a refusal rather than under sources.
 pub const GROUNDING_RULES: &str = "\
 Answer only from the material above. Cite the passages you used by their number, like [2].
-If the material does not contain the answer, say so plainly and stop. Do not fill the gap \
+If the material does not contain the answer, reply with one sentence that begins \"The material \
+does not cover\" and names what is missing, and stop. Do not fill the gap \
 from general knowledge, and do not guess. Quote exact wording when the question is about what \
 someone actually said or decided.";
+
+/// How [`GROUNDING_RULES`] asks a refusal to begin.
+pub const REFUSAL_OPENING: &str = "The material does not cover";
+
+/// Whether a reply is a refusal in the form [`GROUNDING_RULES`] asks for.
+///
+/// Only the beginning counts. "Yes, but the material does not cover pricing" answers the question.
+pub fn is_refusal(reply: &str) -> bool {
+    reply
+        .trim_start()
+        .to_lowercase()
+        .starts_with(&REFUSAL_OPENING.to_lowercase())
+}
 
 /// What the passages are, for a client that wants to show its working.
 pub fn citations(passages: &[Passage]) -> Vec<serde_json::Value> {
@@ -1329,5 +1351,16 @@ mod tests {
         // multiplication against a non-positive median would invert the comparison.
         let cut = cutoff(&scores(&[0.62, 0.10, -0.05, -0.20, -0.30])).expect("should match");
         assert!(cut > 0.10);
+    }
+
+    /// A refusal is recognised by how it begins, so the rules have to ask for that beginning.
+    #[test]
+    fn the_rules_ask_a_refusal_to_begin_the_way_one_is_recognised() {
+        assert!(GROUNDING_RULES.contains(&format!("begins \"{REFUSAL_OPENING}\"")));
+        assert!(is_refusal("The material does not cover the cost of a key."));
+        assert!(is_refusal("  the material does not cover it."));
+        assert!(!is_refusal(
+            "Yes, the material does not cover pricing, but [1] says…"
+        ));
     }
 }
