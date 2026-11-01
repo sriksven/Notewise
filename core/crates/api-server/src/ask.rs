@@ -322,16 +322,19 @@ fn respond(
         });
     }
 
-    // The passages the answer points at, under the numbers it uses. All of them when it points
-    // at none: an answer that cites nothing was still written from this material, and hiding
-    // the material would present it as having no source.
+    // The passages the answer points at, under the numbers it uses; when it points at none, the
+    // ones it was evidently written from.
+    let listed = if cited.is_empty() {
+        written_from(&text, passages)
+    } else {
+        cited
+    };
     let citations: Vec<serde_json::Value> = retrieval::citations(passages)
         .into_iter()
         .filter(|citation| {
-            cited.is_empty()
-                || citation["n"]
-                    .as_u64()
-                    .is_some_and(|n| cited.contains(&(n as usize)))
+            citation["n"]
+                .as_u64()
+                .is_some_and(|n| listed.contains(&(n as usize)))
         })
         .collect();
 
@@ -356,6 +359,35 @@ fn names_what_is_missing(refusal: &str) -> bool {
         .trim_start()
         .get(retrieval::REFUSAL_OPENING.len()..)
         .is_some_and(|rest| rest.chars().any(char::is_alphanumeric))
+}
+
+/// The passages an answer that cites none of them was written from: those it shares words with.
+///
+/// It used to be all of them, since an answer that cites nothing was still written from this
+/// material. Not from all of it: "[Raj] I can own the OpenSearch migration." names a speaker
+/// rather than a passage, and in 2 of 5 runs on `llama3.1:8b` was listed over the guide's page on
+/// updates, found by the word "migration", as well as over the meeting it quotes.
+///
+/// A passage is listed when it shares at least half as many of the answer's words as the passage
+/// that shares the most. When none shares any there is nothing to tell them apart by, and all are
+/// listed rather than none: hiding them would present the answer as having no source.
+fn written_from(answer: &str, passages: &[Passage]) -> Vec<usize> {
+    let said = retrieval::terms(answer);
+    let shared: Vec<usize> = passages
+        .iter()
+        .map(|passage| {
+            let words = retrieval::terms(&format!("{} {}", passage.title, passage.text));
+            said.iter().filter(|term| words.contains(term)).count()
+        })
+        .collect();
+
+    let most = shared.iter().copied().max().unwrap_or(0);
+    shared
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| most == 0 || **count * 2 >= most)
+        .map(|(index, _)| index + 1)
+        .collect()
 }
 
 /// Hold an answer's `[n]` references to the passages it was actually given.
@@ -849,6 +881,49 @@ mod tests {
 
         assert_eq!(body["grounded"], true, "{body}");
         assert_eq!(cited_titles(&body), vec!["Settings: API keys"]);
+    }
+
+    /// "[Raj]" names a speaker rather than a passage, so this answer cites nothing. Every passage
+    /// used to be listed under it, and in 2 of 5 runs on `llama3.1:8b` that included the guide's
+    /// page on updates, found by the word "migration".
+    #[test]
+    fn an_answer_that_cites_nothing_lists_the_passages_it_shares_wording_with() {
+        let passages = [
+            passage(
+                "meeting",
+                "Search cluster planning",
+                "Priya: We are moving off Elasticsearch to OpenSearch.\n\
+                 Raj: I can own the OpenSearch migration. I'd want the cutover on October 3rd.",
+            ),
+            passage(
+                "app",
+                "About: Updates",
+                "Nothing in Notewise checks for updates and nothing installs them. The database \
+                 migrates itself forward when a newer build opens it.",
+            ),
+        ];
+        let body = respond(
+            "[Raj] I can own the OpenSearch migration.",
+            "llama3.1:8b".into(),
+            &passages,
+            2,
+        );
+
+        assert_eq!(body["grounded"], true, "{body}");
+        assert_eq!(cited_titles(&body), vec!["Search cluster planning"]);
+    }
+
+    /// With no wording to go on there is no telling which passage an answer came from, and it was
+    /// still written from them: hiding them all would present it as having no source.
+    #[test]
+    fn an_answer_that_cites_nothing_and_shares_no_wording_lists_everything_it_was_given() {
+        let body = respond("Yes.", "llama3.1:8b".into(), &settings_pages(), 2);
+
+        assert_eq!(body["grounded"], true, "{body}");
+        assert_eq!(
+            cited_titles(&body),
+            vec!["Settings: Models", "Settings: API keys"]
+        );
     }
 
     /// "Who owns that?" searches for "owns" alone, which matches nothing; measured, it was
