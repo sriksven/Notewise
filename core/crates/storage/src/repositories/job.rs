@@ -7,7 +7,7 @@
 //! failed on Tuesday and I need to know why" is the ordinary case rather than an edge one.
 //!
 //! Retention is bounded on write. A job firing every fifteen minutes would otherwise grow this table
-//! forever — a disk-space bug with a slow fuse.
+//! forever: a disk-space bug with a slow fuse.
 
 use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row};
@@ -18,7 +18,7 @@ use crate::id::Id;
 
 /// How many runs are kept per job.
 ///
-/// Enough to see a pattern — a job that fails every Monday — without keeping a year of traces for
+/// Enough to see a pattern (a job that fails every Monday) without keeping a year of traces for
 /// something that runs every quarter hour.
 pub const RUNS_KEPT: usize = 50;
 
@@ -315,7 +315,7 @@ fn map_run(row: &Row<'_>) -> rusqlite::Result<JobRun> {
     Ok(JobRun {
         id: row.get(0)?,
         job_id: row.get(1)?,
-        // A status this build does not know is reported, not guessed at — the same treatment every
+        // A status this build does not know is reported, not guessed at: the same treatment every
         // other stored enum here gets.
         status: RunStatus::parse(&raw).ok_or_else(|| {
             rusqlite::Error::FromSqlConversionFailure(

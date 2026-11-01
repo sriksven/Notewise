@@ -38,7 +38,7 @@ interface Props {
  *
  * One screen whose whole job is the moment before and during a meeting: pick the input, press
  * the button, watch the words arrive. It exists separately from the meeting page because those
- * are different tasks — the meeting page is for reading a transcript afterwards, and burying
+ * are different tasks: the meeting page is for reading a transcript afterwards, and burying
  * the start button inside it means hunting for it with a call already ringing.
  *
  * The device picker is loaded on mount and on every change of recording state, not once ever.
@@ -119,7 +119,7 @@ export function RecordView({
         )}
 
         <div className="flex flex-col items-center">
-          {/* The button is the page. Large, centred, and labelled — starting a recording opens
+          {/* The button is the page. Large, centred, and labelled: starting a recording opens
               a microphone, and that should never be something a user does by accident or is
               unsure they did. */}
           <button
@@ -218,7 +218,7 @@ export function RecordView({
 
             <p className="text-[11.5px] text-ink-faint">
               Language: {language ?? "detected automatically"} · Model:{" "}
-              {health?.ai_model ?? "—"}
+              {health?.ai_model ?? "-"}
             </p>
 
             <button
@@ -255,7 +255,7 @@ export function RecordView({
             <div className="card max-h-56 overflow-y-auto px-4 py-3">
               {recent.length === 0 ? (
                 <p className="text-[12.5px] leading-relaxed text-ink-faint">
-                  Listening. Text appears a few seconds behind the audio — transcription runs
+                  Listening. Text appears a few seconds behind the audio: transcription runs
                   in windows, not word by word.
                 </p>
               ) : (

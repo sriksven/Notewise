@@ -82,7 +82,7 @@ interface SettingsViewProps {
    * Something here changed which model answers, or what the engine calls it.
    *
    * The top bar's model pill and its Local/Cloud badge read the window's own copy of `/health`,
-   * which nothing on this screen could update — so switching to a hosted provider here left the
+   * which nothing on this screen could update, so switching to a hosted provider here left the
    * chrome saying "Local" until the window happened to refresh for some other reason.
    */
   onEngineChange: () => void;
@@ -129,7 +129,7 @@ export function SettingsView({
   }, [load]);
 
   // Ask the running backend what it can actually run. The engine's default model id is only a
-  // guess — a machine with `llama3.1:8b` pulled answers `llama3.1` with a 404, and this list is
+  // guess: a machine with `llama3.1:8b` pulled answers `llama3.1` with a 404, and this list is
   // the only way to see that from inside the app.
   useEffect(() => {
     const kind = active?.kind;
@@ -186,8 +186,8 @@ export function SettingsView({
     api.openSystemSettings(pane).catch(() => setError(SETTINGS_BY_HAND));
   };
 
-  // Permissions are read again when the window comes back — the person has just been in System
-  // Settings — so a grant shows here without leaving the page. Only the setup answer: the rest of
+  // Permissions are read again when the window comes back: the person has just been in System
+  // Settings, so a grant shows here without leaving the page. Only the setup answer: the rest of
   // the page does not change by visiting another app.
   useEffect(() => {
     const again = () => {
@@ -301,7 +301,7 @@ export function SettingsView({
               <section>
                 <h2 className="mb-1 text-[13px] font-semibold text-ink">AI backend</h2>
                 <p className="mb-3 text-[12px] text-ink-muted">
-                  Runs summaries, chat and suggested questions. Click one to switch — it takes
+                  Runs summaries, chat and suggested questions. Click one to switch; it takes
                   effect immediately, no restart. A key you paste goes to your OS keychain and is
                   never shown again; an environment variable still works if you prefer one.
                 </p>
@@ -320,7 +320,7 @@ export function SettingsView({
                       <ShieldAlert size={15} aria-hidden />
                     )}
                     <span>
-                      <strong>{active.model}</strong> —{" "}
+                      <strong>{active.model}</strong>:{" "}
                       {active.is_local
                         ? "transcripts stay on this machine"
                         : "transcripts are sent to the provider"}
@@ -389,7 +389,7 @@ export function SettingsView({
                             what was pulled, exactly. */}
                         {backend.requires_api_key && (
                           // Saving a key also switches to that provider, and removing one can leave
-                          // the engine on another — either way the chrome has to hear about it.
+                          // the engine on another: either way the chrome has to hear about it.
                           <ApiKeyRow
                             backend={backend}
                             onChanged={() => {
@@ -444,12 +444,12 @@ export function SettingsView({
           )}
 
           {/* Its own page: the model list is long, and it is a different question from which AI
-              answers — it is what turns a recording into text, on this machine. */}
+              answers: it is what turns a recording into text, on this machine. */}
           {section === "transcription" && (
             <section>
               <h2 className="mb-1 text-[13px] font-semibold text-ink">Transcription models</h2>
               <p className="mb-3 text-[12px] text-ink-muted">
-                Whisper, from OpenAI — the same models MacWhisper, whisper.cpp and most local
+                Whisper, from OpenAI, the same models MacWhisper, whisper.cpp and most local
                 transcription tools use. Bigger is more accurate and slower. A name ending in{" "}
                 <code className="rounded bg-overlay px-1">.en</code> is English-only. Stored
                 in{" "}
@@ -476,7 +476,7 @@ export function SettingsView({
                         {model.language_note}
                       </p>
                       {/* RAM is shown because it is the number that decides whether a model is
-                          usable at all — a 3GB model on an 8GB machine will not run. */}
+                          usable at all: a 3GB model on an 8GB machine will not run. */}
                       <span className="mt-1 block text-[11px] text-ink-faint">
                         {size(model.bytes)} download · ~{model.approx_ram_mb} MB RAM
                       </span>
@@ -539,7 +539,7 @@ export function SettingsView({
                     />
                   </div>
                   <p className="mt-1.5 text-[11px] text-ink-faint">
-                    The engine owns this download — it continues if you switch views, and
+                    The engine owns this download; it continues if you switch views, and
                     resumes where it left off if the connection drops.
                   </p>
                 </div>

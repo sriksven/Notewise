@@ -14,7 +14,7 @@ interface ModelStepProps {
 /**
  * Pick a speech model.
  *
- * This screen used to show exactly one card — whichever model the registry marked recommended —
+ * This screen used to show exactly one card, whichever model the registry marked recommended,
  * with no indication that eight others existed. That reads as a broken list rather than a
  * decision already made for you, and it left anyone who needs another language or better
  * accuracy with no way forward from the one screen that is about models.
@@ -53,7 +53,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
       </h1>
       <p className="mt-2 max-w-md text-[14px] text-ink-muted">
         Speech recognition runs on this machine, so the model has to live here too. These are
-        OpenAI's Whisper models — the same ones most local transcription apps use. One-time
+        OpenAI's Whisper models, the same ones most local transcription apps use. One-time
         download.
       </p>
 
@@ -181,7 +181,7 @@ export function ModelStep({ satisfied, onChanged }: ModelStepProps) {
             </div>
 
             <p className="mt-2 text-[11px] text-ink-faint">
-              The engine owns this download — it resumes where it left off if the connection
+              The engine owns this download; it resumes where it left off if the connection
               drops, and continues if you switch away.
             </p>
           </div>

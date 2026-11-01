@@ -1,4 +1,4 @@
-# Notewise — Foundation Design
+# Notewise - Foundation Design
 
 **Date:** 2026-08-12
 **Status:** Approved, in implementation
@@ -10,7 +10,7 @@
 
 Notewise is a local-first meeting intelligence and workspace platform. Meetings are
 captured and understood on-device, then become notes, tickets, drafted emails, and
-notifications — all linked in one queryable object graph.
+notifications, all linked in one queryable object graph.
 
 The architectural promise is "local or cloud, your choice." This design treats that
 as a property enforced by a type boundary (`ai-router`), not a marketing claim.
@@ -98,13 +98,13 @@ anything below them but never on each other. This keeps a local-only build able 
 ### 4.2 `storage`
 
 Owns the SQLite schema, migrations, and encryption at rest. Exposes repositories
-(`MeetingRepository`, `NoteRepository`, …) — never raw SQL to callers outside the crate.
+(`MeetingRepository`, `NoteRepository`, …), never raw SQL to callers outside the crate.
 Uses `rusqlite` with the `bundled` feature so no system SQLite is required.
 
 ### 4.3 `graph`
 
 Sits on top of `storage`. Nodes are `(NodeKind, Id)` references to entities; edges are
-typed (`DerivedFrom`, `References`, `Owns`, `Mentions`, …). Provides traversal — the
+typed (`DerivedFrom`, `References`, `Owns`, `Mentions`, …). Provides traversal: the
 `related(node, depth)` query is what makes "everything connected to this meeting" a real
 operation instead of a hand-written join per feature.
 
@@ -147,7 +147,7 @@ keys model ownership (a segment belongs to exactly one meeting); edges model ass
 
 Each crate defines its own error enum via `thiserror` and returns
 `Result<T, CrateError>`. No `unwrap()` in library code. Surfaces (`api-server`, `cli`)
-translate errors into transport-appropriate forms — HTTP status codes, process exit codes —
+translate errors into transport-appropriate forms (HTTP status codes, process exit codes)
 at the boundary, so core crates never encode transport concerns.
 
 ---
@@ -155,7 +155,7 @@ at the boundary, so core crates never encode transport concerns.
 ## 7. Testing
 
 - Unit tests colocated in each crate.
-- `storage` and `graph` test against in-memory SQLite (`:memory:`) — fast, no fixtures.
+- `storage` and `graph` test against in-memory SQLite (`:memory:`), fast, no fixtures.
 - `ai-router` tests run against `MockBackend`.
 - Capture and transcription tests use synthetic audio buffers, not recorded files.
 - CI runs `cargo test --workspace` plus `fmt` and `clippy -D warnings`.
@@ -172,9 +172,9 @@ These are environmental limits, recorded so they are not rediscovered later:
 - **macOS system audio** requires ScreenCaptureKit plus a TCC permission grant against a
   signed bundle. Cannot be exercised headlessly; mic capture via `cpal` can.
 - **Whisper inference** requires a cmake build of whisper.cpp and a model download
-  (150 MB – 1.5 GB). The model registry and download logic are real; inference is behind
+  (150 MB to 1.5 GB). The model registry and download logic are real; inference is behind
   a feature flag.
-- **Browser extension** cannot run Whisper at usable speed — it must stream tab audio to
+- **Browser extension** cannot run Whisper at usable speed; it must stream tab audio to
   the desktop app's local `api-server`. This means the desktop app must be running. That
   constraint is stated in the extension's README rather than discovered by users.
 - **Wearables do not run the engine.** They are companion surfaces to the phone app.

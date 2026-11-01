@@ -1,6 +1,6 @@
 # Notification service
 
-> **Status: scaffold.** BSL 1.1 — see [LICENSE-CLOUD.md](../../LICENSE-CLOUD.md).
+> **Status: scaffold.** BSL 1.1. See [LICENSE-CLOUD.md](../../LICENSE-CLOUD.md).
 
 Push, Slack, and email delivery.
 

@@ -1,4 +1,4 @@
-# Calendar and mail source connectors — design
+# Calendar and mail source connectors - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -36,9 +36,9 @@ Spec 0's **D6** claims Google and Microsoft can both run on-device because both 
 for installed applications with no client secret in the binary. The PKCE part is true and
 irrelevant. The blocker is Google's *scope classification*:
 
-- `calendar.readonly` is a **sensitive** scope — OAuth verification required. Free, but a
+- `calendar.readonly` is a **sensitive** scope: OAuth verification required. Free, but a
   real review: verified homepage, privacy policy, demo video, weeks of latency.
-- Every Gmail write scope is **restricted** — verification *plus* a third-party CASA security
+- Every Gmail write scope is **restricted**: verification *plus* a third-party CASA security
   assessment, billed annually.
 - An unverified app in Testing status issues refresh tokens that expire every 7 days, which
   makes background calendar sync fail weekly.
@@ -60,7 +60,7 @@ consider. This spec revises it.
 ## Non-goals
 
 - **Sending mail.** Not behind a flag, not for power users. Drafts only.
-- **Writing to calendars** — creating, updating, or deleting events.
+- **Writing to calendars**: creating, updating, or deleting events.
 - **Bot-join recording.** Phase 4, `cloud/bot-service`.
 - **Contacts sync.** Attendees come from events; a contacts source is separate.
 - **Multiple accounts per vendor.** `connector_accounts` is keyed by `connector_id` alone;
@@ -73,9 +73,9 @@ consider. This spec revises it.
 
 ## Decisions
 
-Numbering continues from Spec 0, whose decisions D1–D6 still hold except where stated.
+Numbering continues from Spec 0, whose decisions D1-D6 still hold except where stated.
 
-### D7 — Google goes through a user-deployed Apps Script, not OAuth
+### D7 - Google goes through a user-deployed Apps Script, not OAuth
 
 **Revises D6.** The user pastes an open-source script we ship into their own Google account,
 deploys it as a web app, and gives Notewise the deployment URL and an API key they choose.
@@ -90,46 +90,46 @@ paid once for both capabilities.
 
 The cost is honest and worth stating plainly: Google users perform a five-step one-time setup
 that Microsoft users do not. That asymmetry is the price of not paying Google, and it is
-recoverable later — if Notewise ever completes verification, a `google_oauth` connector can
+recoverable later, if Notewise ever completes verification, a `google_oauth` connector can
 be added alongside without disturbing anything, because the seam is the trait.
 
-**Rejected — pay for CASA verification.** An annual per-year bill and a multi-week review
+**Rejected: pay for CASA verification.** An annual per-year bill and a multi-week review
 before the first line of calendar code ships value. Wrong order.
 
-**Rejected — bring-your-own Cloud project.** Every user creates a GCP project, configures an
+**Rejected: bring-your-own Cloud project.** Every user creates a GCP project, configures an
 OAuth consent screen, and pastes a client id. Strictly more steps than the script, and
 personal `@gmail.com` users still land in Testing status with weekly token expiry.
 
-**Rejected — OS-native calendar (EventKit / WinRT `AppointmentStore`).** This was the leading
+**Rejected: OS-native calendar (EventKit / WinRT `AppointmentStore`).** This was the leading
 candidate before the Apps Script route was found. It reads whatever accounts the OS already
 syncs, covering both vendors plus iCloud with no auth at all. It was rejected on total cost:
 two native backends behind `unsafe` FFI, a calendar TCC grant that cannot be verified
-headlessly, no Linux path, and a Windows story that depends on which Outlook the user runs —
+headlessly, no Linux path, and a Windows story that depends on which Outlook the user runs;
 classic Win32 Outlook may not surface in `AppointmentStore` at all. It remains the right
 answer for iCloud and for zero-setup, and can be added later as a third source connector.
 
-**Rejected — secret ICS feed URLs.** Trivially cheap and covers every provider. Google caches
-published ICS for hours, which defeats pre-meeting awareness — the primary use case.
+**Rejected: secret ICS feed URLs.** Trivially cheap and covers every provider. Google caches
+published ICS for hours, which defeats pre-meeting awareness, the primary use case.
 Published feeds also commonly strip attendees, which defeats the `person` enrichment. Worth
 revisiting as a fallback for providers we otherwise cannot reach.
 
-### D8 — Microsoft uses a Notewise multi-tenant PKCE app; BYO is optional
+### D8 - Microsoft uses a Notewise multi-tenant PKCE app; BYO is optional
 
 Graph is free, `Calendars.Read` and `Mail.ReadWrite` are delegated scopes a user consents to
 themselves without tenant-admin approval, and publisher verification is free and optional. So
 Microsoft gets what Google cannot: one click.
 
 Notewise ships its own multi-tenant app registration. The client id is embedded in the binary,
-which is correct for a public PKCE client — there is no secret to leak. Redirect is loopback.
+which is correct for a public PKCE client; there is no secret to leak. Redirect is loopback.
 
 A bring-your-own client id remains configurable for tenants whose policy requires their own
 app registration. That is a settings field, not a separate connector.
 
-**Rejected — BYO only.** AnythingLLM requires it, but AnythingLLM is a generic tool without a
+**Rejected: BYO only.** AnythingLLM requires it, but AnythingLLM is a generic tool without a
 first-party identity to register. Making every user do Azure paperwork for a free capability
 is a worse product for no gain.
 
-### D9 — One connector id per vendor; capabilities live in `scopes`
+### D9 - One connector id per vendor; capabilities live in `scopes`
 
 Ids are `"google"` and `"microsoft"`. Each is a single type implementing **both**
 `SourceConnector` (calendar pull) and `SinkConnector` (draft creation). The direction-split
@@ -145,7 +145,7 @@ user connected; the Apps Script bridge is an implementation detail that must be 
 without a data migration, because connector ids are persisted in `external_items` and
 `connector_outbox`.
 
-### D10 — Mail drafts go through the outbox; generation and state already exist
+### D10 - Mail drafts go through the outbox; generation and state already exist
 
 Most of this capability is already built, and this spec adds only the last hop.
 
@@ -159,8 +159,8 @@ What does not exist is putting an approved draft into the user's actual mailbox.
 only new work here:
 
 - Enqueue to `connector_outbox` after `approve`, idempotency key `(email_draft_id)`.
-- `SinkConnector::push` creates a **provider-side draft** — Apps Script `createDraft` on Google,
-  `POST /me/messages` on Graph — and returns an `ExternalRef` carrying its URL.
+- `SinkConnector::push` creates a **provider-side draft** (Apps Script `createDraft` on Google,
+  `POST /me/messages` on Graph) and returns an `ExternalRef` carrying its URL.
 - The UI turns that URL into "Open draft in Gmail / Outlook".
 
 **`mark_sent` is not called on this path.** Creating a Gmail draft is not sending, and recording
@@ -176,43 +176,43 @@ For users with neither vendor connected, a new `meeting_to_eml` in `storage::exp
 already-generated body as RFC 5322 for the desktop shell to open in the default client. The
 body comes from the existing generator; only the envelope is new.
 
-### D11 — Event detail is an owned table; the meeting link is an edge
+### D11 - Event detail is an owned table; the meeting link is an edge
 
 Per CLAUDE.md rule 4, and consistent with D3 and D4.
 
-`external_items` records identity only — `(connector_id, external_id)`, url, title,
+`external_items` records identity only: `(connector_id, external_id)`, url, title,
 `remote_version`. It has nowhere to put a start time, and should not: it is the shared record
 of "a thing exists elsewhere" for every connector.
 
 Event detail therefore lives in `calendar_events`, foreign-keyed to `external_items.id` and
-cascading from it. The event detail is *owned* by the external record — delete the record,
+cascading from it. The event detail is *owned* by the external record: delete the record,
 the detail goes. The association between a meeting and its event is a `SyncedTo` **edge**, as
 Spec 0's inbound flow already specified. Getting this backwards would mean a schema migration
 the first time an event links to something other than a meeting.
 
-### D12 — Reconciliation is its own crate, not part of `connectors`
+### D12 - Reconciliation is its own crate, not part of `connectors`
 
 `connectors` is plumbing: transport, credentials, retry, idempotency. Deciding that a
 recording overlapping a calendar event is *that* meeting, that an attendee is a known person,
 and that two events share a series is domain logic with real rules and real edge cases.
 
-It goes in `core/crates/calendar`, which does no I/O of its own — it takes repositories and
+It goes in `core/crates/calendar`, which does no I/O of its own; it takes repositories and
 returns decisions. Every rule in it is unit-testable against hand-written rows with no network
 and no vendor account, which is the property that matters most here.
 
-**Rejected — a `CalendarStore` trait abstracting event sources.** Proposed during
+**Rejected: a `CalendarStore` trait abstracting event sources.** Proposed during
 brainstorming when native backends were still in scope. Without them, each vendor already has
 exactly one implementation behind `SourceConnector`; a second trait over the same boundary
 would be one abstraction per implementation, abstracting nothing.
 
-### D13 — `Cursor` means different things per connector, and that is the point
+### D13 - `Cursor` means different things per connector, and that is the point
 
 Microsoft supports `/me/calendarView/delta` and gets a real delta link. Apps Script exposes no
 change feed, so Google gets a rolling-window high-water mark and re-reads the window each
 pull, made safe by `ExternalItemRepository::upsert` on `(connector_id, external_id)`.
 
 `Cursor(Option<String>)` is opaque precisely so these can differ without a shared schema.
-Cursor advances only after the batch is persisted, per Spec 0 — an interrupted pull re-reads
+Cursor advances only after the batch is persisted, per Spec 0; an interrupted pull re-reads
 rather than skips.
 
 Window: 30 days back, 90 days forward, both configurable. Backward because meetings get
@@ -350,8 +350,8 @@ CREATE INDEX idx_calendar_attendees_person ON calendar_attendees(person_id);
 `is_all_day` exists because an all-day event has no meaningful UTC instant, and storing one
 without the flag makes a timezone bug indistinguishable from a real 00:00 meeting.
 
-`recurrence_key` is the provider's own recurrence identifier — `recurringEventId` on Google,
-`seriesMasterId` on Graph — normalized to one nullable column. This is what replaces title
+`recurrence_key` is the provider's own recurrence identifier (`recurringEventId` on Google,
+`seriesMasterId` on Graph), normalized to one nullable column. This is what replaces title
 matching in `series.rs`.
 
 Attendee import writes `display_name` and `email` only. The `people` table also has
@@ -469,12 +469,12 @@ D2's whole purpose.
 
 ### Setup
 
-**Google** — six steps, once: open the script editor, create a project, paste the script from
+**Google**: six steps, once: open the script editor, create a project, paste the script from
 `scripts/gapps/`, set an API key of their choosing, deploy as web app executing as themselves,
 paste deployment URL and key into Notewise. Notewise then calls a `version` endpoint to
 confirm the bridge answers and matches a supported contract version.
 
-**Microsoft** — click Connect, consent in the system browser, PKCE loopback completes, refresh
+**Microsoft**: click Connect, consent in the system browser, PKCE loopback completes, refresh
 token to `KeychainStore`.
 
 Both end at `AccountStatus::Connected` with `scopes` recording chosen capabilities. Per
@@ -485,7 +485,7 @@ degraded.
 
 ## Error handling
 
-`ConnectorError` already carries most of what this needs — `Auth { connector }`,
+`ConnectorError` already carries most of what this needs: `Auth { connector }`,
 `RateLimited { retry_after }`, `Transient`, `Permanent`, `NotConfigured`, and a `Serde`
 conversion. Only one variant is genuinely new.
 
@@ -509,7 +509,7 @@ branch.
 we do not control. Users will still be running a year-old deployment; the failure must name the
 fix rather than surface as a decode error.
 
-Graph's 410 on an expired delta token is recovery, not failure — drop the cursor and re-read
+Graph's 410 on an expired delta token is recovery, not failure: drop the cursor and re-read
 the window, which upsert makes harmless.
 
 No `unwrap()` in any of it; each crate keeps its `thiserror` enum, and `api-server` translates
@@ -520,7 +520,7 @@ at the boundary.
 What runs in CI, with no account and no network:
 
 - **Both connectors against a stub HTTP server.** Recorded response fixtures for Apps Script
-  and Graph, including error shapes — 401, 429, 410, malformed JSON, an all-day event, a
+  and Graph, including error shapes: 401, 429, 410, malformed JSON, an all-day event, a
   cancelled event, a recurring instance.
 - **Decode tests** per vendor: real-shaped payloads to `NewCalendarEvent`, including
   timezone-bearing and all-day events.
@@ -545,17 +545,17 @@ tests can honestly establish.
 
 ## What this delivers
 
-1. `Importer` — the inbound engine, completing the seam Spec 0 shaped.
+1. `Importer`: the inbound engine, completing the seam Spec 0 shaped.
 2. `google` connector: calendar pull and Gmail draft creation via a user-deployed Apps Script.
    No Cloud project, no verification, no recurring cost.
 3. `microsoft` connector: calendar pull via Graph delta and Outlook draft creation, one-click
    PKCE against a Notewise multi-tenant registration.
-4. `core/crates/calendar` — reconciliation, fully tested without network or vendor accounts.
+4. `core/crates/calendar`: reconciliation, fully tested without network or vendor accounts.
 5. Schema v11 plus `CalendarEventRepository`.
-6. `meeting_to_eml` in `storage::export` — the RFC 5322 fallback for unconnected users,
+6. `meeting_to_eml` in `storage::export`: the RFC 5322 fallback for unconnected users,
    wrapping the body the existing `ai-router::email` generator already produces.
 7. `api-server` routes: catalogue entries, both setup flows, manual sync trigger, sync status.
-8. `scripts/gapps/` — the shipped Apps Script and its deploy guide.
+8. `scripts/gapps/`: the shipped Apps Script and its deploy guide.
 
 Works on macOS, Windows, and Linux, because none of it is platform code.
 

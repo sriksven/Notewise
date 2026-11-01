@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// A sample rate in Hz.
 ///
 /// A newtype rather than a bare `u32` because mixing up 16 kHz and 48 kHz produces audio that
-/// plays at the wrong speed and transcribes to nonsense — a bug that is much easier to
+/// plays at the wrong speed and transcribes to nonsense, a bug that is much easier to
 /// prevent at a type boundary than to diagnose from a garbled transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SampleRate(u32);

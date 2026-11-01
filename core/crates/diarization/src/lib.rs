@@ -11,7 +11,7 @@
 //! removed from the default path after it labelled one person's pause as a second participant.
 //!
 //! [`PauseDiarizer`] is a real, complete algorithm that infers turn-taking from the gaps
-//! between segments. It needs no model and no audio — only segment timings — so it works on
+//! between segments. It needs no model and no audio (only segment timings), so it works on
 //! every platform and on imported transcripts. It is opt-in, because gaps are evidence about
 //! *pacing* and it uses them as evidence about *people*: two speakers alternating cleanly are
 //! separated well, one speaker thinking mid-sentence is split in two. See
@@ -19,7 +19,7 @@
 //!
 //! Separating voices needs the voices. [`SpeakerEmbedder`] and [`cluster`] are the acoustic
 //! half of that; [`EmbeddingDiarizer`] carries per-segment audio through to them. It produces
-//! **anonymous** labels — clustering can prove there were five voices and can never learn that
+//! **anonymous** labels: clustering can prove there were five voices and can never learn that
 //! one of them was Priya.
 //!
 //! # Names come from the platform, not from the audio
@@ -86,7 +86,7 @@ pub enum DiarizationError {
     /// A speaker turn named someone the timeline has no roster entry for.
     ///
     /// Rejected rather than stored: a turn we cannot put a name to would become either a hole in
-    /// the transcript or, worse, a hole filled in from a neighbour — which attributes words to
+    /// the transcript or, worse, a hole filled in from a neighbour, which attributes words to
     /// whichever named person happened to be adjacent.
     #[error("no participant is known with id {id}")]
     UnknownParticipant { id: String },
@@ -106,7 +106,7 @@ pub type Result<T> = std::result::Result<T, DiarizationError>;
 /// [`SpeakerEmbedder`] compiles either way and returns [`DiarizationError::Unavailable`] without
 /// the `onnx` feature, which is what lets callers be written once. But a surface needs to say
 /// "this build cannot do that" *before* a user downloads 29 MB and turns on a setting that will
-/// never do anything — the same reason `/health` reports `can_record`.
+/// never do anything: the same reason `/health` reports `can_record`.
 pub const fn acoustic_available() -> bool {
     cfg!(feature = "onnx")
 }
@@ -137,7 +137,7 @@ pub struct PauseConfig {
 
     /// Maximum distinct speakers.
     ///
-    /// Bounded because the heuristic has no way to recognize a returning voice — without a
+    /// Bounded because the heuristic has no way to recognize a returning voice: without a
     /// cap, a long meeting accumulates a new "speaker" at every pause.
     pub max_speakers: usize,
 }
@@ -227,7 +227,7 @@ impl Diarizer for PauseDiarizer {
 
     fn confidence(&self, transcript: &Transcript) -> f32 {
         if transcript.segments.len() < 2 {
-            // Nothing to separate — the single label is trivially right.
+            // Nothing to separate: the single label is trivially right.
             return 1.0;
         }
 
@@ -274,17 +274,17 @@ impl Diarizer for NoopDiarizer {
 /// # Why this is the default
 ///
 /// Timing cannot tell a pause from a person. [`PauseDiarizer`] reads a gap as a change of
-/// speaker, which is right for two people alternating cleanly and wrong for everything else —
+/// speaker, which is right for two people alternating cleanly and wrong for everything else,
 /// including the common case of one person pausing to think, who comes out of it labelled as a
 /// room full of people taking turns.
 ///
 /// That is not a threshold that needs tuning; it is the wrong kind of evidence. A recording of
 /// one person saying "hello how are you", followed by silence, produced a confident
-/// `Speaker 1` / `Speaker 2` transcript here — and a user who can see there was only one
+/// `Speaker 1` / `Speaker 2` transcript here, and a user who can see there was only one
 /// person in the room now has a reason to distrust every label in the app.
 ///
 /// So this claims what the available evidence supports and nothing more: the words, in order,
-/// attributed to a single voice. Separating real voices needs the voices — see
+/// attributed to a single voice. Separating real voices needs the voices: see
 /// [`SpeakerEmbedder`], which does the acoustic half of that job and is waiting on a
 /// [`Diarizer`] to cluster per-segment audio with it.
 #[derive(Debug, Clone, Copy, Default)]
@@ -316,7 +316,7 @@ impl Diarizer for SingleSpeakerDiarizer {
 
     /// Zero, and deliberately.
     ///
-    /// Not "certain there was one speaker" — no separation was attempted, so a caller asking
+    /// Not "certain there was one speaker": no separation was attempted, so a caller asking
     /// how much to trust the *separation* must not be told to trust it. A UI reading this
     /// should offer to split speakers, not present these labels as findings.
     fn confidence(&self, _transcript: &Transcript) -> f32 {
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn ambiguous_gaps_yield_low_confidence() {
-        // Every gap sits right at the 700ms threshold — the boundary is doing arbitrary
+        // Every gap sits right at the 700ms threshold: the boundary is doing arbitrary
         // work, and the user should be told the labels are a guess.
         let ambiguous = transcript(&[(0, 1000), (1700, 2700), (3400, 4400), (5100, 6100)]);
         assert!(
@@ -558,7 +558,7 @@ mod tests {
 
     /// The behaviour the pipeline now depends on: silence, however long, is not a person.
     ///
-    /// The spans are the real ones from the recording that motivated this — a phrase, an
+    /// The spans are the real ones from the recording that motivated this: a phrase, an
     /// eight-second hole, then four more segments.
     #[test]
     fn a_single_speaker_survives_any_gap() {
@@ -583,7 +583,7 @@ mod tests {
                 .collect::<std::collections::HashSet<_>>()
                 .len(),
             2,
-            "the heuristic this replaced should still behave as documented — it splits here, \
+            "the heuristic this replaced should still behave as documented: it splits here, \
              which is exactly why it is no longer the default"
         );
     }

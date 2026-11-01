@@ -27,8 +27,8 @@ function isDone(item: ActionItem): boolean {
  * summary was later regenerated, belongs in this list too. `summary.action_items` is the
  * narrower "what this summary proposed" view and would silently drop both.
  *
- * Every mutation is optimistic and rolls back on failure. The alternative — waiting for the
- * round trip before the checkbox moves — makes ticking off five items feel broken on a
+ * Every mutation is optimistic and rolls back on failure. The alternative, waiting for the
+ * round trip before the checkbox moves, makes ticking off five items feel broken on a
  * machine that is also transcribing audio.
  */
 /**
@@ -36,7 +36,7 @@ function isDone(item: ActionItem): boolean {
  *
  * The intelligence panel stays mounted while the library switches meetings under it. Without the
  * key a half-typed item stayed open on the next meeting and Enter added it there, and the last
- * meeting's items stayed on screen until — or, if the request failed, instead of — this one's.
+ * meeting's items stayed on screen until (or, if the request failed, instead of) this one's.
  */
 export function ActionItems(props: Props) {
   return <ActionItemsForMeeting key={props.meetingId} {...props} />;
@@ -93,7 +93,7 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
       setItems((current) => [...current, created]);
       setError(null);
     } catch (e) {
-      // Put the text back rather than discarding it — retyping a sentence someone just
+      // Put the text back rather than discarding it: retyping a sentence someone just
       // dictated is the most annoying possible failure here.
       setDraft(text);
       setAdding(true);
@@ -106,7 +106,7 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
    *
    * Optimistic like every other mutation here, and the same shape as removing a decision in
    * `IntelPanel`: the row goes when it is clicked, and comes back if the engine refuses. The delete
-   * is a hard one — there is no trash for action items, unlike meetings — so the confirmation is
+   * is a hard one: there is no trash for action items, unlike meetings, so the confirmation is
    * the hover-only control rather than a dialog, which is the pattern already used for the
    * equivalent action on decisions.
    */
@@ -117,7 +117,7 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
       await api.deleteActionItem(item.id);
       setError(null);
     } catch (e) {
-      // A 404 means it is already gone — which is what was asked for. Restoring the row and
+      // A 404 means it is already gone, which is what was asked for. Restoring the row and
       // reporting "not found" would show a phantom item and blame the user for a race.
       if (e instanceof ApiError && e.status === 404) return;
       setItems(before);
@@ -204,9 +204,9 @@ function ActionItemsForMeeting({ meetingId, refreshToken = 0 }: Props) {
                     type="button"
                     onClick={() => void promote(item)}
                     disabled={promoting === item.id}
-                    title="Track this as a ticket. The action item stays — it is the record that this meeting produced the work."
+                    title="Track this as a ticket. The action item stays: it is the record that this meeting produced the work."
                     aria-label={`Make a ticket from: ${item.text}`}
-                    // Shown on keyboard focus as well as hover, like the delete beside it — a control
+                    // Shown on keyboard focus as well as hover, like the delete beside it: a control
                     // Tab can land on and nobody can see is a trap.
                     className="mt-[1px] shrink-0 text-ink-faint opacity-0 transition
                                hover:text-ink group-hover:opacity-100 focus-visible:opacity-100

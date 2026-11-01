@@ -19,7 +19,7 @@ const CONSOLE: Record<string, string> = {
 /**
  * Add or remove one provider's API key.
  *
- * The key is written to the OS keychain and is never readable back — the row can only ever say
+ * The key is written to the OS keychain and is never readable back: the row can only ever say
  * whether one exists. That is why there is no "show key" affordance and no value in the input
  * once saved: a key you can reveal is a key in the next screenshot.
  *

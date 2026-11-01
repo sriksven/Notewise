@@ -46,8 +46,8 @@
     -webkit-font-smoothing: antialiased;
     color: var(--text);
     background: var(--bg);
-    /* Switching theme should feel like a light changing, not like a page reloading. Kept short
-       — anything slower reads as lag when clicking through the accent swatches. */
+    /* Switching theme should feel like a light changing, not like a page reloading. Kept short:
+       anything slower reads as lag when clicking through the accent swatches. */
     transition:
       background-color 150ms ease,
       color 150ms ease;

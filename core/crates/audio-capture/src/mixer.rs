@@ -8,7 +8,7 @@
 //!
 //! Two signals near full scale sum above 1.0 and clip, which sounds like harsh distortion
 //! and measurably degrades transcription accuracy. Halving both inputs avoids that but makes
-//! a quiet meeting quieter, which is worse most of the time — most meetings are not near full
+//! a quiet meeting quieter, which is worse most of the time: most meetings are not near full
 //! scale, and attenuating them costs signal for a problem that was not going to occur.
 //!
 //! [`Mixer`] therefore leaves the common case untouched and only compresses when the sum
@@ -111,7 +111,7 @@ impl Mixer {
         )
     }
 
-    /// Mix a single frame — gain and limiting, no second stream.
+    /// Mix a single frame: gain and limiting, no second stream.
     ///
     /// Used when only one of the two sources is available, so the signal path is identical
     /// whether or not a system tap is present.
@@ -128,7 +128,7 @@ impl Mixer {
 
 /// An [`AudioSource`] combining a microphone and a system tap.
 ///
-/// Either may be absent — a user with no system-audio permission still gets a usable
+/// Either may be absent: a user with no system-audio permission still gets a usable
 /// recording from the microphone alone, rather than no recording at all.
 #[derive(Debug)]
 pub struct MixedSource {
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn loud_signals_are_compressed_not_clipped() {
-        // Above the knee the output must keep rising — a hard clamp would flatten it,
+        // Above the knee the output must keep rising; a hard clamp would flatten it,
         // and flattened peaks are the distortion that hurts recognition.
         let a = soft_clip(0.9);
         let b = soft_clip(1.4);

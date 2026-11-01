@@ -64,7 +64,7 @@ function Row({
   snippet?: string;
   onSelect: () => void;
 }) {
-  // A meeting with no `ended_at` is open, which is not the same as being recorded — one
+  // A meeting with no `ended_at` is open, which is not the same as being recorded, one
   // created for an import, or left dangling by a crash, has no microphone behind it. Only the
   // engine's own answer earns the red dot.
   const open = meeting.ended_at === null;
@@ -109,7 +109,7 @@ function Row({
  * The permanent meeting library.
  *
  * Always on screen rather than behind a toggle. Everything in this app is about one meeting at
- * a time, so which meeting is being looked at is the app's primary state — hiding it made
+ * a time, so which meeting is being looked at is the app's primary state: hiding it made
  * switching a two-click operation and left the window with no sense of place.
  *
  * The search box asks the engine rather than filtering titles here: what a person remembers
@@ -176,7 +176,7 @@ export function MeetingLibrary({ meetings, selectedId, recordingId, onSelect }: 
    * Search results, paired with the meeting they belong to.
    *
    * A hit can name a meeting older than the loaded page, so the hit's own title is the
-   * fallback — a result that cannot be resolved locally is still worth showing.
+   * fallback: a result that cannot be resolved locally is still worth showing.
    */
   const results = useMemo(() => {
     if (!hits) return null;

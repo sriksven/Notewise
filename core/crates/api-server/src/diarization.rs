@@ -3,7 +3,7 @@
 //! # Why this is off by default
 //!
 //! Clustering voice embeddings is the only way to answer "who spoke" for a mono recording with no
-//! platform timeline — an imported file, or one microphone in a room. It is also a guess, and its
+//! platform timeline: an imported file, or one microphone in a room. It is also a guess, and its
 //! accuracy on real meetings is not something this repository has measured: see the note on
 //! [`notewise_diarization::models`]. A guess presented as a finding is worse than the honest
 //! `Speaker 1`, so a user turns this on deliberately, having been told what it is.
@@ -74,7 +74,7 @@ impl Mode {
     /// Parse a stored value, treating anything unrecognised as off.
     ///
     /// Deliberately lenient in this direction only: an unreadable setting must not silently
-    /// enable a guess, and it must not fail the request either — a corrupt row would otherwise
+    /// enable a guess, and it must not fail the request either: a corrupt row would otherwise
     /// make every import fail rather than just decline to separate speakers.
     fn parse(raw: &str) -> Self {
         match raw {
@@ -281,7 +281,7 @@ pub async fn remove_model(
 
 /// Build the acoustic diarizer for an import, if everything needed is in place.
 ///
-/// Returns `None` when separation is off, unsupported, or the model is missing — all three are
+/// Returns `None` when separation is off, unsupported, or the model is missing: all three are
 /// ordinary states, not errors, and an import must go ahead without speaker labels rather than
 /// fail. A model that is present but refuses to load *is* worth surfacing, so that logs a warning
 /// rather than passing silently.
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(retain, DEFAULT_RETAIN_MINUTES);
     }
 
-    /// A nonsense budget falls back rather than being honoured — a zero would mean the acoustic
+    /// A nonsense budget falls back rather than being honoured: a zero would mean the acoustic
     /// pass silently never runs, and a huge one would try to hold the machine's whole memory.
     #[test]
     fn an_out_of_range_budget_falls_back_to_the_default() {

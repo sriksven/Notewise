@@ -1,7 +1,7 @@
 //! Deciding when a scheduled job is due.
 //!
-//! Pure, with the clock passed in. Every rule here — a job whose previous run has not finished, an
-//! app that was closed over a weekend, a cron expression that fires every minute — is answerable
+//! Pure, with the clock passed in. Every rule here (a job whose previous run has not finished, an
+//! app that was closed over a weekend, a cron expression that fires every minute) is answerable
 //! without waiting for wall time, which is the only way this is testable at all.
 //!
 //! The running of the work lives in [`crate::jobs`]. This module only ever answers "should it run,
@@ -54,7 +54,7 @@ pub struct JobTiming<'a> {
 /// a job that silently never ran.
 pub fn parse_cron(expr: &str) -> Result<Schedule, String> {
     // The `cron` crate wants seconds as a sixth leading field. Users write five-field cron, so a
-    // leading `0` is added when five fields are given — otherwise "0 9 * * *" would be read as
+    // leading `0` is added when five fields are given; otherwise "0 9 * * *" would be read as
     // second-0 minute-9 and fire once a minute for an hour, which is a spectacular way to be wrong.
     let trimmed = expr.trim();
     let fields = trimmed.split_whitespace().count();
@@ -137,7 +137,7 @@ pub fn due(job: &JobTiming<'_>, now: DateTime<Utc>) -> Due {
         };
     }
 
-    // With `catch_up`, the *most recent* missed occurrence runs — once. Never the whole backlog:
+    // With `catch_up`, the *most recent* missed occurrence runs, once. Never the whole backlog:
     // opening the app after a holiday and receiving a week of stale digests, each costing model
     // time and describing days the user already lived through, is the worst first impression this
     // feature could make.
@@ -286,7 +286,7 @@ mod tests {
             Due::Run {
                 occurrence: utc("2026-08-17T09:00:00Z")
             },
-            "the latest, once — never the whole backlog"
+            "the latest, once; never the whole backlog"
         );
     }
 

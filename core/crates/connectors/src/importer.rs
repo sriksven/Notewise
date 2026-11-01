@@ -7,7 +7,7 @@
 //! # Why the cursor advances last
 //!
 //! Identity is `(connector_id, external_id)` and `ExternalItemRepository::upsert` is keyed on it, so
-//! reading the same item twice is a no-op. That makes re-reading cheap and skipping expensive — a
+//! reading the same item twice is a no-op. That makes re-reading cheap and skipping expensive: a
 //! pull interrupted half way must resume from where it started, not from where it stopped. So the
 //! cursor is written only after the batch has been persisted.
 //!
@@ -99,7 +99,7 @@ impl Importer {
             match persist(db, id, item) {
                 Ok(()) => upserted += 1,
                 // One malformed item must not abandon the rest of the batch, and must not stop the
-                // cursor advancing — otherwise a single bad row is re-read forever.
+                // cursor advancing: otherwise a single bad row is re-read forever.
                 Err(e) => tracing::warn!(
                     connector = %id,
                     external_id = %item.external_id,
@@ -118,7 +118,7 @@ impl Importer {
 
 /// Record one inbound item's identity.
 ///
-/// Only identity. What the item *is* — an event's start time, a document's body — belongs to
+/// Only identity. What the item *is* (an event's start time, a document's body) belongs to
 /// whichever crate understands that kind of thing, and lands in its own table keyed to this row.
 /// `external_items` is the shared record that a thing exists elsewhere, for every connector.
 fn persist(db: &Database, connector_id: &str, item: &Inbound) -> Result<()> {
@@ -134,8 +134,8 @@ fn persist(db: &Database, connector_id: &str, item: &Inbound) -> Result<()> {
 
 /// Put what an inbound item *is* in the table that owns that kind of thing.
 ///
-/// This step did not exist. Every source built its payload — a document's body, an event's times
-/// and attendees, already normalised across providers — and the importer stored the identity and
+/// This step did not exist. Every source built its payload (a document's body, an event's times
+/// and attendees, already normalised across providers) and the importer stored the identity and
 /// dropped the rest, so `documents` and `calendar_events` stayed empty however many items a sync
 /// reported. A watched folder made nothing searchable, and the calendar reconciliation and
 /// join detection that read `calendar_events` had nothing to read. The sources and the
@@ -350,7 +350,7 @@ mod tests {
 
     /// The whole path a watched folder takes, with the real source: a file in the folder has to
     /// end up findable. Before the landing step existed, the sync reported it upserted and the
-    /// `documents` table — the one search and retrieval read — stayed empty.
+    /// `documents` table (the one search and retrieval read) stayed empty.
     #[tokio::test]
     async fn a_watched_folder_becomes_searchable_documents() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -431,7 +431,7 @@ mod tests {
             .any(|a| a.email == "dana@example.com" && a.is_organizer));
     }
 
-    /// One malformed event must not cost the batch — the existing rule, now that landing can fail.
+    /// One malformed event must not cost the batch: the existing rule, now that landing can fail.
     #[tokio::test]
     async fn an_event_without_times_is_skipped_not_fatal() {
         let db = db_with(crate::sources::MicrosoftGraph::ID);

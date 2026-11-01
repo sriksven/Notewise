@@ -1,6 +1,6 @@
 //! Stored vectors, and what they were made from.
 //!
-//! Everything here is derived data — see the v8 migration for why that shapes the schema. The
+//! Everything here is derived data; see the v8 migration for why that shapes the schema. The
 //! repository's job is to make three things cheap: writing a batch, reading every vector for
 //! one model, and knowing what has gone stale.
 
@@ -15,7 +15,7 @@ use crate::id::Id;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Embedding {
     pub id: Id,
-    /// `meeting`, `note`, or `ticket` — matching `NodeKind` naming.
+    /// `meeting`, `note`, or `ticket`, matching `NodeKind` naming.
     pub entity_kind: String,
     pub entity_id: Id,
     /// Position within the entity, so chunks come back in reading order.
@@ -159,7 +159,7 @@ impl<'a> EmbeddingRepository<'a> {
 
     /// Drop one entity's vectors, for every model.
     ///
-    /// Called when the entity itself is destroyed. Nothing cascades here — the table
+    /// Called when the entity itself is destroyed. Nothing cascades here; the table
     /// references heterogeneous kinds and so has no foreign keys.
     pub fn delete_for_entity(&self, entity_kind: &str, entity_id: Id) -> Result<usize> {
         Ok(self.db.conn().execute(
@@ -202,7 +202,7 @@ fn to_blob(vector: &[f32]) -> Vec<u8> {
 /// Read a vector back, checking the length the row claims.
 ///
 /// A blob whose byte count disagrees with `dims` is corrupt, and silently returning a shorter
-/// vector would make every comparison against it score zero — a wrong answer that looks like a
+/// vector would make every comparison against it score zero: a wrong answer that looks like a
 /// weak match rather than a fault.
 fn from_blob(bytes: &[u8], dims: i64) -> std::result::Result<Vec<f32>, String> {
     if !bytes.len().is_multiple_of(4) {
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(stored[0].vector, vec![9.0]);
     }
 
-    /// Re-embedding with one model must not destroy another model's vectors — they are
+    /// Re-embedding with one model must not destroy another model's vectors; they are
     /// separate indexes that happen to share a table.
     #[test]
     fn replacing_one_model_leaves_another_alone() {
@@ -450,7 +450,7 @@ mod tests {
     }
 
     /// A blob that disagrees with its own `dims` is corrupt. Returning a truncated vector
-    /// would score zero against everything — a wrong answer disguised as a weak match.
+    /// would score zero against everything: a wrong answer disguised as a weak match.
     #[test]
     fn a_corrupt_vector_is_reported_not_silently_truncated() {
         assert!(from_blob(&[0, 0, 0], 1).is_err(), "not a whole f32");

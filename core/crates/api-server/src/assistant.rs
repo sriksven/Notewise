@@ -2,7 +2,7 @@
 //! selection, and continuing a sentence.
 //!
 //! Specs 9b, 9c and 9d. Each is a separate design in the program map and each is staged after
-//! dictation, which is where the shared parts were proven — the hotkey registry, the insertion
+//! dictation, which is where the shared parts were proven: the hotkey registry, the insertion
 //! tiers, the screen-context reduction, the permission reads.
 //!
 //! # What each of them is, honestly
@@ -136,7 +136,7 @@ async fn ask_about_screen(
         )
     } else {
         "You answer the user's question directly. You were given no information about their \
-         screen, so do not pretend to know what is on it — if the question depends on that, say so."
+         screen, so do not pretend to know what is on it. If the question depends on that, say so."
             .to_string()
     };
 
@@ -170,7 +170,7 @@ pub enum Act {
         /// validated against a list: a list would be wrong for somebody's language within a week.
         language: String,
     },
-    /// Produce a summary. Does not replace the original — see [`Act::replaces`].
+    /// Produce a summary. Does not replace the original; see [`Act::replaces`].
     Summarise,
     /// Explain what the text means. Also does not replace.
     Explain,
@@ -202,7 +202,7 @@ impl Act {
     /// The instruction block.
     ///
     /// Every replacing action says "return only the text" twice over, because a model that adds
-    /// "Here is the rewritten version:" has that string inserted into somebody's document — the same
+    /// "Here is the rewritten version:" has that string inserted into somebody's document; the same
     /// failure the completion path guards against, and here the guard has to be the prompt because
     /// there is no shape to check the answer against.
     pub fn prompt(&self) -> String {
@@ -219,7 +219,7 @@ impl Act {
                  matters. Keep its language. {only}"
             ),
             Act::Expand => format!(
-                "Expand the text with the detail it implies but does not say. Invent no facts — if \
+                "Expand the text with the detail it implies but does not say. Invent no facts. If \
                  detail would have to be made up, leave it out. Keep its language. {only}"
             ),
             Act::FixGrammar => format!(
@@ -231,7 +231,7 @@ impl Act {
                  it. Keep its language. {only}"
             ),
             Act::Translate { language } => format!(
-                "Translate the text into {language}. Translate it — do not summarise, explain, or \
+                "Translate the text into {language}. Translate it. Do not summarise, explain, or \
                  improve it. {only}"
             ),
             Act::Summarise => "Summarise the text in at most three sentences, in the language it \
@@ -248,7 +248,7 @@ impl Act {
 
 /// Every action, for a menu.
 ///
-/// Held as data so the list a user sees and the list the server accepts cannot drift apart — the
+/// Held as data so the list a user sees and the list the server accepts cannot drift apart: the
 /// same reasoning `MUTATING_TOOLS` uses in `mcp-server`.
 pub fn every_act() -> Vec<Act> {
     vec![
@@ -391,7 +391,7 @@ async fn act_on_selection(
             }
             Err(error) => (
                 None,
-                Some(format!("{error} The result is above — copy it from here.")),
+                Some(format!("{error} The result is above. Copy it from here.")),
             ),
         }
     };
@@ -439,7 +439,7 @@ struct Completion {
 
 /// Suggest a continuation of what is being typed.
 ///
-/// Suggests only. Nothing is inserted here — acceptance is a separate request, because a completion
+/// Suggests only. Nothing is inserted here; acceptance is a separate request, because a completion
 /// that writes itself into a document is not a suggestion.
 async fn complete(
     State(state): State<Shared>,
@@ -481,7 +481,7 @@ async fn complete(
         }));
     }
 
-    // The instruction as the system prompt, not as "material" under the meetings default — see
+    // The instruction as the system prompt, not as "material" under the meetings default; see
     // `ChatRequest::system` for what that framing did to every assistant action.
     let request = ChatRequest::new(vec![ChatMessage::user(&text)]).with_system(
         "The user is part-way through writing something. Continue it from exactly where it stops.\n\n\
@@ -607,7 +607,7 @@ mod tests {
         assert!(Act::Expand.prompt().contains("Invent no facts"));
     }
 
-    /// Translating into the user's own words for a language, not a validated list — a list would be
+    /// Translating into the user's own words for a language, not a validated list: a list would be
     /// wrong for somebody's language within a week.
     #[test]
     fn translation_carries_the_language_through() {
@@ -794,7 +794,7 @@ mod tests {
         );
     }
 
-    /// 9b with the screen deliberately left out — which is how the surface stays usable on a
+    /// 9b with the screen deliberately left out, which is how the surface stays usable on a
     /// machine where the grant was refused.
     #[tokio::test]
     async fn a_question_can_be_answered_without_reading_the_screen() {
@@ -846,7 +846,7 @@ mod tests {
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
             // The reason differs by platform: a macOS build without the feature names it, and a
             // Linux build says the platform cannot do this at all. Asserting the feature name
-            // passed on macOS and failed on Linux for a build behaving correctly — so what is
+            // passed on macOS and failed on Linux for a build behaving correctly, so what is
             // asserted is the property that holds everywhere: the refusal explains itself, and
             // does not point at a setting that cannot fix it.
             let reason = body["error"].as_str().expect("a reason");
@@ -877,7 +877,7 @@ mod tests {
         );
     }
 
-    /// Forcing skips the pause and the rate limit — which is what a "suggest now" key does — and
+    /// Forcing skips the pause and the rate limit (which is what a "suggest now" key does) and
     /// nothing else.
     #[tokio::test]
     async fn forcing_a_suggestion_skips_the_pause_but_still_needs_something_to_continue() {
@@ -923,7 +923,7 @@ mod tests {
     /// The typing monitor's state is process-global, so this is one test rather than two.
     ///
     /// Split across two, they raced: whichever started the monitor first made the other's "it is
-    /// off" assertion false. That is not a flaw in either assertion — it is the shape of a resource
+    /// off" assertion false. That is not a flaw in either assertion; it is the shape of a resource
     /// there is exactly one of, and the fix is to check the sequence in order.
     #[tokio::test]
     async fn the_typing_monitor_is_off_until_started_and_says_why_when_it_cannot_start() {
@@ -972,7 +972,7 @@ mod tests {
             StatusCode::NOT_IMPLEMENTED => {
                 // The reason differs by platform: a macOS build without the feature names it, and a
                 // Linux build says the platform cannot do this at all. Asserting the feature name
-                // passed on macOS and failed on Linux for a build behaving correctly — so what is
+                // passed on macOS and failed on Linux for a build behaving correctly, so what is
                 // asserted is the property that holds everywhere: the refusal explains itself, and
                 // does not point at a setting that cannot fix it.
                 let reason = body["error"].as_str().expect("a reason");

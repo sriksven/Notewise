@@ -2,7 +2,7 @@
  * The download cards, shared by the overview and the install page.
  *
  * macOS and Windows are resolved against the real release; Ubuntu says plainly that its build is
- * coming. Windows says so too until a release carries its installer — the card follows GitHub
+ * coming. Windows says so too until a release carries its installer: the card follows GitHub
  * rather than this file, so it changes when such a release is published, with no redeploy. Someone on Windows should learn what exists here, not by clicking a button that hands
  * them a disk image they cannot open.
  */
@@ -107,7 +107,7 @@ const LINK = "text-ink-muted underline decoration-hairline underline-offset-2 ho
  * The Windows card's contents once a release carries the installer.
  *
  * Contents rather than the whole card: the card already on the page has been given its tilt and
- * its reveal, and a replacement would arrive with neither — invisible, since reveal starts hidden.
+ * its reveal, and a replacement would arrive with neither: invisible, since reveal starts hidden.
  */
 function windowsContents(release: WindowsRelease): string {
   const kind = release.prerelease ? "Release candidate" : "Latest release";

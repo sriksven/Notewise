@@ -7,8 +7,8 @@ import type { Route } from "../lib/router";
 /**
  * Which colour a conversation is drawn in.
  *
- * `workspace` is the app's accent. `note` is its companion — another of the eleven, chosen in
- * `lib/theme` — because asking one note and asking everything sit side by side often enough that
+ * `workspace` is the app's accent. `note` is its companion, another of the eleven, chosen in
+ * `lib/theme`, because asking one note and asking everything sit side by side often enough that
  * they should never look like the same thing. The class strings are spelled out in full so Tailwind
  * finds them; a class assembled at runtime generates no CSS.
  */

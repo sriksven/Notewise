@@ -6,8 +6,8 @@
 //! # Two ways to record, and why the second one is better
 //!
 //! [`ChannelPipeline`] keeps each capture source separate and labels every segment by the
-//! source it arrived on. On a call that answers "who said this" exactly — the microphone is
-//! you, the system tap is everyone else — with no model and no inference.
+//! source it arrived on. On a call that answers "who said this" exactly: the microphone is
+//! you, the system tap is everyone else, with no model and no inference.
 //!
 //! ```text
 //!   microphone ──→ TranscriptionEngine ──→ storage  ("You")
@@ -17,7 +17,7 @@
 //!
 //! [`Pipeline`] sums the sources into one stream and infers the speaker afterwards. It is what
 //! to use when there is only one source, or when a caller genuinely wants a single mixed
-//! track — but the inference is a guess, and summing is irreversible, so prefer the above.
+//! track, but the inference is a guess, and summing is irreversible, so prefer the above.
 //!
 //! ```text
 //!   AudioSource ──┐
@@ -76,7 +76,7 @@ pub enum RecorderError {
     /// Two inputs claimed the same capture channel.
     ///
     /// Channels are identified downstream by the speaker label they write, so two inputs on one
-    /// channel would be indistinguishable in storage — and a per-channel refinement pass would
+    /// channel would be indistinguishable in storage, and a per-channel refinement pass would
     /// silently re-label both.
     #[error("channel {channel:?} was attached twice")]
     DuplicateChannel { channel: Channel },
@@ -87,7 +87,7 @@ pub type Result<T> = std::result::Result<T, RecorderError>;
 /// The rate retained audio is held at, and the rate the acoustic diarizer is told.
 ///
 /// Frames are converted to the transcription format before being retained, so retention has one
-/// rate regardless of what the capture device produced — which is what lets a span's millisecond
+/// rate regardless of what the capture device produced, which is what lets a span's millisecond
 /// bounds be turned back into sample offsets.
 const RETENTION_SAMPLE_RATE: u32 = AudioFormat::transcription().sample_rate.hz();
 
@@ -113,7 +113,7 @@ pub struct PipelineConfig {
     pub diarize: bool,
     /// How long to wait for a frame from a live source before checking for a stop signal.
     ///
-    /// Only bounds shutdown latency — a silent room should not delay stopping by more than
+    /// Only bounds shutdown latency: a silent room should not delay stopping by more than
     /// this, and a user who clicks stop expects it to stop.
     pub poll_timeout: Duration,
 }
@@ -130,8 +130,8 @@ impl Default for PipelineConfig {
 /// Keep samples for an acoustic pass, within a millisecond budget.
 ///
 /// Returns `false` once the budget would be exceeded, having **emptied** `audio`: a prefix cannot
-/// be diarized safely — every segment past the cutoff would be labelled by `nearest_cluster` from
-/// audio nobody examined — so holding it only wastes the memory the budget exists to bound.
+/// be diarized safely: every segment past the cutoff would be labelled by `nearest_cluster` from
+/// audio nobody examined, so holding it only wastes the memory the budget exists to bound.
 ///
 /// One implementation for both [`Pipeline`] and [`ChannelInput`]. Two would be two places for the
 /// off-by-one in the budget to differ.
@@ -151,7 +151,7 @@ fn retain_within(audio: &mut Vec<f32>, samples: &[f32], retain_ms: i64) -> bool 
 /// How much audio a stopped live source may still hand over.
 ///
 /// A backstop, not a budget. A live source told to stop returns what it had already captured and
-/// then `None` — normally a fraction of a second. This bounds one that ignores
+/// then `None`, normally a fraction of a second. This bounds one that ignores
 /// [`AudioSource::stop`], which would otherwise keep a stopped recording running for ever.
 const MAX_TAIL_MS: i64 = 10 * 60 * 1000;
 
@@ -160,15 +160,15 @@ const MAX_TAIL_MS: i64 = 10 * 60 * 1000;
 /// # Why a stop is not just the end of the loop
 ///
 /// A live source buffers. By the time a stop is requested, the microphone has delivered audio the
-/// pipeline has not read yet — at least the frame it is still filling, and everything that arrived
+/// pipeline has not read yet: at least the frame it is still filling, and everything that arrived
 /// while the previous frame was being transcribed. That is the last thing anyone said before
 /// pressing stop. Leaving the loop on the stop signal dropped it: the sources have always handed
 /// their tail over once told to stop, but nothing told them until they were dropped, by which time
 /// nobody was reading.
 ///
 /// So on the first stop request a live source is stopped and then read until it reports `None`. A
-/// file or a synthetic source has nothing "already captured" — the rest of it simply has not been
-/// reached — so it ends at once, as it always did.
+/// file or a synthetic source has nothing "already captured": the rest of it simply has not been
+/// reached, so it ends at once, as it always did.
 ///
 /// One implementation for [`Pipeline`], [`ChannelPipeline`] and dictation, which all read a live
 /// source until somebody says stop.
@@ -258,8 +258,8 @@ impl Pipeline {
     ///
     /// The default is [`SingleSpeakerDiarizer`], not the pause heuristic. Gaps are not evidence
     /// about who was speaking, and treating them as such labelled one person's pause as a
-    /// second participant in a real recording. Callers wanting the heuristic — an imported
-    /// transcript of a call where people did alternate cleanly, say — opt in with
+    /// second participant in a real recording. Callers wanting the heuristic (an imported
+    /// transcript of a call where people did alternate cleanly, say) opt in with
     /// [`Pipeline::with_diarizer`].
     pub fn new(engine: Box<dyn TranscriptionEngine>) -> Self {
         Self {
@@ -276,7 +276,7 @@ impl Pipeline {
     ///
     /// # Why the *converted* samples are what get written
     ///
-    /// Each frame is written after `to_transcription_format`, at one known sample rate — the same
+    /// Each frame is written after `to_transcription_format`, at one known sample rate: the same
     /// conversion the acoustic retention buffer uses, and for the same reason. A transcript segment
     /// records millisecond bounds, and seeking to one means turning milliseconds into a sample
     /// offset. That arithmetic only works if the file is at a rate the reader can assume, which the
@@ -286,7 +286,7 @@ impl Pipeline {
     /// retains nothing rather than appending to the first meeting's file.
     ///
     /// Takes `&mut self` rather than consuming the pipeline, unlike the other builder methods here.
-    /// The difference is that this one can fail at runtime — it opens a file — and a fallible
+    /// The difference is that this one can fail at runtime (it opens a file) and a fallible
     /// builder that consumes `self` gives a caller no way to carry on without it. The import path
     /// wants exactly that: retention is a preference, and a directory that cannot be written to
     /// should cost the recording its audio file and nothing else.
@@ -339,7 +339,7 @@ impl Pipeline {
 
     /// Separate speakers from the audio, retaining at most `retain_ms` of it.
     ///
-    /// This is how [`notewise_diarization::EmbeddingDiarizer`] reaches a **mono** recording — an
+    /// This is how [`notewise_diarization::EmbeddingDiarizer`] reaches a **mono** recording: an
     /// imported file, or a single-microphone capture of a room. It is the case the channel path
     /// cannot help with: there is one stream and no platform timeline, so who spoke is only
     /// recoverable from the voices.
@@ -350,7 +350,7 @@ impl Pipeline {
     /// # Why the budget is a required argument
     ///
     /// Clustering cannot begin until the whole recording is known, so the audio has to be kept.
-    /// Mono 16 kHz `f32` is 64 KB per second — about 230 MB for an hour. That is not a cost to
+    /// Mono 16 kHz `f32` is 64 KB per second, about 230 MB for an hour. That is not a cost to
     /// inherit from a default, so there is no default.
     ///
     /// # At the budget, it stops rather than guesses
@@ -392,7 +392,7 @@ impl Pipeline {
     /// Run a source to completion, storing segments as they are produced.
     ///
     /// `should_stop` is polled between frames so a live recording can be ended without
-    /// waiting for the source to exhaust itself — a microphone never does.
+    /// waiting for the source to exhaust itself: a microphone never does.
     pub async fn run(
         &mut self,
         db: &Database,
@@ -496,7 +496,7 @@ impl Pipeline {
     /// Label stored segments with speakers.
     ///
     /// Runs over the whole transcript at once because turn-taking is only visible from the
-    /// gaps between segments — which the live path cannot see for the segment it is storing.
+    /// gaps between segments, which the live path cannot see for the segment it is storing.
     ///
     /// Returns `(segments labelled, distinct speakers)`.
     fn diarize(&self, db: &Database, meeting_id: Id) -> Result<(usize, usize)> {
@@ -608,7 +608,7 @@ fn store_segments(
 ///
 /// The channel *is* the speaker, on a call. Everything the microphone hears is the person at
 /// this machine; everything the system tap hears is the far end. That is not an inference from
-/// timings or a clustering of voices — it is which cable the audio came down, and it is the
+/// timings or a clustering of voices: it is which cable the audio came down, and it is the
 /// most reliable speaker signal available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
@@ -640,7 +640,7 @@ pub struct ChannelInput {
     /// This channel's audio, retained only for [`ChannelDiarizer::Audio`].
     audio: Vec<f32>,
     /// Set when retention hit its budget. The partial buffer is dropped and the acoustic pass
-    /// skipped — see [`ChannelInput::retain`].
+    /// skipped: see [`ChannelInput::retain`].
     audio_truncated: bool,
     /// Keeps this channel's tail when the recording is stopped. See [`CaptureReader`].
     reader: CaptureReader,
@@ -707,7 +707,7 @@ impl ChannelInput {
     /// # What this is for
     ///
     /// The channel label answers "which side of the call" and stops there. On a five-person
-    /// video call the system tap is one channel carrying four people, all stored as `Others` —
+    /// video call the system tap is one channel carrying four people, all stored as `Others`:
     /// correct, and not what a reader wants. This is the hook that turns those four into four
     /// names.
     ///
@@ -718,7 +718,7 @@ impl ChannelInput {
     ///
     /// # Why it runs after, not during
     ///
-    /// The same reason the rest of the pipeline works this way — the label is refined once the
+    /// The same reason the rest of the pipeline works this way: the label is refined once the
     /// whole channel is known, while the live transcript still appears immediately under its
     /// channel label. A reader sees `Others` during the call and names afterwards, rather than
     /// nothing during the call.
@@ -737,14 +737,14 @@ impl ChannelInput {
     ///
     /// This is how [`notewise_diarization::EmbeddingDiarizer`] and
     /// [`notewise_diarization::NamedClusterDiarizer`] reach the live recording path. The latter is
-    /// the best separation available — acoustic boundaries with platform names — and it needs both
+    /// the best separation available (acoustic boundaries with platform names) and it needs both
     /// the audio and a timeline.
     ///
     /// # Why the budget is a required argument
     ///
     /// Clustering cannot start until the whole channel is known, so the audio has to be kept.
     /// Mono 16 kHz `f32` is 64 KB per second: about 230 MB for an hour, per channel. That is not a
-    /// cost to inherit from a default, so there is no default — a caller enabling this states what
+    /// cost to inherit from a default, so there is no default: a caller enabling this states what
     /// it is willing to spend.
     ///
     /// # What happens at the budget
@@ -756,7 +756,7 @@ impl ChannelInput {
     /// [`notewise_diarization::NamedClusterDiarizer`] those labels are people's names.
     ///
     /// Pair it with [`Self::with_diarizer`]'s argument instead when the platform supplies a
-    /// timeline — that path needs no audio at all and so has no budget to blow.
+    /// timeline: that path needs no audio at all and so has no budget to blow.
     pub fn with_audio_diarizer(
         mut self,
         diarizer: Box<dyn AudioDiarizer + Send>,
@@ -798,7 +798,7 @@ impl ChannelInput {
 /// [`Pipeline::mixed_source`] sums the microphone and the system tap into one mono stream, and
 /// summing is irreversible: once the two are added together, no amount of downstream cleverness
 /// recovers which side of the call a sentence came from. The pipeline then has to *infer* the
-/// speaker from the mixed audio — from pauses, or from clustering voice embeddings — and both
+/// speaker from the mixed audio (from pauses, or from clustering voice embeddings) and both
 /// are guesses that get it wrong.
 ///
 /// Keeping the streams apart makes the question disappear for the case that matters most. On a
@@ -808,7 +808,7 @@ impl ChannelInput {
 /// Diarization does not run *across* channels, and that is deliberate: it would overwrite known
 /// attribution with an inferred one.
 ///
-/// Separating several voices *within* one channel is a different problem, and the common one — a
+/// Separating several voices *within* one channel is a different problem, and the common one: a
 /// five-person call puts four people on the system tap, and three people around one microphone
 /// are one channel too. [`ChannelInput::with_diarizer`] is that hook: a per-channel pass that
 /// refines `Others` into names without touching what the channel already established.
@@ -817,7 +817,7 @@ impl ChannelInput {
 ///
 /// One engine per channel, but not one model per channel: engines that can share loaded weights
 /// (see `WhisperEngine::sibling`) should be built that way by the caller. What is not shared is
-/// the speech gating, which is per-channel by necessity — two streams cutting each other's
+/// the speech gating, which is per-channel by necessity: two streams cutting each other's
 /// phrases would be worse than mixing them.
 #[derive(Debug)]
 pub struct ChannelPipeline {
@@ -831,7 +831,7 @@ impl ChannelPipeline {
     ///
     /// [`RecorderError::DuplicateChannel`] if two inputs share a channel. Stored segments carry
     /// only the channel's speaker label, so two inputs on one channel cannot be told apart
-    /// afterwards — and [`ChannelInput::with_diarizer`] would then re-label both from one
+    /// afterwards, and [`ChannelInput::with_diarizer`] would then re-label both from one
     /// channel's evidence.
     pub fn new(inputs: Vec<ChannelInput>) -> Result<Self> {
         if inputs.is_empty() {
@@ -920,7 +920,7 @@ impl ChannelPipeline {
             stats.segments_stored += stored;
         }
 
-        // Wall clock, so the longest channel — not the sum, which would report a two-channel
+        // Wall clock, so the longest channel, not the sum, which would report a two-channel
         // recording as twice its real length.
         stats.audio_ms = self.inputs.iter().map(|i| i.audio_ms).max().unwrap_or(0);
         stats.segments_attributed = stats.segments_stored;
@@ -982,7 +982,7 @@ impl ChannelPipeline {
 /// # Why this exists separately from [`ChannelInput::with_diarizer`]
 ///
 /// That takes its diarizer when the pipeline is *built*, which is the right shape when the
-/// evidence is already in hand — an import, or a timeline captured earlier. It cannot serve a
+/// evidence is already in hand: an import, or a timeline captured earlier. It cannot serve a
 /// browser extension reporting who is speaking *during* the meeting: at pipeline-construction time
 /// that timeline is empty, and the recorder is deliberately not given shared mutable state to read
 /// later.
@@ -1008,7 +1008,7 @@ pub fn refine_channel_speakers(
 /// # Identifying a channel's segments
 ///
 /// By the speaker label the channel wrote. That is the only marker storage keeps, and it is
-/// sufficient because [`ChannelPipeline::new`] rejects two inputs on one channel — so a label maps
+/// sufficient because [`ChannelPipeline::new`] rejects two inputs on one channel, so a label maps
 /// to exactly one channel for the life of a recording.
 ///
 /// # What is not overwritten
@@ -1162,7 +1162,7 @@ mod tests {
             "the reported size must be the file's real size"
         );
 
-        // Readable, and at the transcription rate — which is what makes seeking to a segment's
+        // Readable, and at the transcription rate, which is what makes seeking to a segment's
         // millisecond bound arithmetic rather than guesswork.
         let source = FileSource::open_wav(&path).expect("read back");
         assert_eq!(source.format(), AudioFormat::transcription());
@@ -1363,7 +1363,7 @@ mod tests {
 
     #[tokio::test]
     async fn buffered_audio_is_flushed_when_stopping() {
-        // Whatever the engine is holding must not be lost — that is the last thing anyone
+        // Whatever the engine is holding must not be lost: that is the last thing anyone
         // said before the meeting ended.
         let db = db();
         let id = meeting(&db);
@@ -1674,7 +1674,7 @@ mod tests {
     ///
     /// Two people talking over each other is the case every timing heuristic and every
     /// embedding clusterer gets wrong. Arriving on two separate streams, it is not a hard case
-    /// at all — each word is labelled by the cable it came down.
+    /// at all: each word is labelled by the cable it came down.
     #[tokio::test]
     async fn each_channel_is_attributed_to_its_own_speaker() {
         let db = db();
@@ -1758,7 +1758,7 @@ mod tests {
     /// The requirement that motivated all of this: five people on a call, each voice named.
     ///
     /// The microphone is the user. The system tap carries the other four, which the channel label
-    /// can only call `Others` — so the platform timeline splits that one channel into four names.
+    /// can only call `Others`, so the platform timeline splits that one channel into four names.
     #[tokio::test]
     async fn a_channel_carrying_several_people_is_split_into_names() {
         use notewise_diarization::TimelineDiarizer;
@@ -2018,7 +2018,7 @@ mod tests {
     /// Blowing the budget must skip the pass, not label from a prefix.
     ///
     /// Labelling a truncated recording would attribute every segment past the cutoff from audio
-    /// that was never examined — and under `NamedClusterDiarizer` those labels are people's names.
+    /// that was never examined, and under `NamedClusterDiarizer` those labels are people's names.
     #[tokio::test]
     async fn exceeding_the_retention_budget_skips_the_acoustic_pass() {
         use std::sync::atomic::Ordering;
@@ -2244,7 +2244,7 @@ mod tests {
     /// Past the budget it must label nothing rather than label from a prefix.
     ///
     /// Every segment after the cutoff would otherwise be attributed by `nearest_cluster` against
-    /// audio that was never examined — confident labels derived from silence.
+    /// audio that was never examined: confident labels derived from silence.
     #[tokio::test]
     async fn exceeding_the_retention_budget_skips_the_acoustic_pass_entirely() {
         let db = db();
@@ -2352,7 +2352,7 @@ mod tests {
     /// A stand-in for a live device.
     ///
     /// It never runs out on its own, and once stopped it still holds `tail` frames it captured and
-    /// nobody has read — what a real microphone has buffered at the moment stop is pressed.
+    /// nobody has read: what a real microphone has buffered at the moment stop is pressed.
     #[derive(Debug)]
     struct LiveDevice {
         tone: SyntheticSource,
@@ -2519,7 +2519,7 @@ mod tests {
         assert!(reader.is_stopping());
     }
 
-    /// Before any stop, a reader is a plain pass-through — including for a source that is not live.
+    /// Before any stop, a reader is a plain pass-through, including for a source that is not live.
     #[test]
     fn a_reader_passes_frames_through_until_stopped() {
         let mut source = tone(300);

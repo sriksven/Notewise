@@ -16,7 +16,7 @@ interface Props {
  *
  * # Why regenerating adds rather than replaces
  *
- * `SummaryRepository` has no `update` — summarising appends, and the newest row wins. So trying
+ * `SummaryRepository` has no `update`: summarising appends, and the newest row wins. So trying
  * another template is free: the previous summary is still there, and the decisions and action items
  * it produced survive because since v6 they carry their own `meeting_id` and only reference the
  * summary as provenance.
@@ -62,7 +62,7 @@ export function SummaryTemplatePicker({ meetingId, hasTranscript, onDone }: Prop
         <Wand2 className="h-3.5 w-3.5" /> Summarise it differently
       </h3>
       <p className="mb-3 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
-        Each of these is a different prompt. Running one adds a new summary — the one you have now,
+        Each of these is a different prompt. Running one adds a new summary. The one you have now,
         and any action items you have edited, stay exactly as they are.
       </p>
 

@@ -15,7 +15,7 @@ interface Props {
  * Ask everything, from wherever you are.
  *
  * The same conversation as the Ask page, in a side panel, so a question does not cost leaving the
- * meeting it came up in. It stays open as you move around — opening a citation shows its source
+ * meeting it came up in. It stays open as you move around: opening a citation shows its source
  * beside the answer that cited it, which is the point of a citation.
  */
 export function AskPanel({ onClose, onNavigate }: Props) {
@@ -49,7 +49,7 @@ export function AskPanel({ onClose, onNavigate }: Props) {
         onNavigate={onNavigate}
         intro={
           <>
-            Answered only from your own meetings and notes — never from what the model happens to
+            Answered only from your own meetings and notes, never from what the model happens to
             know. Every claim carries a reference you can open and check.
           </>
         }

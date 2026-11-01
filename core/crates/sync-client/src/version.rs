@@ -30,7 +30,7 @@ impl std::fmt::Display for DeviceId {
 pub enum Ordering {
     /// Identical.
     Equal,
-    /// The left version descends from the right — it has strictly newer information.
+    /// The left version descends from the right; it has strictly newer information.
     Descends,
     /// The right version descends from the left.
     Precedes,
@@ -85,7 +85,7 @@ impl Version {
         let mut self_ahead = false;
         let mut other_ahead = false;
 
-        // Every device either side knows about — a device missing from one side counts as 0.
+        // Every device either side knows about; a device missing from one side counts as 0.
         for device in self.counters.keys().chain(other.counters.keys()) {
             let mine = self.counter_for(device);
             let theirs = other.counter_for(device);

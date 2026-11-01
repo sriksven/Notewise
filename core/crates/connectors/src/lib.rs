@@ -1,7 +1,7 @@
 //! The connector seam.
 //!
-//! Every external service — a markdown vault, a webhook receiver, a calendar, a ticket
-//! tracker — reaches Notewise through the traits in this crate. Nothing above it imports a
+//! Every external service (a markdown vault, a webhook receiver, a calendar, a ticket
+//! tracker) reaches Notewise through the traits in this crate. Nothing above it imports a
 //! vendor SDK, for the same reason nothing above `notewise-ai-router` imports a model SDK.
 //!
 //! # Direction is a type, not a flag

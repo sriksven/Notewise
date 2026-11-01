@@ -21,7 +21,7 @@ function spans(parts: Span[]) {
 /**
  * A summary, rendered as prose.
  *
- * Text only — the parser produces spans with a bold flag and nothing else, so there is no path
+ * Text only: the parser produces spans with a bold flag and nothing else, so there is no path
  * from a model's output to markup. That matters more here than anywhere else in the app: the
  * content is generated from whatever was said in a meeting.
  */

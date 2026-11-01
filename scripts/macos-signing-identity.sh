@@ -6,7 +6,7 @@
 # macOS attaches the Microphone, Screen & System Audio Recording, Accessibility and Input
 # Monitoring grants to an app's *designated requirement*. Signed ad-hoc, that requirement is a
 # hash of the binary, so every update is a stranger and every grant is lost. Signed with a
-# certificate — any certificate, self-signed included — it becomes
+# certificate (any certificate, self-signed included), it becomes
 #
 #     identifier "dev.notewise.app" and certificate leaf = H"<sha1 of this certificate>"
 #

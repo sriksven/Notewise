@@ -2,7 +2,7 @@ import { AlertCircle, X } from "lucide-react";
 
 interface SetupBannerProps {
   /**
-   * What is not working and what to do about it, as whole sentences — see `bannerProblems`.
+   * What is not working and what to do about it, as whole sentences; see `bannerProblems`.
    *
    * "permissions needs attention" describes the setup screen's state and tells someone with a
    * meeting starting in a minute nothing. "Ollama isn't running. Open the Ollama app…" tells

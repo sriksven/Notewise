@@ -2,7 +2,7 @@
  * Turning a workspace into numbers.
  *
  * Pure functions over data already fetched, so every one of them is testable without a
- * network — which matters more here than usual, because a dashboard's whole job is to be
+ * network, which matters more here than usual, because a dashboard's whole job is to be
  * *correct* about counts. A view that renders beautifully and says 11 when the answer is 12 is
  * worse than no view.
  */
@@ -67,7 +67,7 @@ export interface DayCount {
  * Meetings per day over the last `days`, oldest first.
  *
  * Every day in the window appears, including the empty ones. A bar chart that silently omits
- * quiet days compresses the axis and turns a fortnight of nothing into a flat busy line — the
+ * quiet days compresses the axis and turns a fortnight of nothing into a flat busy line: the
  * gaps are the information.
  *
  * Local dates, not UTC: a meeting at 9pm on Tuesday belongs to Tuesday for the person who was
@@ -108,7 +108,7 @@ export interface OwnerLoad {
  * Open work grouped by who owns it, busiest first.
  *
  * Unowned work is its own row rather than being dropped. It is usually the largest one, and it
- * is the row that matters — an action item nobody owns is the one that does not get done.
+ * is the row that matters: an action item nobody owns is the one that does not get done.
  */
 export function loadByOwner(items: Array<ActionItem | Ticket>): OwnerLoad[] {
   const open = items.filter(isOpen);

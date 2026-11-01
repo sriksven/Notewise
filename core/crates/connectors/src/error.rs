@@ -28,7 +28,7 @@ pub enum ConnectorError {
     /// dispatcher records the divergence so the user can be asked what to do. A message in a
     /// dead-letter row is not something a screen can offer three choices about.
     ///
-    /// Not retryable. Retrying cannot resolve a conflict — only a person can.
+    /// Not retryable. Retrying cannot resolve a conflict; only a person can.
     #[error("{path} was changed outside Notewise; not overwriting it")]
     Diverged { path: String },
 

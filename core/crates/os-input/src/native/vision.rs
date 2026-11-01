@@ -2,8 +2,8 @@
 //!
 //! # Why this is the only Objective-C in the crate
 //!
-//! Vision has no C entry point. Every other framework here — the accessibility API, the pasteboard,
-//! event synthesis, Carbon hotkeys — is reachable through a plain `extern "C"` block, which is why
+//! Vision has no C entry point. Every other framework here (the accessibility API, the pasteboard,
+//! event synthesis, Carbon hotkeys) is reachable through a plain `extern "C"` block, which is why
 //! this crate needs the objc2 runtime for exactly one capability and nothing else.
 //!
 //! # What is implemented, and the wall in front of it
@@ -13,7 +13,7 @@
 //! itself.
 //!
 //! *Capturing* the screen is the part a test run cannot do. It needs the Screen & System Audio
-//! Recording grant, which macOS gives to an app bundle and never to a loose test binary — the same
+//! Recording grant, which macOS gives to an app bundle and never to a loose test binary: the same
 //! condition system audio has, encoded once in `macos_permissions::can_hold_screen_recording`. So
 //! [`super::recognise_text_on_screen`] refuses with that reason rather than returning an empty
 //! string, which would read as "there was no text on screen".
@@ -64,13 +64,13 @@ impl Bitmap {
 
     fn to_cg_image(&self) -> Option<Retained<CGImage>> {
         // CoreGraphics keeps a reference to the data provider, which keeps the CFData, which owns
-        // its own copy of these bytes — so the image does not borrow `self`.
+        // its own copy of these bytes, so the image does not borrow `self`.
         let data = CFData::from_bytes(&self.pixels);
         let provider = CGDataProvider::with_cf_data(Some(&data))?;
         let space = CGColorSpace::new_device_gray()?;
 
         // SAFETY: the buffer length is checked against `width * height` by the caller, the row
-        // stride is exactly `width` for one byte per pixel, and `decode` is null — which the
+        // stride is exactly `width` for one byte per pixel, and `decode` is null, which the
         // function's own safety note permits.
         let image = unsafe {
             CGImage::new(
@@ -176,7 +176,7 @@ pub fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
     let space = CGColorSpace::new_device_gray().ok_or_else(|| "no greyscale space".to_string())?;
     let mut pixels = vec![0u8; width * height];
 
-    // SAFETY: the buffer is `width * height` bytes and the context is told exactly that — one byte
+    // SAFETY: the buffer is `width * height` bytes and the context is told exactly that: one byte
     // per pixel, a row stride of `width`, and eight bits per component. The context borrows the
     // buffer for as long as it lives, and it is dropped at the end of this function while `pixels`
     // is still owned here.
@@ -230,7 +230,7 @@ pub fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
 /// pane to open. Conflating them is the mistake `63f6f6d` was about.
 ///
 /// `CGWindowListCreateImage` is deprecated in favour of ScreenCaptureKit, and is used anyway: SCK is
-/// asynchronous, needs a delegate, and cannot be verified here either — so it would trade one
+/// asynchronous, needs a delegate, and cannot be verified here either, so it would trade one
 /// untested call for thirty.
 pub fn capture_screen() -> Result<Bitmap, ScreenCaptureRefusal> {
     if !notewise_macos_permissions::can_hold_screen_recording() {
@@ -241,7 +241,7 @@ pub fn capture_screen() -> Result<Bitmap, ScreenCaptureRefusal> {
         return Err(ScreenCaptureRefusal::GrantMissing);
     }
 
-    // `CGRectInfinite` — every display, whatever their arrangement.
+    // `CGRectInfinite`: every display, whatever their arrangement.
     let everything = CGRect::new(
         CGPoint::new(f64::MIN / 2.0, f64::MIN / 2.0),
         CGSize::new(f64::MAX, f64::MAX),
@@ -434,7 +434,7 @@ mod tests {
     /// The conversion, proven by a round trip: pixels in, a CoreGraphics image, pixels out.
     ///
     /// This is the half of screen capture that can be verified, and it is the half where the subtle
-    /// bugs live — row strides, colour spaces, an image drawn upside down.
+    /// bugs live: row strides, colour spaces, an image drawn upside down.
     #[test]
     fn a_bitmap_survives_a_round_trip_through_coregraphics() {
         let original = draw("HI", 10);
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(converted.height, original.height);
         assert!(converted.is_consistent());
 
-        // Not byte-for-byte: drawing goes through a rasteriser. What must survive is the content —
+        // Not byte-for-byte: drawing goes through a rasteriser. What must survive is the content:
         // the same ink in the same places, which is what recognition depends on.
         let ink_before = original.pixels.iter().filter(|p| **p < 0x80).count();
         let ink_after = converted.pixels.iter().filter(|p| **p < 0x80).count();

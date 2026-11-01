@@ -24,7 +24,7 @@ interface Props {
    * Stop capture from here.
    *
    * Passed only on the tabs where the floating dock is not on screen. Recording is the one
-   * thing that must always be stoppable in one press — being three tabs deep in a chat is no
+   * thing that must always be stoppable in one press: being three tabs deep in a chat is no
    * reason to have to go and find the button.
    */
   onStop?: () => void;
@@ -226,7 +226,7 @@ export function WorkspaceHeader({
  * The meeting title, renameable in place.
  *
  * A recording started from a hotkey keeps whatever the caller guessed before the meeting happened,
- * and until now that was permanent — `title` was set at `create` and never again.
+ * and until now that was permanent: `title` was set at `create` and never again.
  *
  * Empty is refused: an untitled meeting is unfindable, which is worse than a wrong title.
  */
@@ -266,7 +266,7 @@ function EditableTitle({
         title="Double-click, or focus and press Enter, to rename"
         onDoubleClick={() => setEditing(true)}
         // Reachable from the keyboard as well. A double-click was the only way in, so renaming a
-        // meeting — the one fix for a title guessed before it happened — needed a mouse.
+        // meeting, the one fix for a title guessed before it happened, needed a mouse.
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === "F2") {

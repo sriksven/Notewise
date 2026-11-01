@@ -127,7 +127,7 @@ download uncommon; keep it. Run the `_x64-setup.exe`, and if **Windows protected
 appears, choose **More info**, then **Run anyway**. It installs for your account only, with no
 administrator prompt.
 
-On Windows, recording is from the microphone only — system audio is not built there yet —
+On Windows, recording is from the microphone only (system audio is not built there yet),
 transcription runs on the processor, and the desktop assistant is not available.
 
 ## Quick start

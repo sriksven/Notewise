@@ -173,7 +173,7 @@ describe("serialize", () => {
 
   /**
    * Renumbered from position rather than preserving what was typed: a reordered list should
-   * read 1, 2, 3, and every Markdown renderer renumbers anyway — keeping the original digits
+   * read 1, 2, 3, and every Markdown renderer renumbers anyway: keeping the original digits
    * would make the file disagree with every view of it.
    */
   it("renumbers a numbered list from its position", () => {
@@ -213,7 +213,7 @@ describe("serialize", () => {
 describe("round-tripping", () => {
   /**
    * The invariant the editor rests on: whatever is on screen survives a save and a reload.
-   * `serialize(parse(x)) === x` is deliberately *not* claimed — `*` bullets become `-` — but
+   * `serialize(parse(x)) === x` is deliberately *not* claimed, `*` bullets become `-`, but
    * the block direction must be exact.
    */
   it("preserves blocks through a save and a load", () => {
@@ -247,7 +247,7 @@ describe("round-tripping", () => {
       newBlock("paragraph", "a # b"),
       newBlock("paragraph", "> not a quote because it is mid-line"),
     ];
-    // The third *will* re-read as a quote — a line starting with `>` is a quote by definition,
+    // The third *will* re-read as a quote: a line starting with `>` is a quote by definition,
     // and that is Markdown's rule rather than a bug in the parser.
     const reread = shape(parse(serialize(tricky)));
     expect(reread[0]).toEqual({ type: "paragraph", text: "3 - 2 = 1" });
@@ -365,7 +365,7 @@ describe("nesting", () => {
   });
 
   // Four-space indentation is the other common convention. It reads as two levels, then the
-  // skipped-level clamp brings it back to one — which is the shape its author meant.
+  // skipped-level clamp brings it back to one, which is the shape its author meant.
   it("accepts four-space and tab indentation", () => {
     expect(parse("- one\n    - two\n").map(depthOf)).toEqual([0, 1]);
     expect(parse("- one\n\t- two\n").map(depthOf)).toEqual([0, 1]);
@@ -515,7 +515,7 @@ describe("tables", () => {
     ]);
   });
 
-  // The alignment row is syntax, not content — treating it as a row would show `---` as data.
+  // The alignment row is syntax, not content: treating it as a row would show `---` as data.
   it("never returns the alignment row as data", () => {
     for (const row of tableRows(parse(`${md}\n`)[0])) {
       expect(row.join("")).not.toContain("---");
@@ -558,7 +558,7 @@ describe("images", () => {
 
 describe("canonical", () => {
   // The autosave compared the editor's output with the stored text, so any body this editor would
-  // write differently — a note made through the API, an agent's note, an empty new note — was
+  // write differently, a note made through the API, an agent's note, an empty new note, was
   // "changed" the moment it was opened, and saved: its Markdown rewritten and its date bumped.
   it("is what an untouched editor writes back, so opening a note is not an edit", () => {
     for (const stored of ["", "line one\nline two", "* starred bullet", "trailing   \n", "# Title\n\n- a\n- b\n"]) {

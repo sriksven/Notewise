@@ -10,7 +10,7 @@
 //!
 //! Not in the framing. In the child process: a server that writes a megabyte to stderr and blocks
 //! because nobody drained it, a server that ignores SIGTERM, a process left running after the app
-//! quits. Each of those is handled here on purpose rather than discovered later —
+//! quits. Each of those is handled here on purpose rather than discovered later;
 //! [`StdioTransport`] drains stderr in its own task and sets `kill_on_drop`.
 //!
 //! # Why a factory
@@ -32,7 +32,7 @@ use crate::{McpError, Result};
 
 /// Where a server is and how to reach it.
 ///
-/// Credentials — environment variables for a stdio server, headers for an HTTP one — arrive here
+/// Credentials (environment variables for a stdio server, headers for an HTTP one) arrive here
 /// already resolved. They are held in the keychain and the caller fetches them; nothing in this
 /// crate reads or writes a credential store, and nothing persists these values.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,7 +232,7 @@ impl StdioTransport {
             detail: "the child has no stdout".into(),
         })?;
 
-        // Drain stderr into the log. This is not for diagnostics — it is what stops a server that
+        // Drain stderr into the log. This is not for diagnostics; it is what stops a server that
         // logs verbosely from filling the pipe buffer and blocking forever on its next write,
         // which looks exactly like a hung tool call.
         if let Some(stderr) = child.stderr.take() {
@@ -287,7 +287,7 @@ impl Transport for StdioTransport {
         self.write(&message).await?;
 
         // Read until the matching reply. Log notifications and other ids are skipped rather than
-        // returned — a read loop that took the first line would hand a log entry back as a result.
+        // returned: a read loop that took the first line would hand a log entry back as a result.
         loop {
             let line = self
                 .stdout

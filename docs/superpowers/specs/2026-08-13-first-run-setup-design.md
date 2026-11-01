@@ -1,4 +1,4 @@
-# Notewise — First-Run Setup Design
+# Notewise - First-Run Setup Design
 
 **Date:** 2026-08-13
 **Status:** Approved, awaiting implementation
@@ -58,8 +58,8 @@ deliberately not reproduced.
 microphone access from `inputDevices.length > 0`; devices enumerate fine with the grant
 denied. `check_screen_recording_permission()` has the body `true`. `trigger_system_audio_permission`
 carries the comment *"even with permission denied, tap creation may succeed but audio will be
-silence."* The Permissions screen can show two green checks on a machine that records nothing
-— the exact failure the screen exists to prevent. §6 specifies probes that touch the thing
+silence."* The Permissions screen can show two green checks on a machine that records nothing,
+the exact failure the screen exists to prevent. §6 specifies probes that touch the thing
 being probed.
 
 **Its completion flag outranks reality.** `"Trust the completed status - don't revert based on
@@ -90,7 +90,7 @@ the first unsatisfied step" would skip it entirely. The rule is: **while setup i
 the wizard always opens on Welcome, and Next from Welcome jumps to the first unsatisfied
 step.** A user who quits mid-download therefore sees Welcome once more on relaunch and is one
 click from where they left off. Tracking "has seen Welcome" would mean persisting a step
-index, which is the decision that produced Meetily's races (§3) — a redundant click is the
+index, which is the decision that produced Meetily's races (§3); a redundant click is the
 cheaper trade.
 
 No step index is stored. No per-model status is stored. There is no auto-save effect, so
@@ -118,7 +118,7 @@ CREATE TABLE app_settings (
 
 A generic key/value table rather than an `onboarding` table: this is app-level configuration,
 not a domain object, and it has no edges. Accessed through a new
-`repositories/setting.rs` — `get(key)`, `set(key, value)`, `delete(key)` — because SQL lives
+`repositories/setting.rs` (`get(key)`, `set(key, value)`, `delete(key)`) because SQL lives
 only in `storage` (rule 3).
 
 `SUPPORTED_VERSION` derives from `MIGRATIONS.len()`, so it advances on its own.
@@ -165,7 +165,7 @@ The readiness snapshot. The engine decides policy; the frontend renders.
 ```
 
 `status` is one of `not_requested | granted | denied | unavailable`. `not_requested` is
-stated as such rather than guessed — nothing prompts on mount.
+stated as such rather than guessed; nothing prompts on mount.
 
 This route never prompts. It calls `permissions::status`, never `permissions::request`; a
 `GET` that raised a TCC dialog would fire before the user pressed anything. The backend probe
@@ -184,7 +184,7 @@ Idempotent: completing twice leaves the first timestamp in place.
 `kind` ∈ `microphone | system_audio`. Runs the probe in §6 and returns the same per-kind
 object as `GET /v1/setup`. This is the "Enable" button's request.
 
-Blocking work runs on `spawn_blocking` — opening an audio device is not async.
+Blocking work runs on `spawn_blocking`; opening an audio device is not async.
 
 ---
 
@@ -202,7 +202,7 @@ pub fn request(kind: CaptureKind) -> PermissionStatus;  // may prompt
 
 **Microphone.** `request` opens the default input stream through `cpal` and drops it
 immediately. That is what triggers the TCC prompt on first call and what returns a permission
-error when denied — `microphone.rs:292-294` already performs exactly this error-string
+error when denied: `microphone.rs:292-294` already performs exactly this error-string
 mapping, which moves into the new module so both callers share one definition. `status`
 returns `NotRequested` until a probe has run; it does not open a device, because doing so on
 mount would prompt the user before they pressed anything.
@@ -211,7 +211,7 @@ mount would prompt the user before they pressed anything.
 backend whose `unavailable_reason()` is `Some`, yields `Unavailable(reason)`. When a usable
 backend exists, `request` attempts to open it and maps the outcome as above.
 
-At the time of writing `unavailable_reason()` returns `Some` for **every** variant — the
+At the time of writing `unavailable_reason()` returns `Some` for **every** variant; the
 non-ScreenCaptureKit arm answers `"this backend is not implemented yet"`. System audio is
 therefore never required on any build today, and R3's gate is exercised from the first commit
 rather than being dead code awaiting a signed bundle. That is the correct behaviour, not a
@@ -244,7 +244,7 @@ The HTTP call lives inside `ai-router` (rule 1). No other crate gains a provider
 
 A backend is `satisfied` when a kind and model are resolved and `probe()` succeeds. An
 unreachable Ollama is reported with `reachable: false` and a `detail` string; the Backend step
-then offers the same two choices it always offers — local, or bring your own key — with the
+then offers the same two choices it always offers (local, or bring your own key) with the
 failure stated rather than hidden.
 
 ---
@@ -255,15 +255,15 @@ failure stated rather than hidden.
 
 ```
 src/onboarding/
-  SetupGate.tsx          — renders the flow or the children
-  SetupFlow.tsx          — step routing from derived readiness
+  SetupGate.tsx          - renders the flow or the children
+  SetupFlow.tsx          - step routing from derived readiness
   Stepper.tsx
   steps/WelcomeStep.tsx
   steps/ModelStep.tsx
   steps/BackendStep.tsx
   steps/PermissionsStep.tsx
   steps/PermissionRow.tsx
-  readiness.ts           — pure: snapshot → step list, current step, can-finish
+  readiness.ts           - pure: snapshot → step list, current step, can-finish
 ```
 
 `App.tsx` is 409 lines and already carries recording, transcript polling, questions,
@@ -275,20 +275,20 @@ summarize, import, and export. It gains a wrapper and nothing else:
 </SetupGate>
 ```
 
-`readiness.ts` is pure and holds all the branching — which steps exist on this machine, which
+`readiness.ts` is pure and holds all the branching: which steps exist on this machine, which
 are required, which is current, whether Finish enables. It is the only piece with logic worth
 testing directly, and it has no React or fetch dependency.
 
 ### 8.2 The four screens
 
-Centred column, existing Tailwind tokens, `lucide-react` icons — consistent with
+Centred column, existing Tailwind tokens, `lucide-react` icons, consistent with
 `SettingsView`. A stepper across the top from step 2 onward.
 
 1. **Welcome.** Product name, one line, three claims (stays on device / meetings become notes,
    tickets, email / works offline). One primary button.
 2. **Model.** The recommended model with size and RAM, a progress bar during download showing
    transferred bytes, total, rate, and percent. Reuses the engine's existing SSE stream.
-3. **Backend.** Two cards — the detected local backend with a reachability dot, and bring your
+3. **Backend.** Two cards: the detected local backend with a reachability dot, and bring your
    own key with the environment variables to set. Choosing is the requirement; downloading is
    not offered, because the app does not install Ollama.
 4. **Permissions.** One row per capability: icon, name, one-line rationale, and an Enable
@@ -301,7 +301,7 @@ Finish is disabled until every required step is satisfied, and calls `POST /v1/s
 
 `SetupGate` fetches `GET /v1/setup` once on mount; it does not poll. When `completed_at` is
 set but a required step has regressed, the main app shows a dismissible banner naming the
-specific problem and linking to the matching Settings section. The wizard does not reappear — a restarted Ollama
+specific problem and linking to the matching Settings section. The wizard does not reappear; a restarted Ollama
 must not demote an established user to a welcome screen (R6).
 
 ---
@@ -332,13 +332,13 @@ No unrelated refactoring.
 
 ## 10. Testing
 
-### 10.1 Rust — all headless
+### 10.1 Rust - all headless
 
 | Area | Test |
 |---|---|
 | `storage` | `app_settings` round-trip; overwrite; absent key; migration advances `SUPPORTED_VERSION` |
 | `api-server` | `GET /v1/setup` shape; `complete` writes the timestamp; `complete` is idempotent; `complete` returns 409 when a required step is unsatisfied |
-| `api-server` | `list_models` honours `with_model_dir` — a regression test for §9 |
+| `api-server` | `list_models` honours `with_model_dir` - a regression test for §9 |
 | `audio-capture` | `Unavailable` carries the reason when no backend exists; permission-error strings map to `Denied` |
 | `ai-router` | default `probe()` returns `Ok`; Ollama `probe()` maps a refused connection to an error |
 

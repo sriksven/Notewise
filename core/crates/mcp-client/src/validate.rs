@@ -8,7 +8,7 @@
 //! user was never asked about.
 //!
 //! A validation failure goes back to the model as an observation, the same recovery path the agent
-//! already uses for an unparseable action — the model gets to correct itself rather than the run
+//! already uses for an unparseable action; the model gets to correct itself rather than the run
 //! dying.
 //!
 //! # Why unknown fields are rejected rather than dropped
@@ -19,7 +19,7 @@
 //! # What this is not
 //!
 //! Not a complete JSON Schema implementation. It covers the subset MCP servers actually publish for
-//! tool arguments — an object with typed properties, a required list, and enums — and says so when
+//! tool arguments (an object with typed properties, a required list, and enums) and says so when
 //! it meets something it does not understand rather than passing it as valid. Claiming to validate
 //! and not doing so is worse than declining.
 
@@ -84,7 +84,7 @@ pub fn validate(schema: &Value, arguments: &Value) -> Vec<Invalid> {
         return vec![Invalid::NotAnObject];
     };
 
-    // A tool with no schema, or an empty one, accepts anything — that is the server's choice to
+    // A tool with no schema, or an empty one, accepts anything; that is the server's choice to
     // publish and not this validator's to second-guess.
     let Some(schema_obj) = schema.as_object() else {
         return Vec::new();

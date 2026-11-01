@@ -9,7 +9,7 @@
 //! # Why the pipeline gets its own database connection
 //!
 //! [`crate::AppState`] keeps the database behind a mutex. A recording lasts as long as the
-//! meeting, and `Pipeline::run` borrows the database for its whole duration — so running it
+//! meeting, and `Pipeline::run` borrows the database for its whole duration, so running it
 //! under that mutex would block every read for an hour. Instead the recording thread opens a
 //! second connection to the same file. SQLite in WAL mode supports one writer concurrent with
 //! many readers, which is exactly this shape.
@@ -27,7 +27,7 @@ use thiserror::Error;
 ///
 /// Capture needs the `record` feature (platform audio SDKs) and transcription needs `whisper`
 /// (a cmake build of whisper.cpp). Both are off by default so a plain `cargo build` stays
-/// dependency-light, which means a running engine has to be able to *say* what it can do —
+/// dependency-light, which means a running engine has to be able to *say* what it can do:
 /// see the `can_record` field on `/health`. A UI that assumed capture worked would present a
 /// button that silently did nothing.
 pub const SUPPORTED: bool = cfg!(all(feature = "record", feature = "whisper"));
@@ -163,7 +163,7 @@ impl RecordingManager {
     /// Begin recording, creating the meeting as part of the same call.
     ///
     /// Creating the meeting here rather than making the client do it first means there is no
-    /// window in which a meeting exists but nothing is capturing into it — which is precisely
+    /// window in which a meeting exists but nothing is capturing into it, which is precisely
     /// the state a crashed client would otherwise leave behind.
     #[allow(unused_variables)]
     pub async fn start(
@@ -341,11 +341,11 @@ mod imp {
         let store = ModelStore::new(&model_dir);
 
         // Refuse rather than download. A download is minutes of network on a model the user
-        // may not have chosen, and the meeting they are trying to record is happening now —
+        // may not have chosen, and the meeting they are trying to record is happening now:
         // silently going quiet for that long is worse than a clear error with a fix.
         if !store.is_available(&model) {
             return Err(RecordingError::Failed(format!(
-                "the '{}' model is not installed — download it first \
+                "the '{}' model is not installed. Download it first \
                  (POST /v1/models/{}/download)",
                 model.name, model.name
             )));
@@ -373,7 +373,7 @@ mod imp {
         //
         // Deliberately not fatal. System audio needs a Screen Recording grant that many users
         // will not have given, and a microphone-only recording is the thing this product did
-        // yesterday — refusing to record at all because the *better* mode is unavailable would
+        // yesterday: refusing to record at all because the *better* mode is unavailable would
         // be a regression dressed up as a feature.
         let system_source = if request.capture_system_audio {
             match open_system_audio(&capture, capture_origin) {
@@ -540,7 +540,7 @@ mod imp {
         let store = ModelStore::new(&model_dir);
         if !store.is_available(&model) {
             return Err(RecordingError::Failed(format!(
-                "the '{}' model is not installed — download it first",
+                "the '{}' model is not installed. Download it first",
                 model.name
             )));
         }
@@ -588,7 +588,7 @@ mod imp {
 
                     // An import is the case acoustic separation exists for: one mono stream, no
                     // platform timeline, so who spoke is only recoverable from the voices. Off
-                    // unless the user turned it on and the model is present — `diarizer_for_import`
+                    // unless the user turned it on and the model is present: `diarizer_for_import`
                     // returns `None` for every ordinary reason so the import still goes ahead.
                     let mut pipeline = match crate::diarization::diarizer_for_import(&db, &store) {
                         Some((diarizer, retain_ms)) => {

@@ -43,7 +43,7 @@ interface Props {
   blocks: Block[];
   onChange: (blocks: Block[]) => void;
   placeholder?: string;
-  /** Focus the first block on mount — for a note the user just created. */
+  /** Focus the first block on mount, for a note the user just created. */
   autoFocus?: boolean;
 }
 
@@ -87,7 +87,7 @@ const MENU: Array<{ type: BlockType; label: string; hint: string; Icon: typeof T
  * stays Markdown a human can read.
  *
  * ⌘B, ⌘I, ⌘E and ⌘⇧X toggle marks over the selection, and a toolbar appears when there is
- * one. Both go through `lib/inline.ts`, which toggles rather than only wrapping — an editor
+ * one. Both go through `lib/inline.ts`, which toggles rather than only wrapping: an editor
  * where the same key only ever adds markers accumulates `****bold****`.
  *
  * # Focus
@@ -100,7 +100,7 @@ const MENU: Array<{ type: BlockType; label: string; hint: string; Icon: typeof T
 export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props) {
   /** Where to put the caret after the next render, if anywhere. */
   const pending = useRef<{ id: string; offset: number | "end" } | null>(null);
-  /** Where to put a *range* after the next render — formatting keeps the words selected. */
+  /** Where to put a *range* after the next render: formatting keeps the words selected. */
   const pendingSelection = useRef<{ id: string; start: number; end: number } | null>(null);
   const fields = useRef(new Map<string, HTMLTextAreaElement>());
   /** Which block has the slash menu open. */
@@ -201,7 +201,7 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
     setMenuFor(null);
 
     // Structural blocks have no editable line of their own, so each is inserted whole and
-    // followed by an empty paragraph — otherwise choosing one from the menu leaves the caret
+    // followed by an empty paragraph; otherwise choosing one from the menu leaves the caret
     // nowhere and typing stops.
     if (isStructural(type)) {
       const made =
@@ -252,7 +252,7 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
   /**
    * Backspace at the very start of a block.
    *
-   * A styled block loses its style first — one press turns a heading back into a paragraph,
+   * A styled block loses its style first: one press turns a heading back into a paragraph,
    * which is how a mistyped `# ` is undone. A paragraph merges into the block above, with the
    * caret left exactly where the join happened.
    */
@@ -287,7 +287,7 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
    * Toggle a mark over the textarea's current selection.
    *
    * The selection is restored afterwards through the same `pending` mechanism the structural
-   * operations use — an editor that drops your selection on every ⌘B is unusable.
+   * operations use: an editor that drops your selection on every ⌘B is unusable.
    */
   const applyMark = (index: number, field: HTMLTextAreaElement, mark: Mark) => {
     const block = blocks[index];
@@ -351,18 +351,18 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
     }
 
     // Tab nests a list item under the one above it; Shift+Tab brings it back out. Only for
-    // list items — everywhere else Tab stays the browser's focus key, which is what a keyboard
+    // list items; everywhere else Tab stays the browser's focus key, which is what a keyboard
     // user needs to leave the editor at all.
     if (event.key === "Tab" && isListItem(block.type)) {
       const next = event.shiftKey ? outdent(blocks, index) : indent(blocks, index);
-      // Unchanged means the move was illegal — the first item of a list, or already at the
+      // Unchanged means the move was illegal: the first item of a list, or already at the
       // limit. Let Tab fall through to the browser rather than swallowing it silently.
       if (next === blocks) return;
 
       event.preventDefault();
       onChange(next);
-      // The row is replaced by a new object, so focus and caret have to be restored explicitly
-      // — otherwise nesting a line drops the cursor and Tab cannot be pressed twice.
+      // The row is replaced by a new object, so focus and caret have to be restored explicitly;
+      // otherwise nesting a line drops the cursor and Tab cannot be pressed twice.
       pending.current = { id: block.id, offset: caret };
       return;
     }
@@ -381,7 +381,7 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
       return;
     }
 
-    // Delete at the very end pulls the next block up — the mirror of backspace.
+    // Delete at the very end pulls the next block up, the mirror of backspace.
     if (
       event.key === "Delete" &&
       caret === block.text.length &&
@@ -469,7 +469,7 @@ export function BlockEditor({ blocks, onChange, placeholder, autoFocus }: Props)
  * Sources an `<img>` in this window can actually fetch.
  *
  * Notes are stored as Markdown and may be edited elsewhere, so a body can easily arrive with
- * `![x](/Users/me/shot.png)` in it — written by someone in Obsidian, where that works. It cannot
+ * `![x](/Users/me/shot.png)` in it, written by someone in Obsidian, where that works. It cannot
  * work here, and saying so is better than rendering nothing.
  */
 const LOADABLE = /^(https?:|data:|blob:)/i;
@@ -487,7 +487,7 @@ const STYLES: Record<BlockType, string> = {
   code: "font-mono text-[12.5px] leading-relaxed",
   divider: "",
   // Both are drawn by the editor rather than shown as an editable line, so they have no text
-  // style of their own — see `isStructural`.
+  // style of their own; see `isStructural`.
   table: "",
   image: "",
 };
@@ -619,7 +619,7 @@ function Row({
             src={src}
             alt={alt}
             // A source that will not load must say so. The page is served over http, so a bare
-            // filesystem path resolves against that origin and 404s — silently, as a blank gap,
+            // filesystem path resolves against that origin and 404s, silently, as a blank gap,
             // which reads as the editor being broken rather than the path being unusable.
             onLoad={(event) => event.currentTarget.classList.remove("hidden")}
             onError={(event) => event.currentTarget.classList.add("hidden")}
@@ -632,7 +632,7 @@ function Row({
         )}
         {src && !LOADABLE.test(src) && (
           <p className="mt-1.5 rounded-lg border border-hairline px-3 py-2 text-[12px] leading-relaxed text-ink-muted">
-            A filesystem path cannot be shown here — the window is served over http, so{" "}
+            A filesystem path cannot be shown here: the window is served over http, so{" "}
             <code className="text-ink">{src}</code> is looked up on that server rather than on
             disk. Use an <code className="text-ink">https://</code> address, or a{" "}
             <code className="text-ink">data:</code> URL.
@@ -745,7 +745,7 @@ function Row({
                         // accessibility tree, leaving an unfocused formatted line with
                         // nothing a screen reader could reach or edit.
                         //
-                        // Transparent keeps it focusable, announced, and hit-testable — so a
+                        // Transparent keeps it focusable, announced, and hit-testable, so a
                         // click lands the caret exactly where the browser would have put it,
                         // with no coordinate arithmetic here.
                         rendered ? "absolute inset-0 text-transparent caret-transparent" : ""
@@ -753,7 +753,7 @@ function Row({
         />
 
         {/* The rendered view. Only when this block does not have the caret and actually
-            contains formatting — otherwise it is the same pixels with a chance of drifting. */}
+            contains formatting; otherwise it is the same pixels with a chance of drifting. */}
         {rendered && (
           <div
             // Hidden from assistive tech: the transparent textarea above carries the same

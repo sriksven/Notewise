@@ -1,4 +1,4 @@
-# Memory and personalization — design
+# Memory and personalization - design
 
 **Date:** 2026-08-18
 **Status:** draft, awaiting review
@@ -10,7 +10,7 @@ meetings.
 ## Why this exists
 
 Every model call in Notewise starts from nothing. The user's role, the vocabulary their team uses,
-which project a recurring meeting belongs to, how they like summaries structured — none of it
+which project a recurring meeting belongs to, how they like summaries structured; none of it
 survives from one call to the next. A user who told the app last month that "the platform team"
 means four specific people has to tell it again, implicitly, every time.
 
@@ -42,7 +42,7 @@ That is also exactly why this spec is mostly about restraint.
 
 ## Decisions
 
-### P1 — Off by default, and the manual path works without ever turning it on
+### P1 - Off by default, and the manual path works without ever turning it on
 
 Automatic extraction is disabled on a fresh install. Manual memories work regardless.
 
@@ -53,7 +53,7 @@ that reads every transcript to build a durable profile belongs in that category,
 on would be inconsistent with a product whose central claim is that the user decides what happens
 to their recordings.
 
-### P2 — Memories are about the user, never about third parties
+### P2 - Memories are about the user, never about third parties
 
 An extracted memory may record the user's own role, preferences, projects, vocabulary, and working
 patterns. It may not record claims about other people.
@@ -64,20 +64,20 @@ storing them as durable context injected into future prompts would be indefensib
 describe never consented, cannot see them, cannot correct them, and would be described that way in
 every future summary the model writes.
 
-Attendee *identity* — that a person exists, their name and email — is already handled by the
+Attendee *identity*, that a person exists, their name and email, is already handled by the
 `people` table via Spec 1's calendar import, which is a directory rather than a dossier. The
 distinction this decision draws is between knowing who someone is and holding opinions about them.
 
 The extraction prompt forbids third-party claims explicitly, and the reflector rejects candidates
-naming a person other than the user. That is mitigation, not a guarantee — which is why P3 also
+naming a person other than the user. That is mitigation, not a guarantee, which is why P3 also
 makes every memory visible and deletable.
 
-**Rejected — extracting team facts because they are useful.** They are useful. "Priya owns billing"
+**Rejected: extracting team facts because they are useful.** They are useful. "Priya owns billing"
 would genuinely improve action-item assignment. It is also one sentence away from "Priya is
 struggling with billing," and no prompt reliably separates those. Assignment already has a better
 mechanism in `set_action_item_person`.
 
-### P3 — Every memory is visible, editable, and deletable, always
+### P3 - Every memory is visible, editable, and deletable, always
 
 No hidden memories, no derived state the user cannot inspect. The list shows every memory, its
 scope, and when it was added.
@@ -86,7 +86,7 @@ A durable fact silently influencing every future answer, that the user cannot se
 mode that makes personalization feel like surveillance. It is also the only practical remedy when
 P2's prompt-level guard misses something.
 
-### P4 — Two scopes with hard caps: global and project
+### P4 - Two scopes with hard caps: global and project
 
 Global memories apply everywhere and are capped at 5. Project memories apply to meetings in that
 project and are capped at 20 per project. The `Workspace → Project → Meeting` hierarchy already
@@ -100,34 +100,34 @@ cap forces a choice, and forcing a choice is the point.
 Injection sends all global memories plus the most relevant project memories, ranked by the same
 cosine similarity `embed.rs` already provides, with a fixed ceiling.
 
-### P5 — Observer and reflector are two passes, and the reflector is pure
+### P5 - Observer and reflector are two passes, and the reflector is pure
 
 **Observer** reads recent, unprocessed meetings and proposes at most three candidate facts per run.
 **Reflector** compares candidates against existing memories, decides scope, rejects duplicates and
 third-party claims, and consolidates rather than accumulating.
 
-Splitting them means the reflector's rules — dedup, scope choice, cap enforcement, third-party
-rejection — are a pure function over candidates and existing memories, testable exhaustively with no
+Splitting them means the reflector's rules (dedup, scope choice, cap enforcement, third-party
+rejection) are a pure function over candidates and existing memories, testable exhaustively with no
 model. That is where the decisions that can be wrong live, and it follows the same split
 `clarify.rs` uses: the model call in one place, the judgement about whether to act in another.
 
-### P6 — Extraction runs as a scheduled job, gated on idleness
+### P6 - Extraction runs as a scheduled job, gated on idleness
 
 Extraction is a Spec 7 job on a default schedule of every few hours, and it does nothing unless
 there are enough unprocessed meetings and the app has been idle for a while.
 
 Building a second scheduler for this would duplicate Spec 7 exactly. The idle gate exists because
-extraction competes with the user for a local model — running it during a live meeting would slow
+extraction competes with the user for a local model; running it during a live meeting would slow
 transcription to save a fact nobody asked for.
 
 If Spec 7 is not implemented, extraction runs on demand from settings, and the automatic path
 simply does not exist yet. This spec does not require Spec 7 to be useful.
 
-### P7 — Memory never leaves the machine except with the prompt it is attached to
+### P7 - Memory never leaves the machine except with the prompt it is attached to
 
 Memories are stored locally and are subject to the same `RedactionPolicy` as anything else in a
-prompt going to a remote backend. A memory whose text matches a `redact::Category` — an api key, a
-card number, a phone number — is rejected at write time rather than redacted at send time.
+prompt going to a remote backend. A memory whose text matches a `redact::Category` (an api key, a
+card number, a phone number) is rejected at write time rather than redacted at send time.
 
 Storing a secret as a durable fact and then relying on redaction to mask it on every future call is
 one missed code path away from leaking it. Refusing to store it has no such failure mode.
@@ -180,7 +180,7 @@ CREATE TABLE memory_extraction_state (
 );
 ```
 
-The `CHECK` makes the scope/project pairing a schema invariant rather than a convention — a global
+The `CHECK` makes the scope/project pairing a schema invariant rather than a convention: a global
 memory with a project id, or a project memory without one, cannot exist.
 
 `source_meeting_id` is `ON DELETE SET NULL`: a memory outlives the meeting that produced it, but the
@@ -189,7 +189,7 @@ think that."
 
 `memory_extraction_state` is a separate table rather than a column on `meetings` because it is
 derived state about a background pass, and `meetings` should not grow a column every time something
-processes it — the same reasoning the v8 migration applies to embeddings being derived data.
+processes it, the same reasoning the v8 migration applies to embeddings being derived data.
 
 ## Data flow
 
@@ -267,7 +267,7 @@ The reflector is pure, so nearly everything that can be wrong is testable with n
 - **P2 is enforced by a prompt plus a heuristic reflector check, and both can miss.** A memory that
   slips through is visible and deletable by P3, which is the backstop, not a fix. This is the
   single most important risk in this spec.
-- **"Is this about the user?" is genuinely ambiguous** for facts like "I run the platform standup" —
+- **"Is this about the user?" is genuinely ambiguous** for facts like "I run the platform standup",
   which is about the user and implies things about others. The reflector will get some of these
   wrong in both directions.
 - **Caps will frustrate.** Five global memories is very few, and the alternative is degrading every

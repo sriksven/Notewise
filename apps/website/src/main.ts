@@ -114,7 +114,7 @@ const FEATURES: Array<{ icon: string; title: string; body: string }> = [
  * than someone who was told here.
  */
 /**
- * `whenWindows` is the limit as it reads once a release carries the Windows installer — see
+ * `whenWindows` is the limit as it reads once a release carries the Windows installer. See
  * `announceWindows` in `downloads.ts`, which swaps it in only then.
  */
 const LIMITATIONS: Array<{ title: string; body: string; whenWindows?: { title: string; body: string } }> = [

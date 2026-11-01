@@ -23,7 +23,7 @@ export function useModelDownload(onFinished: () => void | Promise<void>): ModelD
   const [error, setError] = useState<string | null>(null);
 
   // Held in a ref so the mount effect below can call the latest callback without listing it
-  // as a dependency — depending on it would re-run the effect on every parent render and
+  // as a dependency: depending on it would re-run the effect on every parent render and
   // open a second EventSource onto the same download.
   const finished = useRef(onFinished);
   finished.current = onFinished;
@@ -61,7 +61,7 @@ export function useModelDownload(onFinished: () => void | Promise<void>): ModelD
     }
   };
 
-  // Recover a download already running when this mounted — the engine owns it, so navigating
+  // Recover a download already running when this mounted: the engine owns it, so navigating
   // away and back must not lose the progress bar.
   useEffect(() => {
     let cancel: (() => void) | undefined;
@@ -70,7 +70,7 @@ export function useModelDownload(onFinished: () => void | Promise<void>): ModelD
       .downloads()
       .then((states) => {
         // Transcription models only. The engine tracks speaker-model downloads in the same
-        // registry, and `watchDownload` streams from `/v1/models/:name/download` — which does not
+        // registry, and `watchDownload` streams from `/v1/models/:name/download`, which does not
         // know those names and answered 400 for each one.
         const running = states.find(
           (s) => s.status === "downloading" && s.kind === "transcription",

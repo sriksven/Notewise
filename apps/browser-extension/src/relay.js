@@ -4,16 +4,16 @@
  * # Why the page cannot simply fetch
  *
  * A content script's requests are the page's requests. Chrome attributes them to the page's origin
- * — `https://meet.google.com` — and applies that origin's rules, not the extension's: the
+ * (`https://meet.google.com`) and applies that origin's rules, not the extension's: the
  * `host_permissions` in the manifest do not apply to them. Two rules then stop a fetch to
  * `http://127.0.0.1:47821` outright. Local Network Access refuses a public page's request to the
  * loopback address space ("Permission was denied for this request to access the `loopback` address
- * space"), and CORS would refuse the answer anyway, because the engine sends no CORS headers — on
+ * space"), and CORS would refuse the answer anyway, because the engine sends no CORS headers, on
  * purpose, since permissive CORS on an unauthenticated loopback API would let any page read the
  * user's meetings.
  *
  * So the extension did nothing at all on a real meeting page. Every probe failed, every failure
- * was swallowed as "the app is not running", and nothing reached the engine — while the unit tests,
+ * was swallowed as "the app is not running", and nothing reached the engine, while the unit tests,
  * which hand `engine.js` a fake `fetch`, stayed green.
  *
  * The service worker runs on the extension's own origin, where `host_permissions` do apply. It
@@ -23,7 +23,7 @@
  *
  * Exactly the three things the page side needs, each with its arguments checked: say whether an
  * engine is recording, announce a join, and post speaker events. The last takes the engine's origin
- * from the caller — the worker may have been stopped and restarted since it found it — and so it
+ * from the caller (the worker may have been stopped and restarted since it found it) and so it
  * refuses any origin that is not one of the loopback ports in the manifest. Whatever the page side
  * sends, the worker posts to loopback or nowhere.
  */
@@ -47,8 +47,8 @@ const isId = (value) =>
 /**
  * The page-side half: the three engine calls `session.js` makes, carried by `send`.
  *
- * Each call settles to the same fallback the direct version produced when nobody was listening —
- * `null` or `false` — when the worker cannot be reached. That happens for an ordinary reason: an
+ * Each call settles to the same fallback the direct version produced when nobody was listening (
+ * `null` or `false`) when the worker cannot be reached. That happens for an ordinary reason: an
  * extension that is reloaded or updated leaves its old content scripts running on open pages, and
  * every message they send throws "Extension context invalidated". That is the same situation as the
  * app not running, and a meeting page must not fill its console over it.
@@ -82,7 +82,7 @@ export function engineViaWorker(send) {
 /**
  * The worker-side half: answer one message from a content script.
  *
- * Returns a promise of the answer, or of `null` for anything it will not do. Never rejects — a
+ * Returns a promise of the answer, or of `null` for anything it will not do. Never rejects: a
  * failed request is reported the same way an absent engine is, which is how the direct version
  * behaved too.
  *
@@ -98,8 +98,8 @@ export function workerHandler(engine) {
   const allowed = new Set(engine.origins);
 
   return async (message, sender) => {
-    // `onMessage` only hears this extension, but it hears all of it. Only a content script — a
-    // sender with a tab — is a page asking, and nothing else in this extension has a reason to.
+    // `onMessage` only hears this extension, but it hears all of it. Only a content script (a
+    // sender with a tab) is a page asking, and nothing else in this extension has a reason to.
     if (!sender || sender.id !== engine.selfId || !sender.tab) return null;
     if (!message || typeof message !== "object") return null;
 

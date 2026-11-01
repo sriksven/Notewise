@@ -1,6 +1,6 @@
 # Hosted inference
 
-> **Status: scaffold.** BSL 1.1 — see [LICENSE-CLOUD.md](../../LICENSE-CLOUD.md).
+> **Status: scaffold.** BSL 1.1. See [LICENSE-CLOUD.md](../../LICENSE-CLOUD.md).
 
 STT and LLM endpoints for users without local compute.
 

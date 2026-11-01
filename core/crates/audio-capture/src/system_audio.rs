@@ -3,7 +3,7 @@
 //! # What this unlocks
 //!
 //! Everything the machine plays: the other people on a video call. Captured separately from
-//! the microphone, it answers "who said this" without a model — the microphone is the person
+//! the microphone, it answers "who said this" without a model: the microphone is the person
 //! at this desk, the system tap is everyone else. See `notewise_recorder::ChannelPipeline` for
 //! what consumes it.
 //!
@@ -11,7 +11,7 @@
 //!
 //! macOS has no public microphone-style API for recording output. Historically this needed a
 //! kernel extension or a virtual audio device the user installs by hand. Since macOS 13,
-//! ScreenCaptureKit will deliver system audio on a stream — so the framework named for screen
+//! ScreenCaptureKit will deliver system audio on a stream, so the framework named for screen
 //! recording is, on this platform, the supported way to record sound.
 //!
 //! That inheritance is the reason for two things below that otherwise look wrong: the stream
@@ -52,7 +52,7 @@ pub struct SystemAudioSource {
     format: AudioFormat,
     stopped: Arc<AtomicBool>,
 
-    /// Received audio, re-cut into frames that keep time with the wall clock — filled with
+    /// Received audio, re-cut into frames that keep time with the wall clock, filled with
     /// silence where ScreenCaptureKit delivered nothing because nothing was playing.
     paced: PacedStream,
     /// Time zero for this source's timestamps. See [`SystemAudioSource::with_clock_origin`].
@@ -164,7 +164,7 @@ impl SystemAudioSource {
     /// Count this source's time from `origin` rather than from when it opened.
     ///
     /// A call is recorded as two channels, and the microphone opens first. Starting this clock
-    /// when the tap opened — a few hundred milliseconds later — would put everything the far end
+    /// when the tap opened (a few hundred milliseconds later) would put everything the far end
     /// said that much early against the microphone and against the meeting's start. From the
     /// microphone's origin, the time before the tap opened is silence on this channel, which is
     /// what it was.
@@ -193,14 +193,14 @@ impl AudioSource for SystemAudioSource {
     fn next_frame(&mut self) -> Result<Option<AudioFrame>> {
         // A silent machine produces no callbacks at all, unlike a microphone, which always
         // delivers room tone. This used to wait half a second for them and then hand back an
-        // empty frame — which stalled the microphone it is read alongside, and stopped this
+        // empty frame, which stalled the microphone it is read alongside, and stopped this
         // channel's clock while real time moved on. The paced stream fills that gap with silence
         // once it is overdue, so a read waits about a frame, as a microphone's does.
         loop {
             self.drain();
 
             if self.stopped.load(Ordering::Relaxed) {
-                // Return the tail rather than discarding it — real audio only, then the end.
+                // Return the tail rather than discarding it: real audio only, then the end.
                 return Ok(self
                     .paced
                     .rest(self.samples_per_frame)
@@ -267,7 +267,7 @@ mod tests {
         source.stop().expect("stop");
     }
 
-    /// Without the grant, opening must fail with a message naming the permission — not return
+    /// Without the grant, opening must fail with a message naming the permission, not return
     /// a source that silently produces nothing for the length of a meeting.
     #[test]
     #[ignore = "outcome depends on whether this machine has already granted Screen Recording"]

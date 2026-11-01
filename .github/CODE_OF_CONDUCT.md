@@ -35,11 +35,11 @@ Maintainers are obligated to respect the privacy and security of the reporter.
 
 Maintainers will follow these guidelines in determining consequences:
 
-1. **Correction** — a private written warning explaining the violation.
-2. **Warning** — a warning with consequences for continued behavior, including a period of
+1. **Correction**: a private written warning explaining the violation.
+2. **Warning**: a warning with consequences for continued behavior, including a period of
    no interaction with those involved.
-3. **Temporary ban** — a temporary ban from any sort of public interaction with the community.
-4. **Permanent ban** — a permanent ban from public interaction within the community.
+3. **Temporary ban**: a temporary ban from any sort of public interaction with the community.
+4. **Permanent ban**: a permanent ban from public interaction within the community.
 
 ## Attribution
 

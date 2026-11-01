@@ -17,10 +17,10 @@ pub struct TranscriptInput {
     ///
     /// `None` means "use whatever this backend normally asks for", which is every caller that does
     /// not care. Kept separate from `context`: that is *material* about the meeting, this is an
-    /// *instruction* about the output, and a backend has to treat them differently — one goes in the
+    /// *instruction* about the output, and a backend has to treat them differently; one goes in the
     /// user message, the other in the system prompt.
     pub instructions: Option<String>,
-    /// Standing facts about the reader — their memories — to shape the output by.
+    /// Standing facts about the reader, their memories, to shape the output by.
     ///
     /// Separate from `instructions` because the two are not alternatives. Memories used to be
     /// passed *as* the instructions, which replaced the summary instruction outright: with three
@@ -45,11 +45,11 @@ impl TranscriptInput {
         self
     }
 
-    /// The instruction to send — a template's prompt when one was chosen, else the backend's own —
+    /// The instruction to send (a template's prompt when one was chosen, else the backend's own),
     /// followed by the reader's background when there is any.
     ///
     /// A method rather than each backend checking the fields, so a backend that forgets is a backend
-    /// that never compiled — and so every backend's default stays written where that backend is.
+    /// that never compiled, and so every backend's default stays written where that backend is.
     pub fn system_prompt<'a>(&'a self, default: &'a str) -> std::borrow::Cow<'a, str> {
         let instruction = match self.instructions.as_deref() {
             Some(custom) if !custom.trim().is_empty() => custom,
@@ -101,7 +101,7 @@ pub struct ExtractedDecision {
 pub struct ExtractedActionItem {
     pub text: String,
     /// Owner as named in the transcript. Resolving that to a real user is the
-    /// caller's job — this crate does not know about the identity model.
+    /// caller's job: this crate does not know about the identity model.
     pub owner: Option<String>,
     /// Due date as literally stated, e.g. "next Friday". Left unparsed on purpose:
     /// resolving it needs the meeting's timezone, which belongs to the caller.
@@ -112,7 +112,7 @@ impl ExtractedActionItem {
     /// The task with its deadline still attached, for a store that has no field for a hint.
     ///
     /// The stored action item has `due_at`, a timestamp, and turning "by Friday" into one needs
-    /// the meeting's date, its timezone and a rule for *which* Friday — so the hint was simply
+    /// the meeting's date, its timezone and a rule for *which* Friday, so the hint was simply
     /// not stored, and every deadline a model extracted was lost between this crate and the
     /// database. Kept in the text it survives as it was said, and nothing is guessed. Not
     /// repeated when the text already carries it ("Book the room for the week of March 10th").
@@ -213,7 +213,7 @@ pub struct ChatRequest {
     /// `None` keeps the default, which is a meetings question-answerer: "answer questions about
     /// the user's meetings using only the material provided, and say so when it is not there".
     /// That is right for Ask and wrong for everything else built on `chat`. Features used to pass
-    /// their instructions as `context`, where they arrived as *material* under that default — and
+    /// their instructions as `context`, where they arrived as *material* under that default, and
     /// asked to fix the grammar of a sentence, `llama3.1:8b` answered "I don't have any
     /// information about your meetings" in half of the runs, an answer the assistant would then
     /// have typed over the user's selection.

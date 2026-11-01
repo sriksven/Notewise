@@ -25,8 +25,8 @@ pub fn to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
 
 /// Resample mono audio by linear interpolation.
 ///
-/// Linear interpolation is not the highest-quality resampler — a windowed-sinc filter would
-/// be better — but speech recognition is robust to the aliasing it introduces, and it has no
+/// Linear interpolation is not the highest-quality resampler (a windowed-sinc filter would
+/// be better) but speech recognition is robust to the aliasing it introduces, and it has no
 /// dependencies and constant memory. Worth revisiting if transcription accuracy on
 /// downsampled audio ever measures worse than on natively-recorded 16 kHz.
 pub fn resample_linear(samples: &[f32], from: SampleRate, to: SampleRate) -> Vec<f32> {

@@ -4,7 +4,7 @@
 //!
 //! Every connector in this product worked only when somebody pressed a button. Calendar events
 //! arrived on Sync, a vault file was written on Mirror, an approved mail draft reached a mailbox on
-//! Approve — and if any of those failed, the retry the outbox exists to schedule never happened.
+//! Approve, and if any of those failed, the retry the outbox exists to schedule never happened.
 //! The queue had a retry policy, a lease, an attempt counter, and nothing that ever looked at it
 //! again.
 //!
@@ -14,7 +14,7 @@
 //! # And one that is not about connectors at all
 //!
 //! **Sweep** deletes retained audio past its retention policy. It lives here because it is the same
-//! shape — a periodic pass over the workspace that wants its own connection — and because it had
+//! shape (a periodic pass over the workspace that wants its own connection) and because it had
 //! exactly the same problem: `POST /v1/audio/sweep` existed, nothing called it, and its own log line
 //! said "a later sweep will retry" about a later sweep that was never going to happen.
 //!
@@ -29,12 +29,12 @@
 //! disconnecting stops it.
 //!
 //! The one thing that deliberately is gated is memory extraction, which reads transcripts to build a
-//! durable profile — see [`crate::memory`] for why that is a different kind of ask.
+//! durable profile; see [`crate::memory`] for why that is a different kind of ask.
 //!
 //! # Why every pass gets its own database connection
 //!
 //! `Importer::run` and `Dispatcher::drain` both borrow the database across their awaits, and
-//! `Database` is `Send` but not `Sync` — so a future holding the shared guard across either is not
+//! `Database` is `Send` but not `Sync`, so a future holding the shared guard across either is not
 //! `Send`. It is also the right thing regardless: a vault write can stall for seconds inside an
 //! iCloud folder while a sync client holds a lock, and the app's one connection should not be the
 //! thing waiting.
@@ -59,7 +59,7 @@ pub const PULL_TICK: Duration = Duration::from_secs(10 * 60);
 
 /// How often to delete audio past its retention.
 ///
-/// Hourly. Retention is measured in days, so this could be far slower — but a machine that is only
+/// Hourly. Retention is measured in days, so this could be far slower, but a machine that is only
 /// awake for an hour at a time would then never sweep at all, and the cost of asking is one indexed
 /// query against a table of meetings.
 pub const SWEEP_TICK: Duration = Duration::from_secs(60 * 60);
@@ -104,7 +104,7 @@ where
 /// Ask every registered source for what is new.
 ///
 /// Answers `None` when nothing is connected, so the caller can tell "there was nothing to do" from
-/// "it did nothing" — which is the difference between a quiet log and a bug report.
+/// "it did nothing", which is the difference between a quiet log and a bug report.
 pub async fn pull_once(
     state: &Shared,
 ) -> Result<Option<notewise_connectors::ImportReport>, String> {
@@ -126,7 +126,7 @@ pub async fn pull_once(
 ///
 /// Answers `None` when no sink is registered. A drain with nothing to deliver to would claim rows,
 /// fail to find a connector for them, and dead-letter work that is only waiting for an account to be
-/// reconnected — which is worse than not running.
+/// reconnected, which is worse than not running.
 pub async fn drain_once(
     state: &Shared,
 ) -> Result<Option<notewise_connectors::DispatchReport>, String> {
@@ -357,7 +357,7 @@ mod tests {
     /// A delivery that failed is visible afterwards rather than lost.
     ///
     /// Named for what it proves. A missing vault folder is a configuration mistake rather than a
-    /// blip, so the connector calls it permanent and the row dead-letters on the first attempt —
+    /// blip, so the connector calls it permanent and the row dead-letters on the first attempt,
     /// which means this is not a test of the retry path, and pretending otherwise in the name would
     /// leave the retry path looking covered when it is not.
     #[tokio::test]
@@ -393,7 +393,7 @@ mod tests {
         std::fs::create_dir_all(&missing).expect("creates the folder");
 
         // A missing vault folder is a configuration mistake rather than a blip, so the connector
-        // reports it as permanent and the row dead-letters — which is the honest behaviour and the
+        // reports it as permanent and the row dead-letters, which is the honest behaviour and the
         // reason this test asserts on the row rather than on a second delivery.
         let db = state.db().await;
         let failed = notewise_storage::OutboxRepository::new(&db)
@@ -422,7 +422,7 @@ mod tests {
     async fn a_sweep_runs_and_reports_what_it_removed() {
         let (state, _dir) = on_disk();
 
-        // Nothing retained, so nothing to remove — and that is a report rather than an error.
+        // Nothing retained, so nothing to remove, and that is a report rather than an error.
         let report = sweep_once(&state).await.expect("sweeps");
         assert_eq!(report.deleted, 0);
         assert_eq!(report.bytes_freed, 0);

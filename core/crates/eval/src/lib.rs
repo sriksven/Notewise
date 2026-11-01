@@ -5,7 +5,7 @@
 //! Every change to the transcription path so far has shipped on unit tests over synthetic
 //! audio, which prove the plumbing and say nothing about quality. When a real recording came
 //! back with four invented `Okay.` segments and one speaker split into two, nothing in CI
-//! noticed, because nothing in CI was looking at *output* — only at whether the code ran.
+//! noticed, because nothing in CI was looking at *output*, only at whether the code ran.
 //!
 //! Tuning a VAD threshold, swapping a decode window, changing a diarizer: each of these is a
 //! quality tradeoff, and without numbers the only way to evaluate one is to record something
@@ -13,9 +13,9 @@
 //!
 //! # What it measures
 //!
-//! - [`wer`] — Word Error Rate, the standard transcription metric: edit distance over words,
+//! - [`wer`]: Word Error Rate, the standard transcription metric: edit distance over words,
 //!   normalised by reference length.
-//! - [`der`] — Diarization Error Rate, the standard speaker-attribution metric: the fraction
+//! - [`der`]: Diarization Error Rate, the standard speaker-attribution metric: the fraction
 //!   of speech time given to the wrong speaker, missed, or invented.
 //!
 //! Both are implemented from their public definitions (NIST rich-transcription scoring, and
@@ -83,12 +83,12 @@ pub struct WordErrors {
 impl WordErrors {
     /// Word Error Rate: `(S + D + I) / N`.
     ///
-    /// Can exceed 1.0 — a decoder that invents more words than were spoken is more than 100%
+    /// Can exceed 1.0: a decoder that invents more words than were spoken is more than 100%
     /// wrong, and clamping that would hide exactly the failure this exists to catch. The four
     /// invented `Okay.`s over silence are that failure.
     pub fn rate(&self) -> f64 {
         if self.reference_words == 0 {
-            // Nothing was said. Any word produced is an insertion, and a rate is undefined —
+            // Nothing was said. Any word produced is an insertion, and a rate is undefined:
             // report 0.0 for a correctly empty transcript and 1.0 per invented word.
             return if self.insertions == 0 {
                 0.0
@@ -106,7 +106,7 @@ impl WordErrors {
 
 /// Score a transcript against a reference.
 ///
-/// Comparison is over normalised words — case folded, surrounding punctuation stripped —
+/// Comparison is over normalised words (case folded, surrounding punctuation stripped),
 /// because a transcript that differs only in whether it wrote "Friday." or "friday" is not
 /// wrong in any way a user cares about, and counting it as an error would drown the real
 /// errors in noise.
@@ -239,13 +239,13 @@ const FRAME_MS: i64 = 10;
 ///
 /// # Label matching
 ///
-/// A diarizer's labels are arbitrary — its "Speaker 1" and the reference's "Alex" refer to the
+/// A diarizer's labels are arbitrary: its "Speaker 1" and the reference's "Alex" refer to the
 /// same person only by coincidence of ordering. Before scoring, hypothesis labels are mapped
 /// onto reference labels by maximum overlap, greedily and one-to-one: the pair sharing the most
 /// speech is matched first, then the next, and so on.
 ///
 /// Greedy rather than optimal (Hungarian) assignment. Where two hypothesis clusters compete for
-/// one reference speaker, the loser stays unmapped and its frames score as confusion — which
+/// one reference speaker, the loser stays unmapped and its frames score as confusion, which
 /// overstates the error slightly, in the direction of not flattering the system under test.
 pub fn der(reference: &[SpeakerSpan], hypothesis: &[SpeakerSpan]) -> SpeakerErrors {
     let end_ms = reference
@@ -273,7 +273,7 @@ pub fn der(reference: &[SpeakerSpan], hypothesis: &[SpeakerSpan]) -> SpeakerErro
         let labelled = hypothesis_frames[frame].as_deref();
         // An unmapped label is still a label. The system claimed someone was talking here; it
         // just named a speaker with no counterpart in the reference. That is a speaker error,
-        // not a missed detection — "missed" is reserved for saying nothing at all.
+        // not a missed detection; "missed" is reserved for saying nothing at all.
         let mapped = labelled.and_then(|label| mapping.get(label).map(String::as_str));
 
         if truth.is_some() {
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(der(&[], &[]).rate(), 0.0);
     }
 
-    /// Perfect channel attribution — what dual-channel capture produces — must score zero even
+    /// Perfect channel attribution (what dual-channel capture produces) must score zero even
     /// though the two speakers interrupt each other, which is the case heuristics fail on.
     #[test]
     fn channel_attribution_of_interrupting_speakers_scores_clean() {

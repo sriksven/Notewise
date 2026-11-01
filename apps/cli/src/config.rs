@@ -57,8 +57,8 @@ impl Config {
     /// The router, preferring a backend the user has already chosen in the app.
     ///
     /// A choice made in the UI used to last until the process exited, because startup only ever
-    /// read the environment. Someone who picked `llama3.1:8b` — because `llama3.1` is not what
-    /// their Ollama holds — got "model not found" again on the next launch, having already
+    /// read the environment. Someone who picked `llama3.1:8b` (because `llama3.1` is not what
+    /// their Ollama holds) got "model not found" again on the next launch, having already
     /// fixed it once.
     ///
     /// `NOTEWISE_BACKEND` still wins. It is set deliberately for a single launch, and a stored
@@ -122,7 +122,7 @@ fn backend_from_env() -> RouterConfig {
         config
     };
 
-    // An explicit choice beats key sniffing — a user with several keys set still gets
+    // An explicit choice beats key sniffing: a user with several keys set still gets
     // the backend they asked for.
     if let Ok(name) = std::env::var("NOTEWISE_BACKEND") {
         if let Some(kind) = BackendKind::parse(name.trim()) {
@@ -173,7 +173,7 @@ fn key_for(kind: BackendKind) -> Option<String> {
 /// Default database path.
 ///
 /// Delegates to `storage`, which owns the answer. This used to be composed here by hand, and
-/// the desktop shell composed a different one from its bundle identifier — so a user's
+/// the desktop shell composed a different one from its bundle identifier, so a user's
 /// meetings landed in one of two databases depending on which surface they happened to open.
 /// One function, asked by every surface, is the only thing that keeps them from drifting
 /// apart again.

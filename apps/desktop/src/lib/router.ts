@@ -9,7 +9,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
  * moved. A hash is owned entirely by the document.
  *
  * Small enough to own rather than take a routing library for. What is needed is a location, a
- * way to change it, and the back button — all of which the browser already provides.
+ * way to change it, and the back button, all of which the browser already provides.
  */
 
 export type Route =
@@ -169,7 +169,7 @@ function snapshot(): string {
  * The current route, and a way to change it.
  *
  * `navigate` assigns the hash, so the browser records history and the back button works without
- * this module keeping a stack of its own. `replace` is for corrections — landing on a meeting
+ * this module keeping a stack of its own. `replace` is for corrections: landing on a meeting
  * that has since been deleted should not leave a broken entry to go back to.
  */
 export function useRoute(): {

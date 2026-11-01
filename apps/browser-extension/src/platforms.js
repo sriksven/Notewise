@@ -3,7 +3,7 @@
  *
  * # Why this is DOM scraping, and what follows from that
  *
- * Meet, Zoom, and Teams all know exactly who is talking — they route the audio — and all three
+ * Meet, Zoom, and Teams all know exactly who is talking (they route the audio) and all three
  * show it on screen. None of them offers a page-level API for it. So the only way to read it from
  * the user's own session is to read what is rendered.
  *
@@ -53,7 +53,7 @@ function firstMatch(root, list) {
  * A stable-enough id for a participant within one meeting.
  *
  * Prefers whatever the page already uses to key the tile, because that survives a rename. Falls
- * back to the display name, which does not — a rename then reads as a new participant, which is
+ * back to the display name, which does not: a rename then reads as a new participant, which is
  * wrong but harmless: two roster entries, both correctly named.
  */
 function participantId(element, name) {
@@ -133,7 +133,7 @@ export const googleMeet = {
  * Zoom's web client.
  *
  * Zoom is hostile to automation, but this runs in the user's own authenticated session and only
- * reads — no synthetic input, no joining, nothing the user did not already do. The participants
+ * reads: no synthetic input, no joining, nothing the user did not already do. The participants
  * panel must be open for the roster to exist in the DOM, which the caller surfaces rather than
  * working around.
  */
@@ -147,7 +147,7 @@ export const zoomWeb = {
    *
    * Zoom writes the same number four ways depending on how the link was made: `/j/` for an invite,
    * `/s/` for a host start link, and `/wc/<id>/join` or `/wc/join/<id>` for the web client. All of
-   * them are the same meeting, so all of them produce the same id — otherwise one meeting joined by
+   * them are the same meeting, so all of them produce the same id; otherwise one meeting joined by
    * two routes would look like two.
    */
   meetingId(url) {
@@ -210,7 +210,7 @@ export const zoomWeb = {
  *
  * Teams uses `data-tid` attributes fairly consistently, which is the most durable hook of the
  * three. The proper route for Teams is a calling bot with unmixed audio, which needs an Azure app
- * and tenant admin consent — an enterprise integration, not something a user can switch on. This
+ * and tenant admin consent, an enterprise integration, not something a user can switch on. This
  * gets names without any of that.
  */
 export const teamsWeb = {
@@ -224,7 +224,7 @@ export const teamsWeb = {
    * The meeting thread, or null.
    *
    * Teams is the awkward one: the join target lives in the *fragment*, which is why this reads
-   * `url.hash` as well as the path. Everything else about Teams — chats, channels, files — is on
+   * `url.hash` as well as the path. Everything else about Teams (chats, channels, files) is on
    * the same origin, so a host match alone would report a meeting every time somebody opened Teams
    * to read a message.
    */
@@ -293,7 +293,7 @@ export function platformFor(url) {
  * a chat.
  *
  * URL-shaped rather than DOM-shaped on purpose. It is the one signal on these pages that does not
- * rot when a vendor redesigns, and navigating to a meeting link is a deliberate act — which is
+ * rot when a vendor redesigns, and navigating to a meeting link is a deliberate act, which is
  * exactly what the engine's rules treat as a strong signal.
  */
 export function activeMeeting(url) {

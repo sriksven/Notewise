@@ -11,14 +11,14 @@
 //!
 //! For a product whose entire promise is that the SQLite file is yours, "which copy?" is not a
 //! question that may exist. So the answer lives here, once, in the crate that owns the
-//! database — and every surface asks rather than derives.
+//! database, and every surface asks rather than derives.
 //!
 //! # Why the vendor-neutral path wins
 //!
 //! Three reasons. It holds the older and larger store for anyone who used the CLI first; it is
 //! the same shape on every platform (`notewise/`, not a reverse-DNS identifier that only macOS
-//! and Windows conventions produce); and the identifier-derived path's one real advantage —
-//! staying inside a sandbox container — is an advantage Notewise must not take. A sandboxed
+//! and Windows conventions produce); and the identifier-derived path's one real advantage,
+//! staying inside a sandbox container; is an advantage Notewise must not take. A sandboxed
 //! container is unreachable from the CLI and from `mcp-server`, which would make the split
 //! permanent instead of merely current.
 
@@ -48,7 +48,7 @@ const LEGACY_APP_DIRS: &[&str] = &["dev.notewise.app"];
 /// SQLite's sidecar files.
 ///
 /// The database runs in WAL mode, so recent commits can live in `-wal` rather than in the main
-/// file. Moving `notewise.db` alone would silently discard them — this is the difference
+/// file. Moving `notewise.db` alone would silently discard them; this is the difference
 /// between a migration and a data-loss bug.
 const SIDECARS: &[&str] = &["-wal", "-shm"];
 
@@ -132,7 +132,7 @@ pub enum Adoption {
     /// More than one workspace exists and none of them was touched.
     ///
     /// Two databases with real content in them cannot be reconciled by a rename, and merging
-    /// them means remapping every id and edge — a feature, not a migration. Refusing to guess
+    /// them means remapping every id and edge: a feature, not a migration. Refusing to guess
     /// keeps both intact and leaves the choice with the user.
     Split { legacy: Vec<PathBuf> },
 }
@@ -178,13 +178,13 @@ pub fn model_dir(data_dir: &Path) -> PathBuf {
 /// Bring transcription models from an earlier install alongside the adopted workspace.
 ///
 /// Deliberately unlike the database, which refuses to merge. A model file is a large immutable
-/// blob named for the model it holds, so two files with the same name *are* the same model —
+/// blob named for the model it holds, so two files with the same name *are* the same model;
 /// there is no ambiguity to resolve and nothing a user could lose by the wrong choice. Leaving
 /// them behind, on the other hand, means silently re-downloading gigabytes because the
 /// directory beside the workspace moved.
 ///
 /// Colliding names are skipped rather than overwritten, nothing is ever deleted, and a file
-/// that will not move is reported rather than fatal — a model can always be fetched again,
+/// that will not move is reported rather than fatal; a model can always be fetched again,
 /// which is not a reason to refuse to start.
 pub fn adopt_legacy_models(canonical_data_dir: &Path) -> Result<Vec<PathBuf>> {
     let legacy = legacy_model_dirs_with(|key| std::env::var(key).ok())?;
@@ -255,7 +255,7 @@ fn adopt_from(canonical: &Path, legacy: &[PathBuf]) -> Result<Adoption> {
 
     match existing.len() {
         0 => Ok(Adoption::Canonical),
-        // Both exist. Neither is touched — see `Adoption::Split`.
+        // Both exist. Neither is touched; see `Adoption::Split`.
         _ if canonical.is_file() => Ok(Adoption::Split { legacy: existing }),
         1 => {
             let from = existing.remove(0);
@@ -292,7 +292,7 @@ fn move_workspace(from: &Path, to: &Path) -> Result<()> {
 }
 
 /// `notewise.db` + `-wal` is `notewise.db-wal`, which is a suffix on the file name rather than
-/// a change of extension — `set_extension` would produce `notewise-wal` and lose the data.
+/// a change of extension; `set_extension` would produce `notewise-wal` and lose the data.
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn a_model_already_present_is_never_overwritten() {
-        // Same name means same weights, so there is nothing to choose between them — and
+        // Same name means same weights, so there is nothing to choose between them, and
         // clobbering the one in use to prove it would be the worst of both.
         let dir = tempfile::tempdir().unwrap();
         let canonical = dir.path().join("notewise/models");

@@ -2,7 +2,7 @@
 //!
 //! A long-lived refresh token has a different risk profile from a meeting summary: it grants
 //! standing access to someone's calendar or tracker, and it is exactly the kind of value that
-//! ends up inside a support bundle. So credentials do not go in the database — they go behind
+//! ends up inside a support bundle. So credentials do not go in the database; they go behind
 //! this trait, whose production implementation is the OS keychain.
 
 use std::collections::HashMap;

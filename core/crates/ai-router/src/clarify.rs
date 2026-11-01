@@ -18,7 +18,7 @@
 //!   feature feel broken, so a statement is asked about once, and a rewording of an earlier
 //!   question is recognised by its content words.
 //! - **A wrong question costs more than a missing one.** Every question must quote a line that
-//!   was actually said, and that line must show the problem the question claims — see
+//!   was actually said, and that line must show the problem the question claims; see
 //!   [`suggest_questions`].
 //!
 //! The model call lives in [`suggest_questions`]; the decision of whether to make it at all
@@ -37,11 +37,11 @@ use crate::AiBackend;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AmbiguityKind {
-    /// "that approach", "the other thing" — a referent nobody stated.
+    /// "that approach", "the other thing": a referent nobody stated.
     VagueReference,
-    /// "much faster", "soon", "a lot" — a claim with no number attached.
+    /// "much faster", "soon", "a lot": a claim with no number attached.
     Unquantified,
-    /// "someone should", "we'll get to it" — work with no owner.
+    /// "someone should", "we'll get to it": work with no owner.
     UnassignedAction,
     /// A commitment with no date.
     MissingDeadline,
@@ -112,7 +112,7 @@ pub struct ClarifyingQuestion {
 impl ClarifyingQuestion {
     /// Key used for deduplication.
     ///
-    /// Normalized so trivial rewordings of the same question collapse together — the model
+    /// Normalized so trivial rewordings of the same question collapse together; the model
     /// will not phrase an ambiguity identically twice, and a near-duplicate is just as
     /// annoying as an exact one.
     pub fn dedupe_key(&self) -> String {
@@ -124,7 +124,7 @@ impl ClarifyingQuestion {
             .collect();
 
         // Acronyms are kept whatever their length. The length rule below exists to drop "the",
-        // "for" and "who", and it also dropped "ARB" — so "What is ARB?" had an empty key, and
+        // "for" and "who", and it also dropped "ARB", so "What is ARB?" had an empty key, and
         // `accept` discards an empty key as a question with no content. The one kind of question
         // made almost entirely of a short word was never shown.
         let acronyms: Vec<String> = self
@@ -153,7 +153,7 @@ impl ClarifyingQuestion {
     ///
     /// [`Self::dedupe_key`] equality only collapses rewordings that use exactly the same content
     /// words, and the model rarely obliges: "How many seats do we use today?" and "How many seats
-    /// are we using?" differ by a word. Overlap of half the content words is the line — loose
+    /// are we using?" differ by a word. Overlap of half the content words is the line: loose
     /// enough to catch that, tight enough that "who owns the index rebuild" and "who owns the
     /// migration scripts" stay two questions. Rewordings that share less than that are caught by
     /// the statement they quote instead; see [`statement_key`].
@@ -185,7 +185,7 @@ fn stems(key: &str) -> std::collections::BTreeSet<&str> {
 ///
 /// Keyed on when the statement was said. Every poll sends the model the last two minutes, so
 /// one statement is in front of it several times, and each time it finds a new way to ask about
-/// it — measured on a live replay, one unowned task came back as three differently worded
+/// it: measured on a live replay, one unowned task came back as three differently worded
 /// questions over three polls. A statement gets one question.
 ///
 /// Prefixed so it can never collide with a [`ClarifyingQuestion::dedupe_key`], which holds only
@@ -197,7 +197,7 @@ fn statement_key(at_ms: i64) -> String {
 /// Words carrying no distinguishing meaning in a question.
 ///
 /// Contracted forms are listed explicitly: apostrophes are stripped during normalization, so
-/// "what's" arrives here as "whats" and would otherwise survive as a content word — which
+/// "what's" arrives here as "whats" and would otherwise survive as a content word, which
 /// makes "what's the timeline" and "what is the timeline" look like different questions.
 const STOPWORDS: &[&str] = &[
     "what", "when", "which", "that", "this", "with", "from", "have", "does", "will", "your",
@@ -268,7 +268,7 @@ impl Utterance {
 
 /// Live state for one meeting.
 ///
-/// Pure — no model, no clock, no I/O. Time is passed in, which is what makes the interruption
+/// Pure: no model, no clock, no I/O. Time is passed in, which is what makes the interruption
 /// policy testable at all: the interesting cases are about elapsed time, and waiting ninety
 /// seconds in a test to check a cooldown is not a test anyone runs.
 #[derive(Debug, Clone)]
@@ -297,8 +297,8 @@ impl ClarifierSession {
 
     /// Pick a session back up from the state a client carried between requests.
     ///
-    /// The HTTP endpoint keeps nothing per meeting — two clients watching one meeting must not
-    /// silence each other — so this policy only applies if the client hands its state back with
+    /// The HTTP endpoint keeps nothing per meeting; two clients watching one meeting must not
+    /// silence each other, so this policy only applies if the client hands its state back with
     /// each request. Rebuilt empty every time instead, the cooldown and every repeat check were
     /// dead code on the live path: the desktop app polls every thirty seconds, and each poll was
     /// a model call and, usually, a fresh rewording of a question it had already shown.
@@ -388,7 +388,7 @@ impl ClarifierSession {
 
         // Statements asked about before this batch. Not updated inside it: two questions about
         // one statement in the same reply are the model's to make, and `suggest_questions`
-        // already keeps one per statement — this is about the *next* poll asking again.
+        // already keeps one per statement; this is about the *next* poll asking again.
         let earlier_statements: Vec<String> = self
             .asked
             .iter()
@@ -425,7 +425,7 @@ impl ClarifierSession {
 
         if self.pending.len() > self.config.max_pending {
             // Descending by weight. The sort is stable, so questions of equal weight keep
-            // insertion order and the oldest survives truncation — a question raised earlier
+            // insertion order and the oldest survives truncation; a question raised earlier
             // has had longer to matter.
             self.pending
                 .sort_by_key(|q| std::cmp::Reverse(q.kind.weight()));
@@ -438,7 +438,7 @@ impl ClarifierSession {
         &self.pending
     }
 
-    /// Mark a question resolved — asked, or dismissed by the user.
+    /// Mark a question resolved: asked, or dismissed by the user.
     pub fn resolve(&mut self, question: &ClarifyingQuestion) {
         self.pending.retain(|q| q != question);
     }
@@ -455,14 +455,14 @@ impl ClarifierSession {
 ///
 /// The first version listed the seven kinds by name and asked for "usually 0" questions.
 /// Replayed against `llama3.1:8b` on eight meetings it returned one or two questions on every
-/// call — six apiece on two meetings with nothing ambiguous in them ("What does 'perfect' mean in
-/// terms of weather?") — and filed five of six planted problems under the wrong kind. An open
+/// call (six apiece on two meetings with nothing ambiguous in them ("What does 'perfect' mean in
+/// terms of weather?") and filed five of six planted problems under the wrong kind. An open
 /// "find what is ambiguous" invites a small model to find *something*.
 ///
 /// Four narrow checks, each with its own slot that can be `null`, give it somewhere to say
 /// "nothing" every time, and four narrow questions are ones a small model answers far better
-/// than one broad one. They are the four costliest kinds. The vaguer three — an unclear
-/// reference, a missing number, an unstated reason — produced most of the junk on the replay
+/// than one broad one. They are the four costliest kinds. The vaguer three (an unclear
+/// reference, a missing number, an unstated reason) produced most of the junk on the replay
 /// and none of the useful questions, so they are no longer asked for; [`parse_questions`] still
 /// reads them from a model that answers in the old shape.
 ///
@@ -532,11 +532,11 @@ const MAX_PER_CALL: usize = 2;
 
 /// Ask the model for clarifying questions about a window of transcript.
 ///
-/// Implemented over [`AiBackend::chat`] rather than as a trait method so every backend —
-/// including any OpenAI-compatible endpoint added later — supports it without extra code.
+/// Implemented over [`AiBackend::chat`] rather than as a trait method so every backend;
+/// including any OpenAI-compatible endpoint added later; supports it without extra code.
 ///
 /// Takes the utterances rather than rendered text so every question can be checked against the
-/// line that prompted it — see `ground` — and the rendering lives in one place.
+/// line that prompted it (see `ground`) and the rendering lives in one place.
 pub async fn suggest_questions(
     backend: &dyn AiBackend,
     window: &[Utterance],
@@ -582,23 +582,23 @@ struct Candidate {
 /// The panel shows `about` in quotation marks, beneath the question, as words someone in the
 /// room said. A quote the model invented or blended from two lines puts words in a colleague's
 /// mouth, so a question whose quote is not in the window is discarded rather than shown. One that
-/// survives keeps a verbatim quote — the model's, when it copied faithfully, otherwise the line.
+/// survives keeps a verbatim quote: the model's, when it copied faithfully, otherwise the line.
 ///
 /// It also takes that line's time. `at_ms` is documented as when the prompting statement was
 /// said, and staleness is measured from it, but every question used to be stamped with the time
-/// of the poll — so something said two minutes earlier arrived looking brand new.
+/// of the poll, so something said two minutes earlier arrived looking brand new.
 ///
 /// # The quote has to show the problem
 ///
 /// Most of the junk on the replay was a real quote under the wrong claim: "who owns QA?" beside
 /// "Ines owns that", "when is it due?" beside "Thursday the 9th". Each kind names something a line
-/// either shows or does not — see [`evidence_holds`] — and a question whose own quote contradicts
+/// either shows or does not (see [`evidence_holds`]) and a question whose own quote contradicts
 /// it is dropped. The checks are English phrase lists, so they apply only when the window reads
 /// as English; anywhere else they would silence every question, and grounding alone stands.
 ///
 /// # Then the cap
 ///
-/// One question per statement — two about one line are two phrasings of one problem — highest
+/// One question per statement (two about one line are two phrasings of one problem) highest
 /// cost first, at most [`MAX_PER_CALL`].
 fn ground(candidates: Vec<Candidate>, window: &[Utterance]) -> Vec<ClarifyingQuestion> {
     let checks_apply = reads_as_english(window);
@@ -657,7 +657,7 @@ fn evidence_holds(
     match question.kind {
         // Somebody has to be missing. The line either says so ("someone needs to") or follows a
         // decision ("decision made" … "that means a migration plan"), and nobody takes the work
-        // on — in that line, or in the reply to it: "Ines owns that", "I'll review it today".
+        // on: in that line, or in the reply to it: "Ines owns that", "I'll review it today".
         AmbiguityKind::UnassignedAction => {
             let position = window.iter().position(|u| std::ptr::eq(u, line));
             let before = position.and_then(|i| i.checked_sub(1)).map(|i| &window[i]);
@@ -1008,7 +1008,7 @@ fn reads_as_english(window: &[Utterance]) -> bool {
 /// The utterance a quote came from, and whether the quote is faithful to it.
 ///
 /// Faithful means the quote's words appear in the line in order, ignoring case and
-/// punctuation — what a model produces when it copies. Failing that, a line holding at least
+/// punctuation: what a model produces when it copies. Failing that, a line holding at least
 /// four-fifths of the quote's words is accepted as the source of a loose paraphrase, and the
 /// caller shows the line instead. Anything less is not a quote.
 ///
@@ -1375,7 +1375,7 @@ mod tests {
             vec![
                 question("What does CRDT mean?", AmbiguityKind::UndefinedTerm, 0),
                 question(
-                    "That contradicts the earlier plan — which holds?",
+                    "That contradicts the earlier plan. Which holds?",
                     AmbiguityKind::Contradiction,
                     0,
                 ),
@@ -1652,7 +1652,7 @@ mod tests {
     }
 
     /// The length rule that drops "the" and "who" also dropped "ARB", leaving "What is ARB?" with
-    /// an empty key — and an empty key is discarded as a question with no content.
+    /// an empty key, and an empty key is discarded as a question with no content.
     #[test]
     fn a_question_about_a_short_acronym_is_not_discarded() {
         let mut session = ClarifierSession::new(ClarifierConfig::default());

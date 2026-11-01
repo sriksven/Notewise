@@ -3,7 +3,7 @@
 //! One copy rather than one per backend. They were four near-identical strings, and the rules in
 //! them are not provider-specific: a summary that invents a date, or an action item that turns a
 //! colleague's family emergency into a task, is the same failure whichever model wrote it. Each
-//! backend still adds what *is* specific to it — the JSON shape it asks for, or the schema it
+//! backend still adds what *is* specific to it; the JSON shape it asks for, or the schema it
 //! constrains the reply to.
 //!
 //! # Why the rules are repeated after the transcript
@@ -25,7 +25,7 @@ Stay with what was said. Repeat deadlines the way they were said and never work 
 date from them. If the transcript does not say something, leave it out rather than guessing.
 
 Leave out small talk. Never mention anyone's health, family or other personal circumstances, even \
-when it explains a delay or an absence — that was said to the people in the room, not for the \
+when it explains a delay or an absence. That was said to the people in the room, not for the \
 record.";
 
 /// Read after the transcript on the summary path. See the module docs for why it exists.
@@ -36,7 +36,7 @@ small talk and anything about a person's health, family or private life.";
 pub(crate) const ACTION_ITEMS: &str = "\
 Extract the action items from this meeting: work someone committed to doing, or agreed to do when \
 asked. Record the owner exactly as named in the transcript, or null when nobody took it on. Keep \
-the due date exactly as it was said (\"by Friday\", \"next Wednesday\"), or null — never resolve \
+the due date exactly as it was said (\"by Friday\", \"next Wednesday\"), or null. Never resolve \
 it to a calendar date. Something personal is never an action item: nothing about anyone's health, \
 family or private life.";
 

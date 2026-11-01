@@ -1,4 +1,4 @@
-# Notewise — guide for AI coding agents
+# Notewise - guide for AI coding agents
 
 Orientation for agents working in this repo. Read this before making changes.
 
@@ -17,7 +17,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
-`apps/desktop/src-tauri` is excluded from the workspace on purpose — it pulls a GUI
+`apps/desktop/src-tauri` is excluded from the workspace on purpose: it pulls a GUI
 toolchain that engine CI should not depend on. Build it separately if you are working on
 the desktop app.
 
@@ -25,7 +25,7 @@ the desktop app.
 
 **1. Never call a model provider directly.** Everything goes through the `ai-router`
 trait. If you find yourself importing `reqwest` to hit an LLM API from outside
-`core/crates/ai-router`, stop — you are breaking the seam the entire local-or-cloud
+`core/crates/ai-router`, stop: you are breaking the seam the entire local-or-cloud
 promise depends on.
 
 **2. Dependencies point downward only.** `graph` may depend on `storage`; `storage` must
@@ -36,7 +36,7 @@ on each other.
 add a repository method rather than reaching for a connection.
 
 **4. Ownership is foreign keys; association is edges.** A transcript segment belongs to one
-meeting — foreign key. A note references a meeting — graph edge. Getting this wrong means a
+meeting: foreign key. A note references a meeting: graph edge. Getting this wrong means a
 schema migration every time the product grows a link type.
 
 **5. No `unwrap()` in library code.** Each crate has a `thiserror` enum. Surfaces translate
@@ -45,7 +45,7 @@ to HTTP codes or exit codes at the boundary.
 **6. Mark unverifiable tests `#[ignore]` with a reason.** Anything needing a GPU, signed
 bundle, TCC grant, or paid API key. A green CI run must never imply unverified things work.
 
-## Licensing — check before you add code
+## Licensing - check before you add code
 
 | Path | License |
 |---|---|
@@ -58,19 +58,24 @@ Moving code from `cloud/` into `core/` relicenses it. Do not do this incidentall
 
 Many directories are scaffolds awaiting their phase. **Every scaffold's `README.md` states
 its status at the top.** Read it before assuming something is implemented. Do not write
-Phase 3 features during Phase 0 — see `docs/roadmap.md`.
+Phase 3 features during Phase 0. See `docs/roadmap.md`.
 
 ## Conventions
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`). Trunk-based, short-lived
 branches off `main`. `core/` is semver-versioned independently of the apps consuming it.
 
+No em dashes or en dashes, anywhere: UI text, READMEs, the website, comments, docs, LLM prompts,
+commit messages, PR descriptions. Write the punctuation the sentence needs instead (a colon, a
+comma, parentheses, or a new sentence). A spaced hyphen is for separators in titles and labels,
+and a plain hyphen for ranges. Where code must match the character in input, write `\u{2014}`.
+
 ## Things that will bite you
 
 - **macOS system audio** needs ScreenCaptureKit + the Screen & System Audio Recording grant,
   which macOS gives to an app bundle and never to `cargo run` or a test binary. A person has to
   switch it on, so it cannot be tested headlessly. Mic capture via `cpal` can. It does *not* need
-  a Developer ID — that belief was measured wrong; see `macos_permissions::can_hold_screen_recording`.
+  a Developer ID: that belief was measured wrong; see `macos_permissions::can_hold_screen_recording`.
 - **macOS releases are self-signed, and the certificate is pinned.** TCC grants attach to the
   designated requirement, so every release must be signed with the one certificate named by
   `MACOS_CERTIFICATE_SHA1` in `release.yml`. A different certificate resets every user's grants.

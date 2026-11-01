@@ -7,8 +7,8 @@ import { api, ApiError } from "../lib/api";
  * Whether the app may remember what people sound like.
  *
  * Presented as its own decision rather than buried with the audio settings, because it is the
- * only thing the product stores that is about someone other than the user. Everything else —
- * transcripts, notes, tickets — is their own material; a voice print identifies the colleague
+ * only thing the product stores that is about someone other than the user. Everything else (
+ * transcripts, notes, tickets) is their own material; a voice print identifies the colleague
  * who was in the room and never installed anything.
  *
  * Off by default, which is also what the comparable local tools do.
@@ -71,7 +71,7 @@ export function VoiceprintSettings() {
         Not in this build yet: nothing records or matches voices across meetings so far. When it
         does, it will let Notewise name the same colleague across meetings, including in-person
         ones where no meeting app can be asked who was speaking, by keeping a numeric fingerprint
-        of each voice — never audio, and nothing that can be played back. The switch records your
+        of each voice, never audio, and nothing that can be played back. The switch records your
         answer now, so nothing is kept until you have said yes.
       </p>
 

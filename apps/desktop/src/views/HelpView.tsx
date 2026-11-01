@@ -22,7 +22,7 @@ const TABS: Array<{ id: HelpSection; label: string; Icon: typeof BookOpen }> = [
  * a daemon that is not running. A user hitting one of those may also have no network.
  *
  * Everything here is answerable from the repository as it stands. There are no links to pages
- * that do not exist and no promises about a roadmap — a help page that describes a different
+ * that do not exist and no promises about a roadmap: a help page that describes a different
  * version of the app is worse than none.
  */
 export function HelpView({ section, onNavigate }: Props) {
@@ -107,7 +107,7 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
       <Topic title="Recording the other side of a call">
         <p>
           The microphone hears you and whoever is in the room. It does not hear the other
-          people on a call, because that audio never reaches it — it goes to your speakers.
+          people on a call, because that audio never reaches it: it goes to your speakers.
         </p>
         <p>
           Capturing it needs the permission macOS calls Screen &amp; System Audio Recording, because
@@ -118,7 +118,7 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         </p>
         <p>
           Every release is signed with the same certificate, so the permission carries over to
-          updates. macOS still asks from time to time whether Notewise should keep it — a check
+          updates. macOS still asks from time to time whether Notewise should keep it: a check
           Sequoia added for every app that records the screen, not something Notewise does. A copy
           run with{" "}
           <code className="text-ink">cargo run</code> is not an application as far as macOS is
@@ -131,7 +131,7 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
         <p>
           Larger models hear better, especially through a bad connection or an accent the small
           ones were not trained for. <code className="text-ink">large-v3-turbo</code> is the
-          one worth downloading — it is close to the largest model in accuracy at a fraction of
+          one worth downloading; it is close to the largest model in accuracy at a fraction of
           the time, and it is what fixes most "it did not hear that properly" transcripts.
         </p>
         <p>
@@ -177,7 +177,7 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
           <Link onClick={() => onNavigate({ name: "settings", section: "search" })}>
             Settings
           </Link>{" "}
-          fixes that — it embeds your workspace locally, through Ollama, and never through your
+          fixes that: it embeds your workspace locally, through Ollama, and never through your
           chat provider.
         </p>
         <p>
@@ -207,7 +207,7 @@ function Docs({ onNavigate }: { onNavigate: (route: Route) => void }) {
  * The keyboard.
  *
  * This list and `lib/shortcuts.ts` have to agree. A help page describing keys that do nothing
- * is worse than no help page — it sends someone looking for a fault in their keyboard.
+ * is worse than no help page: it sends someone looking for a fault in their keyboard.
  */
 function Shortcuts() {
   const rows: Array<[string, string]> = [
@@ -256,15 +256,15 @@ function Shortcuts() {
  * The changelog.
  *
  * Kept in the app and written in terms of what changed for the person using it, not the commit
- * that changed it. Newest first, and short — a release note nobody reads is worse than none,
+ * that changed it. Newest first, and short: a release note nobody reads is worse than none,
  * and the way to make one unreadable is to list everything.
  *
  * `CHANGELOG.md` at the repository root is the long version, and the two have to agree. This one
- * said "Unreleased — in development" and listed five things on the day 0.1.0 was tagged, which
+ * said "Unreleased, in development" and listed five things on the day 0.1.0 was tagged, which
  * would have shipped a release note describing a fraction of the app.
  *
  * A first release cannot say what changed, because nothing came before it. So it says what the
- * thing is, and — the part a release note usually omits — what it cannot do.
+ * thing is, and, the part a release note usually omits, what it cannot do.
  */
 function WhatsNew() {
   const releases: Array<{ version: string; date: string; changes: string[] }> = [
@@ -274,11 +274,11 @@ function WhatsNew() {
       changes: [
         "The first release. Record or import a meeting, transcribe it on this machine, and get a summary, decisions and action items that stay linked to it.",
         "Ask a question of everything you have recorded and get an answer that cites the meetings it came from.",
-        "Follow-up emails land as a draft in Gmail or Outlook for you to read — never sent for you.",
+        "Follow-up emails land as a draft in Gmail or Outlook for you to read, never sent for you.",
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
         "External tools run only when you confirm that specific call.",
         "Keeping the audio after transcription is off until you turn it on, under Settings.",
-        "On macOS, system audio — the other side of a call — needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
+        "On macOS, system audio (the other side of a call) needs the Screen & System Audio Recording permission, granted in System Settings. The first launch needs Open Anyway in Privacy & Security, because Notewise is not signed by an Apple Developer ID.",
       ],
     },
   ];
@@ -316,7 +316,7 @@ function Support({ onNavigate }: { onNavigate: (route: Route) => void }) {
       <Topic title="Something is not working">
         <p>
           Start with <Link onClick={() => onNavigate({ name: "about" })}>About</Link>. It reports
-          what this build can actually do — whether the engine is reachable, whether it can
+          what this build can actually do: whether the engine is reachable, whether it can
           record, which model is loaded and whether it runs locally. Most reports turn out to be
           one of those saying no.
         </p>

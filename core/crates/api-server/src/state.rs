@@ -13,7 +13,7 @@ use crate::recording::RecordingManager;
 ///
 /// The database is behind a mutex because `rusqlite::Connection` is `Send` but not `Sync`.
 /// This is a real serialization point: SQLite writes are serialized anyway, and the
-/// alternative — a connection pool — buys nothing for a single-user local engine while adding
+/// alternative (a connection pool) buys nothing for a single-user local engine while adding
 /// a WAL-writer-contention failure mode.
 ///
 /// It is a `tokio::sync::Mutex` rather than a `std` one so a handler that awaits mid-request
@@ -46,7 +46,7 @@ pub struct AppState {
     /// The resolved embedder, and the setting it was built for.
     ///
     /// Resolving a tag costs a round trip to the daemon, and the answer only changes when the user
-    /// picks a different embedding model — so it is built once and kept.
+    /// picks a different embedding model, so it is built once and kept.
     embedder: tokio::sync::RwLock<Option<CachedEmbedder>>,
     /// Fused join signals, so dedup and the grace period survive between requests.
     ///
@@ -56,7 +56,7 @@ pub struct AppState {
     join: tokio::sync::Mutex<crate::join::JoinTracker>,
     /// Connections to external MCP servers.
     ///
-    /// Holds sessions — child processes and sockets — and not configuration: the server list lives
+    /// Holds sessions (child processes and sockets) and not configuration: the server list lives
     /// in the database and is handed to the client per call, so there is no in-memory copy to drift
     /// out of step with the rows the user edited. Nothing starts until a tool is listed or called.
     mcp: Arc<notewise_mcp_client::McpClient>,
@@ -71,14 +71,14 @@ pub struct AppState {
     ///
     /// Not on [`RecordingManager`]: that is compiled out entirely in a build without capture, and
     /// the extension reports who was speaking whether or not this engine recorded the audio. An
-    /// entry is drained when its meeting ends — see
+    /// entry is drained when its meeting ends; see
     /// [`crate::speakers::apply_pending_timeline`].
     speaker_timelines: crate::speakers::PendingTimelines,
 }
 
 /// A resolved embedder together with the setting value it was built from.
 ///
-/// Keyed by the *requested* name, because that is what a settings change alters — comparing
+/// Keyed by the *requested* name, because that is what a settings change alters: comparing
 /// resolved tags would miss a switch from `bge-m3` to `nomic-embed-text` if both resolved to the
 /// same tag, which cannot happen, and would still be the wrong thing to compare.
 #[derive(Debug)]
@@ -169,12 +169,12 @@ impl AppState {
 
     /// The local embedder, with its tag already resolved.
     ///
-    /// Always Ollama, never the configured chat backend — see [`notewise_ai_router::Embedder`]
+    /// Always Ollama, never the configured chat backend; see [`notewise_ai_router::Embedder`]
     /// for why embedding a whole workspace must not follow the chat provider. Which model is
     /// a stored setting so a user who prefers `bge-m3` keeps it across restarts.
     ///
     /// Cached, and rebuilt only when the configured model changes. `Embedder::connect` asks the
-    /// daemon which tags it holds, and retrieval builds an embedder for every search — paying a
+    /// daemon which tags it holds, and retrieval builds an embedder for every search, paying a
     /// round trip per query to answer a question whose answer does not change would be a poor
     /// trade for exactness.
     pub async fn embedder(&self) -> Arc<notewise_ai_router::Embedder> {
@@ -232,7 +232,7 @@ impl AppState {
     /// Lock the database.
     ///
     /// Hold the guard for as little as possible, and never across an `.await` on a model
-    /// call — summarization can take tens of seconds and would stall every other request.
+    /// call: summarization can take tens of seconds and would stall every other request.
     pub async fn db(&self) -> tokio::sync::MutexGuard<'_, Database> {
         self.db.lock().await
     }
@@ -258,7 +258,7 @@ impl AppState {
         )
     }
 
-    /// Replace the registry — used when a connector is connected or disconnected.
+    /// Replace the registry, used when a connector is connected or disconnected.
     pub fn set_connectors(&self, registry: notewise_connectors::ConnectorRegistry) {
         *self
             .connectors
@@ -305,12 +305,12 @@ impl AppState {
         *self.ai.write().expect("ai router lock poisoned") = router;
 
         // Remember it. Without this the choice lasts until the process exits, and the engine
-        // comes back on its inferred default — which is how a user who picked `llama3.1:8b`
+        // comes back on its inferred default, which is how a user who picked `llama3.1:8b`
         // gets "model 'llama3.1' not found" on the next launch, having already fixed it once.
         //
         // The model is remembered only when one was named. With none, the router's `model_id()`
-        // is the backend's *default guess* — `llama3.1` for Ollama, before the daemon has been
-        // asked what it holds — and persisting that made the next launch pass it to `with_model`,
+        // is the backend's *default guess* (`llama3.1` for Ollama, before the daemon has been
+        // asked what it holds) and persisting that made the next launch pass it to `with_model`,
         // which treats a model as the user's choice and never substitutes it. On a machine with
         // only, say, `mistral` pulled, every feature then failed until a model was picked by
         // hand. Choosing a provider without a model now clears the stored one, so the next launch
@@ -352,7 +352,7 @@ pub const ROUTING_RULES_KEY: &str = "ai_routing_rules";
 /// The stored routing rules, or none.
 ///
 /// A malformed rule set degrades to no routing rather than refusing to start. An app that will
-/// not launch because a routing rule is bad has turned an optimisation into an outage — the same
+/// not launch because a routing rule is bad has turned an optimisation into an outage: the same
 /// reasoning `crate::indexing` applies to a missing embedder.
 pub fn stored_routes(db: &Database) -> Vec<notewise_ai_router::StoredRoute> {
     let raw = match SettingsRepository::new(db).get(ROUTING_RULES_KEY) {
@@ -529,7 +529,7 @@ pub const API_KEY_FIELD: &str = "api_key";
 /// Where transcription models live by default.
 ///
 /// Mirrors the CLI's resolution so `notewise serve` and the desktop app find the same models a
-/// `notewise record` run downloaded — a user who has already waited for a 148 MB download must
+/// `notewise record` run downloaded: a user who has already waited for a 148 MB download must
 /// not be asked to do it again by a different front end.
 fn default_model_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("NOTEWISE_MODEL_DIR") {
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(state.ai().model_id(), "mock");
     }
 
-    /// Presence is asked of the store once, then answered from memory — and kept right by the
+    /// Presence is asked of the store once, then answered from memory, and kept right by the
     /// writes that go through this type.
     #[test]
     fn the_keychain_is_asked_about_an_entry_once() {
@@ -638,7 +638,7 @@ mod tests {
         assert!(!keychain.has(entry, "api_key"));
 
         // Written behind the cache's back, as another program might. Still absent: the answer
-        // came from memory, which is the point — the store was not asked again.
+        // came from memory, which is the point: the store was not asked again.
         Keychain::store()
             .set(entry, "api_key", &Secret::new("sk-behind-its-back"))
             .expect("set");

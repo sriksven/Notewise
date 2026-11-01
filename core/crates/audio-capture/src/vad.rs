@@ -3,7 +3,7 @@
 //! # Why this exists
 //!
 //! Whisper hallucinates on non-speech audio. Fed ten seconds of room tone it does not return
-//! nothing — it returns a confident, fluent, entirely invented sentence. Observed in this
+//! nothing: it returns a confident, fluent, entirely invented sentence. Observed in this
 //! repository during a live recording test: the opening silence before anyone spoke produced
 //! *"I know. You're happy to see a new work to grow."* That is worse than a gap, because a
 //! transcript the user cannot distinguish from a real one is a transcript they cannot trust.
@@ -15,8 +15,8 @@
 //! # The algorithm
 //!
 //! Short-time energy against an **adaptive noise floor**, gated by zero-crossing rate, with
-//! hysteresis and hangover. This is the classical structure — the same shape as the energy
-//! stage in WebRTC's VAD — and each part earns its place:
+//! hysteresis and hangover. This is the classical structure (the same shape as the energy
+//! stage in WebRTC's VAD) and each part earns its place:
 //!
 //! - **Adaptive floor**, not a fixed threshold in dBFS. A laptop fan, an air conditioner, and
 //!   a lapel mic in a quiet room differ by more than 30 dB. Any fixed threshold is wrong for
@@ -26,12 +26,12 @@
 //! - **Hysteresis** (a lower threshold to *stay* in speech than to *enter* it) stops the gate
 //!   chattering on the natural amplitude dips inside a word.
 //! - **Hangover** keeps the gate open briefly after energy falls, because word-final
-//!   consonants — the /s/ in "costs", the /t/ in "cut" — are low-energy and would be clipped.
+//!   consonants (the /s/ in "costs", the /t/ in "cut") are low-energy and would be clipped.
 //! - **Minimum speech run** before committing, so a single click cannot open the gate.
 //!
 //! The floor only adapts while the detector believes there is no speech. Adapting during
 //! speech would let a long sentence raise the floor until the speaker's own voice fell below
-//! it — the failure mode that makes naive energy VADs cut out mid-paragraph.
+//! it: the failure mode that makes naive energy VADs cut out mid-paragraph.
 
 /// Tuning for [`Vad`].
 ///
@@ -60,7 +60,7 @@ pub struct VadConfig {
 
     /// Upper bound on zero-crossing rate for a sub-frame to count as speech.
     ///
-    /// Voiced speech sits well below this. Broadband noise — fan, hiss, key clicks — sits
+    /// Voiced speech sits well below this. Broadband noise (fan, hiss, key clicks) sits
     /// above it. Unvoiced fricatives also sit high, which is why a sub-frame failing this test
     /// is not rejected outright once the gate is already open.
     pub max_zcr: f32,
@@ -110,8 +110,8 @@ pub struct VadReport {
 impl VadReport {
     /// Whether any speech was found.
     ///
-    /// The question a caller usually has, since the decision it drives — decode this window or
-    /// skip it — is binary.
+    /// The question a caller usually has, since the decision it drives (decode this window or
+    /// skip it) is binary.
     pub fn has_speech(&self) -> bool {
         self.speech_ms > 0
     }
@@ -232,7 +232,7 @@ impl Vad {
         let above_floor = level_db - self.noise_floor_db;
 
         if self.in_speech {
-            // Hysteresis: a lower bar to stay than to enter. ZCR is not re-tested here — an
+            // Hysteresis: a lower bar to stay than to enter. ZCR is not re-tested here: an
             // unvoiced fricative ending a word has high ZCR by nature, and testing it would
             // clip exactly the sounds hangover exists to protect.
             if above_floor >= self.config.offset_db {
@@ -243,7 +243,7 @@ impl Vad {
             if self.hangover_left > 0 {
                 self.hangover_left -= 1;
                 // Still counted as speech: this audio is being kept, so it must be reported
-                // as kept. The floor deliberately does not adapt here — the tail of a word is
+                // as kept. The floor deliberately does not adapt here: the tail of a word is
                 // not room tone, and learning from it would raise the floor into the speaker.
                 return true;
             }
@@ -265,7 +265,7 @@ impl Vad {
                 return true;
             }
             // A candidate that has not yet met the minimum run is not speech *yet*, and must
-            // not teach the floor either — it may well be the first syllable of a word.
+            // not teach the floor either: it may well be the first syllable of a word.
             return false;
         }
 
@@ -278,7 +278,7 @@ impl Vad {
     ///
     /// Asymmetric by design. It falls faster than it rises, because a room that just went
     /// quiet is immediately quieter and the detector should believe it, whereas the most
-    /// common cause of a *sustained rise* is speech — and a floor that chases speech
+    /// common cause of a *sustained rise* is speech, and a floor that chases speech
     /// eventually swallows it.
     ///
     /// Both the input and the result are clamped to [`VadConfig::silence_floor_db`]. Digital
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(report.total_ms, 0);
     }
 
-    /// Input shorter than one sub-frame is still analysed — at the end of a recording that
+    /// Input shorter than one sub-frame is still analysed, at the end of a recording that
     /// remainder can be the last word.
     #[test]
     fn a_partial_sub_frame_is_still_analysed() {
@@ -632,7 +632,7 @@ mod tests {
         }
     }
 
-    /// Digital near-silence has near-random sign, so an undefended ZCR reads ~0.5 — higher
+    /// Digital near-silence has near-random sign, so an undefended ZCR reads ~0.5, higher
     /// than any real signal. The dead zone is what stops that.
     #[test]
     fn near_silence_does_not_read_as_maximum_zero_crossing_rate() {

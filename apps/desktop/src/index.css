@@ -55,8 +55,8 @@
     -webkit-font-smoothing: antialiased;
     color: var(--text);
     background: var(--bg);
-    /* Switching theme should feel like a light changing, not like a page reloading. Kept short
-       — anything slower reads as lag when clicking through the accent swatches. */
+    /* Switching theme should feel like a light changing, not like a page reloading. Kept short:
+       anything slower reads as lag when clicking through the accent swatches. */
     transition:
       background-color 150ms ease,
       color 150ms ease;
@@ -133,7 +133,7 @@
   }
 
   /* A borderless action inside a card or a row. Used by a dozen controls and, until now, defined
-     nowhere — they rendered with no hover, no shape and no disabled state. */
+     nowhere: they rendered with no hover, no shape and no disabled state. */
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-ink-muted
            transition-colors hover:bg-overlay hover:text-ink

@@ -31,7 +31,7 @@ interface Props {
  *
  * The intelligence panel stays mounted while the library switches meetings under it. Without the
  * key a half-typed name stayed open on the next meeting and Enter added it there, and the last
- * meeting's people stayed on screen until — or, if the request failed, instead of — this one's.
+ * meeting's people stayed on screen until (or, if the request failed, instead of) this one's.
  */
 export function Participants(props: Props) {
   return <ParticipantsForMeeting key={props.meetingId} {...props} />;

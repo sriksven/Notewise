@@ -31,7 +31,7 @@ pub struct NewNotification {
 ///
 /// Drafts are created in [`DraftStatus::Draft`] and can only reach [`DraftStatus::Sent`]
 /// by way of [`DraftStatus::Approved`]. There is no method here that creates a sent draft
-/// or approves one implicitly — a wrong auto-send is the highest-consequence failure in
+/// or approves one implicitly; a wrong auto-send is the highest-consequence failure in
 /// this product, so the state machine is enforced rather than documented. See SECURITY.md.
 #[derive(Debug)]
 pub struct EmailDraftRepository<'a> {
@@ -121,8 +121,8 @@ impl<'a> EmailDraftRepository<'a> {
             rusqlite::params![id, DraftStatus::Discarded.as_str(), Utc::now()],
         )?;
         if changed == 0 {
-            // Either missing, or already sent — a sent email cannot be un-sent. `get` reports the
-            // first; the second is a rule, not damage — see `transition`.
+            // Either missing, or already sent; a sent email cannot be un-sent. `get` reports the
+            // first; the second is a rule, not damage; see `transition`.
             self.get(id)?;
             return Err(StorageError::Refused(
                 "this email was already sent, so it cannot be discarded".into(),
@@ -133,8 +133,8 @@ impl<'a> EmailDraftRepository<'a> {
 
     /// Move a draft along the state machine, or say why it cannot move.
     ///
-    /// A refusal, not `Corrupt`. Nothing stored is wrong when a draft is approved twice — the state
-    /// machine is doing its job — but `Corrupt` reached the user as "invalid stored value in column
+    /// A refusal, not `Corrupt`. Nothing stored is wrong when a draft is approved twice; the state
+    /// machine is doing its job, but `Corrupt` reached the user as "invalid stored value in column
     /// 'email_drafts.status'", which reads as a damaged database, and the API answered 422
     /// `invalid_state` for what is a 409: the request conflicts with the draft's current state.
     fn transition(&self, id: Id, from: DraftStatus, to: DraftStatus) -> Result<EmailDraft> {
@@ -214,7 +214,7 @@ impl<'a> NotificationRepository<'a> {
             .collect()
     }
 
-    /// Undelivered notifications on a channel — what a delivery worker picks up.
+    /// Undelivered notifications on a channel: what a delivery worker picks up.
     pub fn pending_on(&self, channel: NotificationChannel) -> Result<Vec<Notification>> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(

@@ -14,7 +14,7 @@ interface Props {
  *
  * The thing a recurring meeting actually needs and no transcript can provide: the commitments
  * made three standups ago that nobody has closed. It is a graph traversal over stored state,
- * not a model call — so it costs nothing, works offline, and cannot invent an obligation
+ * not a model call, so it costs nothing, works offline, and cannot invent an obligation
  * nobody agreed to.
  *
  * A meeting belongs to no series until someone says it does. That is deliberate: threading on
@@ -26,7 +26,7 @@ interface Props {
  *
  * The intelligence panel stays mounted while the library switches meetings under it. Without the
  * key a half-typed link stayed open on the next meeting and Enter added it there, and the last
- * meeting's brief stayed on screen until — or, if the request failed, instead of — this one's.
+ * meeting's brief stayed on screen until (or, if the request failed, instead of) this one's.
  */
 export function MeetingBrief(props: Props) {
   return <MeetingBriefForMeeting key={props.meetingId} {...props} />;
@@ -133,7 +133,7 @@ function MeetingBriefForMeeting({ meetingId, onOpenMeeting }: Props) {
         <p className="text-[12px] leading-relaxed text-ink-faint">
           {brief.previous_meeting_id
             ? "Nothing outstanding from last time."
-            : "First meeting in this series — nothing to carry forward yet."}
+            : "First meeting in this series: nothing to carry forward yet."}
         </p>
       ) : (
         <ul className="space-y-1.5">

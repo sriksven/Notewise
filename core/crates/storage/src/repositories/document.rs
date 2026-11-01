@@ -471,7 +471,7 @@ mod tests {
             .expect("resolve");
 
         repo.record_divergence(item, "/vault/m.md").expect("again");
-        // Still one row — the same file — but the record is refreshed for a new decision.
+        // Still one row, the same file, but the record is refreshed for a new decision.
         assert!(repo.divergence_for(item).expect("found").is_some());
     }
 

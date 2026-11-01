@@ -89,7 +89,7 @@ impl<'a> OutboxRepository<'a> {
     /// Queue a delivery, or return the existing row for this idempotency key.
     ///
     /// Returning the existing row rather than erroring is what lets a caller re-enqueue
-    /// freely — re-summarizing a meeting should not double-post it.
+    /// freely: re-summarizing a meeting should not double-post it.
     pub fn enqueue(&self, new: NewOutboxEntry) -> Result<OutboxRecord> {
         if let Some(existing) = self.find_by_key(&new.idempotency_key)? {
             return Ok(existing);
@@ -142,12 +142,12 @@ impl<'a> OutboxRepository<'a> {
 
         // Selecting due rows and leasing them in a second statement would leave a window in
         // which another dispatcher reads the same row before either lease lands, and both
-        // would deliver it — the duplicate push this table exists to prevent. Nothing below
+        // would deliver it: the duplicate push this table exists to prevent. Nothing below
         // guards against that: `Database::conn` hands out a bare connection with no lock, and
         // `Database::path` exists precisely so a second process can open its own. So the
         // claim is one statement, which SQLite runs in its own implicit transaction.
         //
-        // `RETURNING` does not promise output order. That is fine — the `ORDER BY` inside the
+        // `RETURNING` does not promise output order. That is fine; the `ORDER BY` inside the
         // subquery is what picks the oldest-due rows; the order they come back in afterwards
         // does not matter to a caller that delivers each independently.
         let sql = format!(

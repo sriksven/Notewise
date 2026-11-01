@@ -18,30 +18,30 @@
 //! skips forward by the predicted duration rather than always advancing one frame.
 //!
 //! That is the whole speed advantage, and it is also the easiest thing to get wrong. Decoding a
-//! TDT model as if it were plain RNNT — always advancing one frame — produces text that is
+//! TDT model as if it were plain RNNT (always advancing one frame) produces text that is
 //! recognisable but repeats tokens, because the frames the model expected to skip are decoded
 //! again.
 //!
 //! # Three models, one engine
 //!
-//! - **encoder** — filterbank features to acoustic frames. 652 MB, and the only slow part.
-//! - **decoder** — the prediction network, an LSTM over emitted tokens. Its state carries
+//! - **encoder**: filterbank features to acoustic frames. 652 MB, and the only slow part.
+//! - **decoder**: the prediction network, an LSTM over emitted tokens. Its state carries
 //!   across the whole utterance.
-//! - **joiner** — combines one encoder frame with the decoder state into token and duration
+//! - **joiner**: combines one encoder frame with the decoder state into token and duration
 //!   logits.
 //!
 //! # Status: works, not yet trusted
 //!
 //! On the reference sample shipped with the model this transcribes exactly, with punctuation
 //! and casing. On a synthetic text-to-speech sample it dropped a clause that
-//! [`crate::WhisperEngine`] transcribed correctly from the same file — "Sam will own the index"
+//! [`crate::WhisperEngine`] transcribed correctly from the same file: "Sam will own the index"
 //! vanished while the rest of the sentence survived.
 //!
 //! One clause lost from a meeting is worse than a whole one, because nothing marks the gap.
 //! Until that is understood this stays behind a feature flag and Whisper remains the default.
-//! The most likely suspects, in order: the duration set may not be `[0,1,2,3,4]` — the joiner
+//! The most likely suspects, in order: the duration set may not be `[0,1,2,3,4]`: the joiner
 //! emits 1030 logits over a 1025-token vocabulary, which is consistent with five durations but
-//! does not prove their values — or the feature extraction may not match NeMo's preprocessor
+//! does not prove their values, or the feature extraction may not match NeMo's preprocessor
 //! closely enough on a signal that synthetic speech happens to stress.
 
 use async_trait::async_trait;
@@ -55,7 +55,7 @@ use crate::{Result, TranscriptionError};
 
 /// Vocabulary and the blank symbol.
 ///
-/// The blank is *not* a word — it is the transducer's "emit nothing and advance" symbol, and it
+/// The blank is *not* a word: it is the transducer's "emit nothing and advance" symbol, and it
 /// is always the last id. Treating it as a token puts `<blk>` in the transcript.
 #[derive(Debug, Clone)]
 pub struct Vocabulary {
@@ -252,7 +252,7 @@ impl ParakeetEngine {
     /// How much audio to accumulate before decoding.
     ///
     /// Longer than Whisper's window because a transducer does not lose context at a boundary
-    /// the way an encoder-decoder does — it emits as it goes — so the only cost of a longer
+    /// the way an encoder-decoder does (it emits as it goes) so the only cost of a longer
     /// window is latency to the first visible text.
     pub const WINDOW_SECONDS: usize = 15;
 
@@ -361,7 +361,7 @@ fn run_encoder(
 ) -> Result<EncoderOutput> {
     use ort::value::Value;
 
-    // NeMo's encoder takes [batch, mel_bins, frames] — features **transposed** relative to the
+    // NeMo's encoder takes [batch, mel_bins, frames]: features **transposed** relative to the
     // [batch, frames, bins] a speaker model wants. Feeding the wrong orientation is accepted
     // silently by ONNX whenever the two dimensions happen to be compatible and produces noise.
     let mut transposed = vec![0.0f32; fbank.frames * fbank.num_bins];
@@ -513,7 +513,7 @@ fn decode_greedy(
 
 /// The decoder's LSTM state, carried across the whole utterance.
 ///
-/// Two tensors of `[2, batch, 640]` — the LSTM's hidden and cell state. The graph names them
+/// Two tensors of `[2, batch, 640]`: the LSTM's hidden and cell state. The graph names them
 /// `states.1` and `onnx::Slice_3` on the way in and `states` and `162` on the way out; those
 /// are export artefacts, not meaningful names, so they are bound by position.
 #[cfg(feature = "parakeet")]
@@ -574,7 +574,7 @@ fn decoder_step(
         )));
     }
 
-    // targets [1, 1] and target_length [1] are Int32, not Int64 — the encoder's `length` is
+    // targets [1, 1] and target_length [1] are Int32, not Int64: the encoder's `length` is
     // Int64 and the decoder's is not, which is the kind of asymmetry that only shows up as a
     // runtime type error.
     let targets = Value::from_array(([1usize, 1usize], vec![token as i32]))
@@ -630,7 +630,7 @@ fn joiner_step(
         .map(|i| i.name().to_string())
         .collect();
 
-    // Both inputs are 3-D — [batch, features, time] with a time extent of one. A 2-D tensor is
+    // Both inputs are 3-D: [batch, features, time] with a time extent of one. A 2-D tensor is
     // rejected outright, which is the good case; the bad case is a rank that happens to
     // broadcast and produces logits for the wrong thing.
     let encoder = Value::from_array((
