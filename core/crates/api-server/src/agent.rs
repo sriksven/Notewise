@@ -638,7 +638,7 @@ async fn execute(
                     format!(
                         "- {} {} \"{}\": {}",
                         passage.kind,
-                        passage.id,
+                        passage.target,
                         passage.title,
                         excerpt(&passage.text)
                     )

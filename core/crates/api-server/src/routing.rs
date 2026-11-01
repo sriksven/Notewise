@@ -335,19 +335,19 @@ fn parse_byte_range(raw: &str, total: u64) -> Option<(u64, u64)> {
 }
 
 #[derive(Debug, Serialize)]
-struct RetentionBody {
+pub(crate) struct RetentionBody {
     /// `off`, `until_deleted`, or `days:N`.
-    policy: String,
+    pub(crate) policy: String,
     /// How many meetings currently have audio, and how much space it is using.
-    retained: usize,
-    bytes: i64,
+    pub(crate) retained: usize,
+    pub(crate) bytes: i64,
     /// Whether retention can be enabled at all. False on an encrypted workspace.
     can_enable: bool,
     /// Why not, when it cannot.
     blocked_by: Option<String>,
 }
 
-async fn get_retention(State(state): State<Shared>) -> ApiResult<Json<RetentionBody>> {
+pub(crate) async fn get_retention(State(state): State<Shared>) -> ApiResult<Json<RetentionBody>> {
     let db = state.db().await;
     let policy = notewise_storage::retention_policy(&db);
 

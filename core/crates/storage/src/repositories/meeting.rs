@@ -186,6 +186,25 @@ impl<'a> MeetingRepository<'a> {
             .collect()
     }
 
+    /// How many meetings are in the trash, or out of it.
+    pub fn count(&self, trashed: bool) -> Result<u64> {
+        let sql = if trashed {
+            "SELECT COUNT(*) FROM meetings WHERE deleted_at IS NOT NULL"
+        } else {
+            "SELECT COUNT(*) FROM meetings WHERE deleted_at IS NULL"
+        };
+        Ok(self.db.conn().query_row(sql, [], |row| row.get(0))?)
+    }
+
+    /// When the earliest meeting outside the trash started, or `None` when there is none.
+    pub fn first_started_at(&self) -> Result<Option<DateTime<Utc>>> {
+        Ok(self.db.conn().query_row(
+            "SELECT MIN(started_at) FROM meetings WHERE deleted_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     /// The ids in the trash, for a caller that must detach edges before destroying the rows.
     pub fn trashed_ids(&self) -> Result<Vec<Id>> {
         let conn = self.db.conn();
@@ -1286,5 +1305,32 @@ mod tests {
 
         assert_eq!(hits("Dana"), 1, "the new name should be findable");
         assert_eq!(hits("\"Speaker 1\""), 0, "the old name should not be");
+    }
+
+    #[test]
+    fn counts_meetings_in_and_out_of_the_trash() {
+        let db = db();
+        let repo = MeetingRepository::new(&db);
+        assert_eq!(repo.count(false).unwrap(), 0);
+        assert_eq!(repo.first_started_at().unwrap(), None);
+
+        let kept = meeting(&db);
+        let gone = repo
+            .create(NewMeeting {
+                project_id: None,
+                title: "Earlier".into(),
+                source: MeetingSource::Import,
+                started_at: ts(1_600_000_000),
+            })
+            .unwrap();
+        repo.trash(gone.id).unwrap();
+
+        assert_eq!(repo.count(false).unwrap(), 1);
+        assert_eq!(repo.count(true).unwrap(), 1);
+        assert_eq!(
+            repo.first_started_at().unwrap(),
+            Some(kept.started_at),
+            "a trashed meeting is not the first recording in the workspace"
+        );
     }
 }

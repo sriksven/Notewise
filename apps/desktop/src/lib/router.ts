@@ -62,7 +62,7 @@ export type SettingsSection =
   | "search"
   | "speakers";
 
-const SETTINGS_SECTIONS: SettingsSection[] = [
+export const SETTINGS_SECTIONS: SettingsSection[] = [
   "appearance",
   "recording",
   "transcription",

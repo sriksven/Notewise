@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { ApiError, type Citation, type GroundedAnswer } from "./api";
-import type { Route } from "./router";
+import { parseRoute, type Route } from "./router";
 import { offered } from "./scope";
 
 /**
@@ -28,7 +28,7 @@ export interface AskTurn {
 export const SUGGESTIONS = [
   "What did we decide about pricing?",
   "What am I supposed to be doing this week?",
-  "Who has raised concerns about the timeline?",
+  "How many recordings do I have?",
 ];
 
 /**
@@ -49,9 +49,16 @@ export function notGroundedNote(answer: GroundedAnswer): string {
  *
  * A ticket can be cited (it is the user's material) while Tickets is held back; the citation then
  * shows and does not open. See `scope`.
+ *
+ * An `app` citation names its page by address, so it opens the exact Settings page or screen it
+ * describes, beside the answer when asked from the panel.
  */
 export function citationRoute(citation: Citation): Route | null {
   switch (citation.kind) {
+    case "app": {
+      const route = parseRoute(`#/${citation.page}`);
+      return offered(route.name) ? route : null;
+    }
     case "meeting":
       return { name: "meeting", id: citation.id, tab: "transcript" };
     case "note":

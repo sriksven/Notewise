@@ -94,6 +94,16 @@ impl<'a> NoteRepository<'a> {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// How many notes are in the trash, or out of it.
+    pub fn count(&self, trashed: bool) -> Result<u64> {
+        let sql = if trashed {
+            "SELECT COUNT(*) FROM notes WHERE deleted_at IS NOT NULL"
+        } else {
+            "SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL"
+        };
+        Ok(self.db.conn().query_row(sql, [], |row| row.get(0))?)
+    }
+
     /// What is in the trash, most recently discarded first.
     pub fn list_trashed(&self) -> Result<Vec<Note>> {
         let conn = self.db.conn();
@@ -397,5 +407,17 @@ mod tests {
             1,
             "restoring should put it back in the index"
         );
+    }
+
+    #[test]
+    fn counts_notes_in_and_out_of_the_trash() {
+        let db = db();
+        let repo = NoteRepository::new(&db);
+        note(&db, "Kept");
+        let gone = note(&db, "Gone");
+        repo.trash(gone.id).unwrap();
+
+        assert_eq!(repo.count(false).unwrap(), 1);
+        assert_eq!(repo.count(true).unwrap(), 1);
     }
 }

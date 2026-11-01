@@ -79,13 +79,25 @@ export interface Note {
 }
 
 /** One piece of source material behind a grounded answer. */
-export interface Citation {
-  /** Its number in the answer's `[n]` references. */
-  n: number;
-  kind: "meeting" | "note" | "ticket";
-  id: string;
-  title: string;
-}
+export type Citation =
+  | {
+      /** Its number in the answer's `[n]` references. */
+      n: number;
+      kind: "meeting" | "note" | "ticket";
+      id: string;
+      title: string;
+    }
+  | {
+      n: number;
+      /**
+       * What Notewise says about itself: a Settings page, a screen, or the live counts behind
+       * Library, My Tasks and Trash. It has no row to open, only the page it describes.
+       */
+      kind: "app";
+      /** That page, as an address without the `#/`, such as `settings/models`. */
+      page: string;
+      title: string;
+    };
 
 export interface GroundedAnswer {
   text: string;

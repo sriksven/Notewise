@@ -40,6 +40,10 @@ The first tagged build.
   they are still a guess, and leaves the finished question in the box for you to check and send.
   Whisper does the listening on this machine, so a spoken question goes nowhere a typed one
   would not.
+- Ask also knows the app. It answers how many recordings, notes and tasks you have, what is in the
+  trash, what each setting does and what it is set to now, and what Help and About say, with a
+  link that opens the page it is about. It explains where to change a setting and never changes
+  one itself.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 
