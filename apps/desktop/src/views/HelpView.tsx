@@ -274,6 +274,7 @@ function WhatsNew() {
       changes: [
         "The first release. Record or import a meeting, transcribe it on this machine, and get a summary, decisions and action items that stay linked to it.",
         "Ask a question of everything you have recorded and get an answer that cites the meetings it came from.",
+        "Ask also answers questions about Notewise itself: what a setting does and what it is set to, how many recordings and tasks you have, and what is in the trash, with a link to the page it is about.",
         "Follow-up emails land as a draft in Gmail or Outlook for you to read — never sent for you.",
         "Meetings can be mirrored to a Markdown folder, and a file you edited yourself is never overwritten.",
         "External tools run only when you confirm that specific call.",

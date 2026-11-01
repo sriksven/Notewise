@@ -35,6 +35,10 @@ The first tagged build.
 - Search across everything said, and a question you can ask the whole workspace that answers only
   from your own material and cites it — from its own page, or from the Ask button at the bottom
   right of any screen but Notes. A note's own Ask works the same way, in a second colour.
+- Ask also knows the app. It answers how many recordings, notes and tasks you have, what is in the
+  trash, what each setting does and what it is set to now, and what Help and About say, with a
+  link that opens the page it is about. It explains where to change a setting and never changes
+  one itself.
 - An agent that reads across your meetings and notes and writes up what it finds. It only
   ever creates a note.
 

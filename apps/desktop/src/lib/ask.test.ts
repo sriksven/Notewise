@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { Citation, GroundedAnswer } from "./api";
 import { citationRoute, threadMessages, type AskTurn } from "./ask";
 
-function cite(kind: Citation["kind"]): Citation {
+function cite(kind: Exclude<Citation["kind"], "app">): Citation {
   return { n: 1, kind, id: "x1", title: "Pricing review" };
+}
+
+function page(page: string): Citation {
+  return { n: 1, kind: "app", page, title: "Settings: Models" };
 }
 
 function answered(question: string, text: string): AskTurn {
@@ -25,6 +29,16 @@ describe("citationRoute", () => {
   // would only redirect home.
   it("has nowhere to send a ticket while Tickets is held back", () => {
     expect(citationRoute(cite("ticket"))).toBeNull();
+  });
+
+  it("opens the page a part of the app describes", () => {
+    expect(citationRoute(page("settings/models"))).toEqual({ name: "settings", section: "models" });
+    expect(citationRoute(page("trash"))).toEqual({ name: "trash" });
+    expect(citationRoute(page("help/shortcuts"))).toEqual({ name: "help", section: "shortcuts" });
+  });
+
+  it("does not open a page this build holds back", () => {
+    expect(citationRoute(page("people"))).toBeNull();
   });
 });
 

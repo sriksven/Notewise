@@ -49,8 +49,9 @@ export function AskPanel({ onClose, onNavigate }: Props) {
         onNavigate={onNavigate}
         intro={
           <>
-            Answered only from your own meetings and notes — never from what the model happens to
-            know. Every claim carries a reference you can open and check.
+            Answered only from your own meetings and notes, and from Notewise's own settings and
+            guide, never from what the model happens to know. Every claim carries a reference you
+            can open and check.
           </>
         }
       />
